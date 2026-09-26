@@ -172,6 +172,9 @@ class Runtime:
         self._slots = {"t": 0.0, "data": None}
         self.ram_gb = total_ram_gb()
         self.settings_file = self.root / "settings.json"
+        self._gpus: list[dict] | None = None
+        if "vulkan" in self.servers:  # ask the Vulkan build which cards it sees, once, off the UI's path
+            threading.Thread(target=self.gpus, daemon=True).start()
 
     # --- settings: the model and acceleration the founder chose, kept across launches -----------
     def settings(self) -> dict:
@@ -220,7 +223,9 @@ class Runtime:
             s = dict(self.status)
         s.update({"servers": sorted(self.servers), "ram_gb": round(self.ram_gb, 1) if self.ram_gb else None,
                   "catalog": self.catalog(), "recommended": recommended(self.ram_gb),
-                  "gpu": self.settings().get("gpu", "auto"), "platform": f"{platform.system()} {platform.machine()}",
+                  "gpu": self.settings().get("gpu", "auto"), "gpus": self._gpus or [],
+                  "gpu_pick": (self.discrete_gpu() or {}).get("name") if self._gpus is not None else None,
+                  "platform": f"{platform.system()} {platform.machine()}",
                   "busy": self.activity(), "model_name": BY_ID[s["model"]]["name"] if s["model"] in BY_ID else ""})
         return s
 
@@ -300,13 +305,38 @@ class Runtime:
                 raise ModelRuntimeError("the downloaded file failed its SHA-256 check and was deleted; download it again")
 
     # --- the server -------------------------------------------------------------------------------
+    def gpus(self) -> list[dict]:
+        """Graphics cards the Vulkan build of llama-server can use: [{id, name, mib, free_mib}]."""
+        if self._gpus is None:
+            self._gpus = []
+            if "vulkan" in self.servers:
+                try:
+                    out = subprocess.run([*argv(self.servers["vulkan"]), "--list-devices"], capture_output=True,
+                                         encoding="utf-8", errors="replace", timeout=60, creationflags=NO_WINDOW)
+                    self._gpus = parse_devices(out.stdout + out.stderr)
+                except (OSError, subprocess.SubprocessError):
+                    pass
+        return self._gpus
+
+    def discrete_gpu(self) -> dict | None:
+        """A card worth using without being asked: a discrete NVIDIA, AMD or Intel Arc card with 6 GB or more.
+        Integrated graphics share the processor's memory and are often slower than the processor alone."""
+        for d in self.gpus():
+            name = d["name"].lower()
+            integrated = ("intel" in name and not re.search(r"arc\S* [ab]\d{3}", name)) or \
+                any(k in name for k in ("llvmpipe", "swiftshader", "microsoft basic"))
+            if not integrated and d["mib"] >= 6000:
+                return d
+        return None
+
     def plan_accel(self, gpu: str) -> list[tuple[str, list[str]]]:
-        """Which llama-server build to try, with how many GPU layers, in order. The last is the CPU."""
+        """Which llama-server build to try, with which GPU layers, in order. The last is the processor alone.
+        "-ngl auto" lets llama.cpp fit as many layers as the card's free memory holds."""
         tries = []
         if "metal" in self.servers and gpu != "off":
-            tries.append(("metal", ["-ngl", "999"]))
-        if "vulkan" in self.servers and gpu == "on":
-            tries.append(("vulkan", ["-ngl", "999"]))
+            tries.append(("metal", ["-ngl", "auto"]))
+        if "vulkan" in self.servers and (gpu == "on" or (gpu == "auto" and self.discrete_gpu())):
+            tries.append(("vulkan", ["-ngl", "auto"]))
         cpu = "cpu" if "cpu" in self.servers else ("metal" if "metal" in self.servers else None)
         if cpu:
             tries.append((cpu, ["-ngl", "0"]))
@@ -436,6 +466,14 @@ class Runtime:
             if self.status.get("state") == "ready":
                 self.status["state"] = "none"
         os.environ.pop("CYNQRA_LOCAL_BASE_URL", None)
+
+
+def parse_devices(text: str) -> list[dict]:
+    """llama-server --list-devices: lines like "  Vulkan0: NVIDIA GeForce RTX 4060 Laptop GPU (8188 MiB, 7934 MiB free)"."""
+    out = []
+    for m in re.finditer(r"^\s*(\w+\d+): (.+?) \((\d+) MiB, (\d+) MiB free\)\s*$", text, re.M):
+        out.append({"id": m.group(1), "name": m.group(2), "mib": int(m.group(3)), "free_mib": int(m.group(4))})
+    return out
 
 
 def argv(server) -> list[str]:

@@ -7,6 +7,7 @@ work replies go back as file blocks, the layout local models are asked for. Ever
 is appended to FAKE_LLAMA_REQUESTS (a file) so tests can check what the app sent.
 
 Knobs (environment): FAKE_LLAMA_FAIL_GPU=1 exits like a failed GPU allocation unless -ngl is 0;
+FAKE_LLAMA_DEVICES is what --list-devices prints;
 FAKE_LLAMA_EXIT=1 exits at once like a model that cannot load; FAKE_LLAMA_LOAD_S seconds of
 loading before /health answers 200.
 """
@@ -27,6 +28,9 @@ from fake_ollama import as_blocks  # noqa: E402
 
 
 def main() -> int:
+    if "--list-devices" in sys.argv:
+        print("Available devices:\n" + (os.environ.get("FAKE_LLAMA_DEVICES") or "  (none)"))
+        return 0
     if "--version" in sys.argv:
         print("version: 11201 (fake0000)\nbuilt with a test double; not llama.cpp")
         return 0

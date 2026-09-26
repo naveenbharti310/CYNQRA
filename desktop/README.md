@@ -30,6 +30,12 @@ The window: Microsoft Edge in app mode on Windows (every Windows 10 and 11 has i
 127.0.0.1 only, starts `llama-server` on another 127.0.0.1 port, and stops both when the window
 closes or Quit is chosen.
 
+Acceleration: macOS uses the Metal build with `-ngl auto` (llama.cpp fits the layers to memory).
+Windows and Linux ship a CPU build and a Vulkan build; on Automatic the app asks the Vulkan build
+for its devices (`--list-devices`) and uses it with `-ngl auto` when there is a discrete NVIDIA, AMD
+or Intel Arc card with 6 GB or more. Every start that fails falls back to the next option, ending
+with the processor alone.
+
 ## The models
 
 `poc/cynqra/runtime.py` holds the catalog: each model names the exact GGUF file at its publisher

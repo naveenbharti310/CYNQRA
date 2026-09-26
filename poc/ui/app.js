@@ -266,10 +266,13 @@ function modelScreen() {
       <p class="small" style="margin:6px 0 10px">${esc(m.about)}</p>
       <div class="between"><span class="small muted mono">${m.size_gb} GB · ${Math.round(m.ctx / 1024)}K context${m.installed ? " · downloaded" : ""}</span>${action}</div></div>`;
   }).join("");
-  const accel = (r.servers || []).includes("vulkan") ? `<label class="lbl" for="rt-gpu">Graphics card (Vulkan)</label>
-      <select id="rt-gpu" data-keep="no" ${working ? "disabled" : ""}><option value="auto" ${r.gpu !== "on" ? "selected" : ""}>Off: use the processor (works everywhere)</option>
-        <option value="on" ${r.gpu === "on" ? "selected" : ""}>On: use an NVIDIA, AMD or Intel Arc card with 8 GB or more</option></select>
-      <span class="small muted">If the card cannot hold the model, Cynqra falls back to the processor by itself. Applies the next time a model starts.</span>`
+  const gpus = (r.gpus || []).map((g) => `${esc(g.name)} (${Math.round(g.mib / 1024)} GB)`).join(", ");
+  const accel = (r.servers || []).includes("vulkan") ? `<label class="lbl" for="rt-gpu">Graphics card</label>
+      <select id="rt-gpu" data-keep="no" ${working ? "disabled" : ""}>
+        <option value="auto" ${r.gpu === "auto" || !r.gpu ? "selected" : ""}>Automatic: ${r.gpu_pick ? `use ${esc(r.gpu_pick)}` : "no suitable card found, use the processor"}</option>
+        <option value="on" ${r.gpu === "on" ? "selected" : ""}>On: use the graphics card even if it is small or integrated</option>
+        <option value="off" ${r.gpu === "off" ? "selected" : ""}>Off: use the processor only</option></select>
+      <span class="small muted">${gpus ? `Found: ${gpus}. ` : "No graphics card found through Vulkan. "}If the card cannot run the model, Cynqra falls back to the processor by itself. Applies the next time a model starts.</span>`
     : (r.servers || []).includes("metal") ? `<span class="small muted">This Mac's GPU is used through Metal.</span>` : "";
   const back = S.st.meta.phase !== "new" || r.state === "ready";
   return `<div class="wiz"><div class="wiz-top"><div class="row"><span class="wordmark">Cynqra</span><span class="muted small">Model</span></div>

@@ -216,11 +216,34 @@ class ServerTests(DesktopBase):
 
     def test_acceleration_plan(self):
         rt = self.runtime(cpu="c", vulkan="v")
+        rt._gpus = []
         self.assertEqual([a for a, _ in rt.plan_accel("auto")], ["cpu"])
-        self.assertEqual([a for a, _ in rt.plan_accel("on")], ["vulkan", "cpu"])
+        self.assertEqual(rt.plan_accel("on"), [("vulkan", ["-ngl", "auto"]), ("cpu", ["-ngl", "0"])])
+        self.assertEqual([a for a, _ in rt.plan_accel("off")], ["cpu"])
         rt = self.runtime(metal="m")
-        self.assertEqual(rt.plan_accel("auto"), [("metal", ["-ngl", "999"]), ("metal", ["-ngl", "0"])])
+        self.assertEqual(rt.plan_accel("auto"), [("metal", ["-ngl", "auto"]), ("metal", ["-ngl", "0"])])
         self.assertEqual(rt.plan_accel("off"), [("metal", ["-ngl", "0"])])
+
+    def test_automatic_uses_a_discrete_card_with_room_and_skips_integrated_graphics(self):
+        rt = self.runtime(cpu="c", vulkan="v")
+        cases = [("NVIDIA GeForce RTX 4060 Laptop GPU", 8188, True), ("AMD Radeon RX 7600M XT", 8176, True),
+                 ("Intel(R) Arc(TM) A770 Graphics", 16032, True), ("Intel(R) Iris(R) Xe Graphics", 8000, False),
+                 ("Intel(R) Arc(TM) Graphics", 16000, False), ("AMD Radeon(TM) Graphics", 2048, False),
+                 ("NVIDIA GeForce MX450", 2048, False), ("llvmpipe (LLVM 17.0.6, 256 bits)", 32000, False)]
+        for name, mib, used in cases:
+            rt._gpus = [{"id": "Vulkan0", "name": name, "mib": mib, "free_mib": mib}]
+            self.assertEqual([a for a, _ in rt.plan_accel("auto")][0] == "vulkan", used, name)
+
+    def test_devices_are_read_from_llama_server(self):
+        os.environ["FAKE_LLAMA_DEVICES"] = ("  Vulkan0: NVIDIA GeForce RTX 4060 Laptop GPU (8188 MiB, 7934 MiB free)\n"
+                                            "  Vulkan1: Intel(R) UHD Graphics (4096 MiB, 3900 MiB free)")
+        self.addCleanup(os.environ.pop, "FAKE_LLAMA_DEVICES", None)
+        rt = self.runtime(cpu=FAKE_SERVER, vulkan=FAKE_SERVER)
+        rt._gpus = None
+        self.assertEqual([(d["id"], d["mib"]) for d in rt.gpus()], [("Vulkan0", 8188), ("Vulkan1", 4096)])
+        self.assertEqual(rt.discrete_gpu()["name"], "NVIDIA GeForce RTX 4060 Laptop GPU")
+        self.assertEqual(rt.snapshot()["gpu_pick"], "NVIDIA GeForce RTX 4060 Laptop GPU")
+        self.assertEqual(runtime.parse_devices("Available devices:\n  (none)\n"), [])
 
     def test_a_server_that_cannot_load_the_model_is_an_error_with_its_log(self):
         os.environ["FAKE_LLAMA_EXIT"] = "1"

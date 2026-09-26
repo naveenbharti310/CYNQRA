@@ -47,9 +47,10 @@ the first screen.
 | Qwen3.5 4B | 2.6 GB | Any | Quick check that everything works; its code fails checks more often |
 
 The choice comes from Cynqra's September 2026 research (`poc/research/`). Macs use their GPU
-through Metal automatically. On Windows and Linux the model runs on the processor; if you have an
-NVIDIA or AMD card with 8 GB or more, set **Graphics card** to On in the Model screen (Cynqra falls
-back to the processor by itself if the card cannot hold the model).
+through Metal automatically. On Windows and Linux, **Graphics card: Automatic** uses an NVIDIA, AMD
+or Intel Arc card with 6 GB or more when there is one (llama.cpp puts as much of the model on it as
+fits) and the processor otherwise; the Model screen shows what it found. If the card cannot run the
+model, Cynqra falls back to the processor by itself.
 
 ## 3. Use it
 
