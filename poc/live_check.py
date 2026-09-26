@@ -40,8 +40,13 @@ sys.path.insert(0, str(HERE))
 
 from cynqra import model_adapter  # noqa: E402
 from cynqra.engine import Engine  # noqa: E402
+from cynqra.verification import NO_WINDOW, python_exe  # noqa: E402
 
-REPORTS = Path(os.environ.get("CYNQRA_REPORTS_DIR") or HERE / "live_reports")
+
+
+def reports_dir() -> Path:
+    """Where reports go: CYNQRA_REPORTS_DIR (the desktop app sets its data folder), else poc/live_reports."""
+    return Path(os.environ.get("CYNQRA_REPORTS_DIR") or HERE / "live_reports")
 SCENARIO = json.loads((HERE / "scenarios" / "candidate_tracker" / "scenario.json").read_text(encoding="utf-8"))
 
 # USD per million tokens, input and output. First party list prices, checked 26 Sep 2026.
@@ -82,8 +87,9 @@ def rerun_product_tests(repo: Path) -> dict:
     shutil.copytree(repo, scratch, ignore=shutil.ignore_patterns("__pycache__", "*.json.lock"))
     env = {k: v for k, v in os.environ.items() if "KEY" not in k and "TOKEN" not in k}
     try:
-        proc = subprocess.run([sys.executable, "-m", "unittest", "discover", "-v"], cwd=scratch, env=env,
-                              capture_output=True, text=True, timeout=300)
+        proc = subprocess.run([python_exe(), "-m", "unittest", "discover", "-v"], cwd=scratch, env=env,
+                              capture_output=True, encoding="utf-8", errors="replace", timeout=300,
+                              creationflags=NO_WINDOW)
         out = (proc.stdout + proc.stderr)[-4000:]
         return {"ran": True, "passed": proc.returncode == 0, "output": out}
     except subprocess.TimeoutExpired:
@@ -202,9 +208,10 @@ def run(objective: str, max_usd: float, cap_units: int, data_dir: Path, log=prin
 
 
 def write(report: dict) -> Path:
-    REPORTS.mkdir(exist_ok=True)
+    reports = reports_dir()
+    reports.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    j = REPORTS / f"live_{ts}.json"
+    j = reports / f"live_{ts}.json"
     j.write_text(json.dumps(report, indent=1), encoding="utf-8")
     lines = [f"# Live check {ts}", "", f"**Outcome: {report['outcome']}**. {report.get('reason', '')}", "",
              f"Model: {(report.get('model') or {}).get('label')}, effort {report.get('effort')}. "
@@ -240,7 +247,7 @@ def main() -> int:
     ap.add_argument("--allow-cmd", action="store_true", help="accept a command model (CYNQRA_S1_MODEL_CMD); not measured")
     args = ap.parse_args()
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    data = REPORTS / f"run_{ts}"
+    data = reports_dir() / f"run_{ts}"
     report = run(args.objective, args.max_usd, args.cap_units, data, allow_cmd=args.allow_cmd)
     path = write(report)
     if not args.keep:

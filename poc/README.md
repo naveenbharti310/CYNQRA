@@ -8,18 +8,14 @@ replay. The spec, the decisions it enforces and the acceptance tests are in POC_
 
 This POC is not gate evidence. S1, S2 and S3 v2 still decide Milestone 2.
 
-## Run it on a laptop, for real
+## The desktop app
 
-`LAPTOP_SETUP.md` at the project root: one installer, an open model through Ollama, and
-`cynqra_cli.py` (doctor, run, bench, setup, ui). The founder answers decisions in the terminal;
-the engineers test and fix their own code before independent verification.
-
-## Show it
-
-To explain Cynqra to someone, use the guided demo: `03_pages/how-cynqra-works.html` (double
-click, works offline) or its link in `DEMO_SCRIPT.md`. It replays a recorded run of this
-engine through these screens, one explained step at a time. In the running app the guide
-bar at the bottom gives the same explanations live; Hide guide turns it off.
+`CYNQRA_DESKTOP.md` at the project root: download the installer for Windows, macOS or Linux,
+install it, open it. It runs this engine with an open-weight model on the laptop itself
+(Qwen3.6 35B-A3B or Qwen3.5 9B, by memory) through llama.cpp's llama-server, which the app
+bundles. `desktop.py` is its entry point; `cynqra/runtime.py` downloads, checks and serves the
+model; `../desktop/` builds the installers. The guide bar at the bottom of the app explains each
+step as it happens; Hide guide turns it off.
 
 ## Run it
 
@@ -99,8 +95,8 @@ TEST_REPORT.md holds the last full run and its coverage.
 
 | Path | What it is |
 | --- | --- |
-| run_poc.py | Starts the server and opens the browser |
-| cynqra_cli.py | The laptop entry point: setup, doctor, run, bench, ui |
+| desktop.py | The desktop app: window, model runtime, server; --selftest, --check-model, --e2e |
+| run_poc.py | Starts the server and opens the browser (demo mode, or live with an API key) |
 | research/ | Which open model and runtime to use, and why (September 2026) |
 | live_check.py | The real model test of the whole journey, with a spend cap and a written report |
 | live_reports/ | Reports of real model runs, with what each one proves |
@@ -113,6 +109,7 @@ TEST_REPORT.md holds the last full run and its coverage.
 | cynqra/intelligence.py | Demo source and live model source; the platform validates every plan |
 | cynqra/model_adapter.py | Byte for byte copy of 02_harness/spikes/model_adapter.py |
 | cynqra/server.py | HTTP API and static UI |
+| cynqra/runtime.py | The desktop app's model: catalog, verified download, llama-server start and GPU fallback |
 | ui/ | The web app, vanilla HTML, CSS and JS, fonts bundled |
 | scenarios/candidate_tracker | The demo scenario and the real product code the workers hand over |
 | design/ | High level screen mockups, copied from the design canvas |

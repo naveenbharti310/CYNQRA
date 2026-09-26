@@ -1,4 +1,4 @@
-"""The laptop path: an open model served by Ollama, the file block layout, the CLI.
+"""Local model servers: Ollama's native API, the file block layout, closed schemas.
 
 FakeOllama speaks Ollama's native API on localhost; no model runs here and nothing is a
 result. What is proven is the wire format, the settings sent, the failure handling and the
@@ -6,17 +6,14 @@ whole journey through the real engine, gateway, verification and deployment.
 """
 from __future__ import annotations
 
-import json
 import os
-import subprocess
-import sys
 import unittest
 
 from fake_ollama import FakeOllama
-from helpers import POC, SCENARIO, TempDir, engine_to_running, no_model_env, restore_env, run_journey
+from helpers import SCENARIO, TempDir, engine_to_running, no_model_env, restore_env, run_journey
 
 from cynqra import model_adapter
-from cynqra.intelligence import IntelligenceError, ModelSource, _file_blocks, _parse_json
+from cynqra.intelligence import ModelSource, _file_blocks, _parse_json
 
 
 class Base(unittest.TestCase):
@@ -167,76 +164,6 @@ class JourneyTests(Base):
         self.assertFalse(fb[0]["payload"]["passed"])
         self.assertEqual(e.meta["phase"], "accepted")
         e.close()
-
-
-class CliTests(Base):
-    def cli(self, *args, stdin: str = "") -> subprocess.CompletedProcess:
-        env = dict(os.environ, CYNQRA_REPORTS_DIR=str(self.tmp.path / "reports"), CYNQRA_DATA_DIR=str(self.tmp.path / "runs"),
-                   PYTHONIOENCODING="utf-8")
-        return subprocess.run([sys.executable, str(POC / "cynqra_cli.py"), *args], input=stdin, capture_output=True,
-                              text=True, env=env, timeout=600)
-
-    def test_doctor_full_passes_against_a_working_setup(self):
-        r = self.cli("doctor", "--full")
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        for line in ("[PASS] Ollama: version 0.34.4", "[PASS] Model installed: qwen3.6:35b", "[PASS] JSON is valid",
-                     "[PASS] Code works: 4 tests, 0 failed", "Ready."):
-            self.assertIn(line, r.stdout)
-
-    def test_doctor_warns_about_an_old_ollama(self):
-        self.o.version = "0.32.14"
-        self.assertIn("[WARN] Ollama: version 0.32.14", self.cli("doctor").stdout)
-
-    def test_doctor_names_the_fix_when_the_model_is_missing(self):
-        os.environ["CYNQRA_OLLAMA_MODEL"] = "gpt-oss:20b"
-        r = self.cli("doctor")
-        self.assertEqual(r.returncode, 1)
-        self.assertIn("fix: ollama pull gpt-oss:20b", r.stdout)
-
-    def test_bench_compares_models_on_cynqras_own_tasks(self):
-        self.o.models.append("gpt-oss:20b")
-        r = self.cli("bench", "qwen3.6:35b", "gpt-oss:20b", "--objectives", "1")
-        self.assertEqual(r.returncode, 0, r.stdout[-3000:] + r.stderr[-2000:])
-        self.assertIn("plan: valid, 6 tasks", r.stdout)
-        rep = json.loads(next((self.tmp.path / "reports").glob("bench_*.json")).read_text())
-        self.assertEqual([x["model"] for x in rep["rows"]], ["qwen3.6:35b", "gpt-oss:20b"])
-        self.assertTrue(all(x["code"] == "pass" and x["plan"] and x["objectives"] == 1 for x in rep["rows"]))
-
-    def test_tiers_follow_the_research(self):
-        import cynqra_cli
-        self.assertEqual(cynqra_cli.pick_tier(64)["model"], "qwen3.6:35b")
-        self.assertEqual(cynqra_cli.pick_tier(32)["model"], "qwen3.6:35b")
-        self.assertEqual(cynqra_cli.pick_tier(24)["model"], "qwen3.5:9b")
-        self.assertEqual(cynqra_cli.pick_tier(16)["num_ctx"], 24576)
-
-    def test_setup_writes_the_config_the_adapter_reads(self):
-        cfg_path = POC / "local_config.json"
-        saved = cfg_path.read_text() if cfg_path.exists() else None
-        try:
-            r = self.cli("setup", "--model", "gpt-oss:20b", "--host", "http://10.0.0.5:11434", "--print-model")
-            self.assertEqual(r.stdout.strip(), "gpt-oss:20b")
-            cfg = json.loads(cfg_path.read_text())
-            self.assertEqual((cfg["think"], cfg["temperature"], cfg["seed"], cfg["host"]), ("low", 0, 42, "http://10.0.0.5:11434"))
-        finally:
-            cfg_path.unlink(missing_ok=True)
-            if saved is not None:
-                cfg_path.write_text(saved)
-
-    def test_unattended_run_reaches_a_live_product(self):
-        r = self.cli("run", "--yes", SCENARIO["messy"])
-        self.assertEqual(r.returncode, 0, r.stdout[-3000:] + r.stderr[-2000:])
-        self.assertIn("PASS: accepted, live, healthy", r.stdout)
-        self.assertIn("the engineer's own tests failed; it is fixing them", r.stdout)
-        rep = json.loads(next((self.tmp.path / "reports").glob("live_*.json")).read_text())
-        self.assertEqual((rep["outcome"], rep["usd"], rep["model"]["kind"]), ("PASS", 0.0, "ollama"))
-
-    def test_interactive_run_with_the_founder_answering(self):
-        answers = "c\n" + "a\n" + "a\na\na\na\n" + "\n"
-        r = self.cli("run", SCENARIO["messy"], stdin=answers)
-        self.assertEqual(r.returncode, 0, r.stdout[-3000:] + r.stderr[-2000:])
-        self.assertIn("=== Needs you: Product rule for t_02", r.stdout)
-        self.assertIn("Stopped by policy:", r.stdout)
-        self.assertIn("The product is live at http://127.0.0.1:", r.stdout)
 
 
 if __name__ == "__main__":

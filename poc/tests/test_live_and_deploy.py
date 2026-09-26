@@ -4,7 +4,6 @@ from __future__ import annotations
 import filecmp
 import os
 import shutil
-import sys
 import unittest
 from pathlib import Path
 

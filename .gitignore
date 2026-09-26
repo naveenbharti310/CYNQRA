@@ -3,10 +3,7 @@ __pycache__/
 poc/data/
 poc/tests/_tmp/
 node_modules/
-poc/demo/out/
 poc/demo/*.mp4
 poc/live_reports/run_*/
 exports/
-poc/demo/replay_build/
-poc/demo/out/
-poc/local_config.json
+dist/

@@ -1,0 +1,195 @@
+# Cynqra desktop app: build the installers for Windows, macOS and Linux, then install each one on a
+# fresh GitHub machine the way a user would and check it with a real open model.
+#
+#   every push             unit tests; build; install; self-test; open the window; a real model
+#                          structures an objective and writes code that passes its tests: Qwen3.5 9B
+#                          (the model a 16 GB laptop gets) on Windows and Linux, Qwen3.5 4B on the
+#                          7 GB macOS machine
+#   "[e2e]" in the commit  also a whole Cynqra run with Qwen3.5 9B on Linux and Windows: from the
+#                          founder's sentence to a deployed, verified product
+#   "[release]"            also publishes the installers as a GitHub prerelease
+name: cynqra-desktop
+
+on:
+  push:
+    branches: [cynqra]
+    paths: ["poc/**", "desktop/**", ".github/workflows/cynqra-desktop.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cynqra-desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  E2E_MODEL: qwen3.5-9b
+  E2E_OBJECTIVE: >-
+    I run a small bakery and my staff keep losing track of custom cake orders. I want a simple internal web
+    page where they can log an order with the pickup date, see what is due in the next few days, and mark
+    orders as paid and picked up. Nothing public, no card payments, and it has to run on the shop laptop.
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - name: Unit and journey tests
+        working-directory: poc
+        run: python3 -m unittest discover -s tests -t tests
+
+  build:
+    needs: tests
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: windows-latest, target: windows-x64, model: qwen3.5-9b}
+          - {os: macos-latest, target: macos-arm64, model: qwen3.5-4b}
+          - {os: ubuntu-latest, target: linux-x64, model: qwen3.5-9b}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build the installer
+        run: ${{ runner.os == 'Windows' && 'python' || 'python3' }} desktop/build.py --target ${{ matrix.target }}
+
+      # ---- install it the way a user would --------------------------------------------------------
+      - name: Install (Windows installer, silent)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist\Cynqra-Setup-*.exe | Select-Object -First 1
+          Start-Process $setup.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/TASKS=desktopicon' -Wait
+          $app = "$env:LOCALAPPDATA\Programs\Cynqra"
+          if (-not (Test-Path "$app\python\pythonw.exe")) { throw "not installed at $app" }
+          Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Filter "Cynqra*.lnk" | ForEach-Object { "Start menu: $($_.Name)" }
+          "CYNQRA=$app\python\python.exe -X utf8 $app\app\desktop.py" | Out-File -Append $env:GITHUB_ENV
+      - name: Install (macOS disk image)
+        if: runner.os == 'macOS'
+        run: |
+          hdiutil attach dist/Cynqra-*.dmg -mountpoint /Volumes/Cynqra -nobrowse
+          mkdir -p ~/Applications && cp -R /Volumes/Cynqra/Cynqra.app ~/Applications/
+          hdiutil detach /Volumes/Cynqra
+          codesign --verify --deep --strict ~/Applications/Cynqra.app && echo "signature valid (ad hoc)"
+          spctl --assess --type execute -vv ~/Applications/Cynqra.app || echo "Gatekeeper: not notarized, so macOS asks once before the first launch"
+          echo "CYNQRA=$HOME/Applications/Cynqra.app/Contents/MacOS/Cynqra" >> $GITHUB_ENV
+      - name: Install (Linux archive)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p /tmp/unpack && tar xzf dist/Cynqra-*-linux-x64.tar.gz -C /tmp/unpack
+          /tmp/unpack/Cynqra/install.sh
+          echo "CYNQRA=$HOME/.local/bin/cynqra" >> $GITHUB_ENV
+
+      # ---- check the installed app ---------------------------------------------------------------
+      - name: Self-test (bundled Python and llama-server, app server, engine, model files on Hugging Face)
+        run: $CYNQRA --selftest --online
+      - name: Open the window and load the app
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a $CYNQRA --window-test; else $CYNQRA --window-test; fi
+      - name: A real open model on this machine (download, llama-server, objective, code that passes its tests)
+        run: $CYNQRA --check-model ${{ matrix.model }}
+      - name: Collect
+        if: always()
+        run: |
+          mkdir -p out
+          cp dist/Cynqra* out/ 2>/dev/null || true
+          for d in "$LOCALAPPDATA/Cynqra" "$HOME/Library/Application Support/Cynqra" "$HOME/.local/share/cynqra"; do
+            [ -d "$d" ] && cp "$d"/selftest.json "$d"/runtime/llama-server.log "$d"/app.log out/ 2>/dev/null || true
+          done
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cynqra-${{ matrix.target }}
+          path: out/
+          if-no-files-found: warn
+
+  e2e:
+    needs: build
+    if: ${{ !cancelled() && contains(github.event.head_commit.message, '[e2e]') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-latest, target: linux-x64}
+          - {os: windows-latest, target: windows-x64}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 358
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: cynqra-${{ matrix.target }}
+          path: dist
+      - name: Install
+        shell: pwsh
+        run: |
+          if ($IsWindows) {
+            $setup = Get-ChildItem dist\Cynqra-Setup-*.exe | Select-Object -First 1
+            Start-Process $setup.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait
+            $app = "$env:LOCALAPPDATA\Programs\Cynqra"
+            "CYNQRA=$app\python\python.exe -X utf8 $app\app\desktop.py" | Out-File -Append $env:GITHUB_ENV
+          } else {
+            New-Item -ItemType Directory -Force /tmp/unpack | Out-Null
+            tar xzf (Get-ChildItem dist/Cynqra-*-linux-x64.tar.gz | Select-Object -First 1).FullName -C /tmp/unpack
+            /tmp/unpack/Cynqra/install.sh
+            "CYNQRA=$env:HOME/.local/bin/cynqra" | Out-File -Append $env:GITHUB_ENV
+          }
+      - name: The whole Cynqra journey with a real model, through the app's own API
+        run: $CYNQRA --e2e $E2E_MODEL "$E2E_OBJECTIVE" --max-minutes 340
+      - name: Collect the report and the product the organization built
+        if: always()
+        run: |
+          mkdir -p out
+          for d in "$LOCALAPPDATA/Cynqra" "$HOME/.local/share/cynqra"; do
+            [ -d "$d/reports" ] && cp -r "$d/reports" out/ ; [ -f "$d/runtime/llama-server.log" ] && cp "$d/runtime/llama-server.log" out/
+          done
+          ls -laR out | head -50
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cynqra-e2e-${{ matrix.target }}
+          path: out/
+
+  release:
+    needs: build
+    if: contains(github.event.head_commit.message, '[release]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cynqra-*-x64
+          path: artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          name: cynqra-macos-arm64
+          path: artifacts/mac
+      - name: Publish the installers as a prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(cat desktop/VERSION)
+          TAG="cynqra-v$VERSION"
+          files=$(find artifacts -type f \( -name 'Cynqra-Setup-*.exe' -o -name 'Cynqra-*.dmg' -o -name 'Cynqra-*-linux-x64.tar.gz' -o -name '*.sha256' \))
+          echo "$files"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" $files --clobber
+            gh release edit "$TAG" --notes-file desktop/RELEASE_NOTES.md --target "$GITHUB_SHA"
+          else
+            gh release create "$TAG" $files --prerelease --target "$GITHUB_SHA" \
+              --title "Cynqra $VERSION (proof of concept)" --notes-file desktop/RELEASE_NOTES.md
+          fi

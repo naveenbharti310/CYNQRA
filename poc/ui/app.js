@@ -4,7 +4,7 @@
 
 const S = {
   st: null, view: "company", worker: "w_eng_b", replayTask: null, replay: null, replayKey: "",
-  seen: -1, sig: "", err: "", busy: false, graph: null, mode: "demo", shown: new Set(), guide: true,
+  seen: -1, sig: "", err: "", busy: false, graph: null, mode: "demo", shown: new Set(), guide: true, modelOpen: false,
 };
 /* Cards animate in only the first time they appear; a repaint must not replay it for every card. */
 const fresh = (key) => { if (S.shown.has(key)) return ""; S.shown.add(key); return "fresh"; };
@@ -57,7 +57,8 @@ function signature() {
   const st = S.st; if (!st) return "";
   const ev = st.events || [];
   return [ev.length ? ev[ev.length - 1].seq : 0, st.meta.phase, st.meta.frozen, st.auto.on, S.view, S.worker,
-    S.replayTask, S.replayKey, S.err, S.busy, S.guide, JSON.stringify(S.graph), (st.decisions.pending || []).map((d) => d.id).join()].join("|");
+    S.replayTask, S.replayKey, S.err, S.busy, S.guide, JSON.stringify(S.graph), (st.decisions.pending || []).map((d) => d.id).join(),
+    S.modelOpen, rtSignature()].join("|");
 }
 
 function paint(force) {
@@ -68,8 +69,9 @@ function paint(force) {
   $$("#app input, #app textarea, #app select").forEach((el) => { if (el.id) keep[el.id] = el.value; });
   const focus = document.activeElement && document.activeElement.id;
   const phase = S.st.meta.phase;
-  const g = guideBar();
-  $("#app").innerHTML = (["new", "objective", "planning"].includes(phase) ? wizard() : shell()) + g;
+  const model = showModelScreen();
+  const g = model ? "" : guideBar();
+  $("#app").innerHTML = (model ? modelScreen() : ["new", "objective", "planning"].includes(phase) ? wizard() : shell()) + g;
   $("#app").classList.toggle("with-guide", !!g);
   const bar = $(".guide-bar");
   if (bar) document.documentElement.style.setProperty("--guide-h", bar.offsetHeight + "px");
@@ -80,7 +82,7 @@ function paint(force) {
 
 /* ---------- guide: what is happening, in plain words (ui/tour.js) ---------- */
 function guideBar() {
-  if (!S.guide || window.CYNQRA_GUIDED_DEMO || typeof CynqraTour === "undefined") return "";
+  if (!S.guide || typeof CynqraTour === "undefined") return "";
   const n = CynqraTour.narrate(S.st);
   if (!n) return "";
   return `<aside class="guide-bar" aria-label="Guide" aria-live="polite"><div class="guide-text"><span class="guide-chapter">${esc(n.chapter)}</span>
@@ -88,7 +90,7 @@ function guideBar() {
     <button class="btn sm" id="guide-off" type="button">Hide guide</button></aside>`;
 }
 function guideToggle() {
-  if (window.CYNQRA_GUIDED_DEMO || S.guide) return "";  // while it shows, the bar has its own Hide button
+  if (S.guide) return "";  // while it shows, the bar has its own Hide button
   return `<button class="btn sm" id="guide-toggle" type="button">Show guide</button>`;
 }
 
@@ -126,10 +128,10 @@ function wizard() {
   const modeChoice = phase === "new" ? `
       <label class="lbl" for="coname">Company name</label>
       <input type="text" id="coname" value="Harbor Recruiting">
-      <div class="modes" role="radiogroup" aria-label="Intelligence">
+      ${isDesktop() ? "" : `<div class="modes" role="radiogroup" aria-label="Intelligence">
         <label class="mode ${S.mode === "demo" ? "on" : ""}" id="m-demo"><input type="radio" name="mode" value="demo" ${S.mode === "demo" ? "checked" : ""}>Demo: scripted workers</label>
         <label class="mode ${S.mode === "live" ? "on" : ""}" id="m-live"><input type="radio" name="mode" value="live" ${S.mode === "live" ? "checked" : ""}>Live: a real model</label>
-      </div>` : "";
+      </div>`}` : "";
   const right = obj ? objectiveCard(obj) : `<div class="card" style="flex:1;display:flex;align-items:center;justify-content:center"><p class="muted">Your structured objective appears here.</p></div>`;
   return `<div class="wiz">${top}<div class="wiz-body">
     <div class="wiz-left">
@@ -141,7 +143,8 @@ function wizard() {
       <textarea class="big" id="messy">${esc(obj ? obj.statement : st.demo_messy)}</textarea>
       <div class="row"><button class="btn primary" id="structure" ${S.busy ? "disabled" : ""}>${obj ? "Structure it again" : "Structure my objective"}</button></div>
       <div class="err" role="alert">${esc(S.err)}</div>
-      <p class="small muted" style="margin:0">Demo mode: the words the workers write come from a prepared script, and every screen says so. Code is still written, tested and deployed for real. Live mode uses a model through the Cynqra model registry and needs an API key on this machine.</p>
+      <p class="small muted" style="margin:0">${isDesktop() ? `Every word the CTO, the PM and the engineers write comes from ${esc(rt().model_name || "the model")}, running on this computer. Nothing leaves it. On a laptop each step takes minutes; the Work view shows what the model is doing.`
+        : "Demo mode: the words the workers write come from a prepared script, and every screen says so. Code is still written, tested and deployed for real. Live mode uses a model through the Cynqra model registry and needs an API key on this machine."}</p>
     </div>
     <div class="wiz-right">${right}</div></div></div>`;
 }
@@ -191,9 +194,102 @@ function planStep() {
     </div></div></div>`;
 }
 
+/* ---------- desktop app: the open model on this computer ---------- */
+const isDesktop = () => !!(S.st && S.st.desktop && S.st.runtime);
+const rt = () => (S.st && S.st.runtime) || {};
+const gb = (b) => (b >= 1073741824 ? (b / 1073741824).toFixed(1) : (b / 1073741824).toFixed(2));
+const RT_WORKING = ["downloading", "checking", "starting"];
+
+function rtSignature() {
+  if (!isDesktop()) return "";
+  const r = rt();
+  return [r.state, r.model, Math.floor((r.done || 0) / 52428800), Math.round((r.rate || 0) / 1048576), r.error, r.gpu,
+    r.busy ? Math.floor(r.busy.tokens / 25) : -1, (r.catalog || []).map((m) => `${m.installed}:${m.partial_gb}`).join()].join(",");
+}
+
+function showModelScreen() {
+  if (!isDesktop()) return false;
+  if (S.modelOpen) return true;
+  return rt().state !== "ready" && S.st.meta.phase === "new";
+}
+
+function modelActivity() {
+  if (!isDesktop()) return "";
+  const b = rt().busy;
+  if (!b) return "";
+  const what = b.tokens ? `Model writing: ${b.tokens.toLocaleString()} tokens` : `Model reading a ${(b.prompt || 0).toLocaleString()}-token prompt`;
+  return `<span class="pill blue" title="What the model on this computer is doing right now"><i class="dot pulse"></i>${what}</span>`;
+}
+
+function modelBanner() {
+  if (!isDesktop() || rt().state === "ready") return "";
+  const r = rt(), working = RT_WORKING.includes(r.state);
+  return `<div class="notice">${working ? `The model is ${r.state === "downloading" ? "downloading" : "starting"}; the run continues when it is ready.`
+    : "The model is not running, so the organization cannot work."} <button class="btn sm primary" data-model-open="1">Open model settings</button></div>`;
+}
+
+function modelStatus() {
+  const r = rt();
+  const name = esc(r.model_name || r.model || "");
+  if (r.state === "downloading") {
+    const pct = r.total ? Math.floor((100 * r.done) / r.total) : 0;
+    const left = r.rate > 0 && r.total ? Math.max(1, Math.round((r.total - r.done) / r.rate / 60)) : null;
+    return `<div class="card stack"><div class="between"><b>Downloading ${name}</b><span class="mono small">${pct}%</span></div>
+      <div class="meter wide" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><i style="width:${pct}%"></i></div>
+      <span class="small mono">${gb(r.done)} of ${r.total ? gb(r.total) : "?"} GB · ${(r.rate / 1e6).toFixed(0)} MB/s${left ? ` · about ${left} min left` : ""}</span>
+      <span class="small muted">From Hugging Face, checked against its published SHA-256 when it finishes. If you pause or quit, the download resumes where it stopped.</span>
+      <div class="row"><button class="btn" id="rt-cancel">Pause download</button></div></div>`;
+  }
+  if (r.state === "checking") return `<div class="card stack"><b>Checking the download</b><span class="small muted">Comparing ${name} with its published SHA-256. Under a minute.</span></div>`;
+  if (r.state === "starting") return `<div class="card stack"><div class="row"><i class="dot pulse" style="color:var(--accent)"></i><b>Starting ${name}</b></div>
+    <span class="small muted">llama.cpp is loading the model into memory${r.accel ? ` (${esc(r.accel === "cpu" ? "processor" : r.accel)})` : ""}. From a few seconds to two minutes.</span>
+    <div class="row"><button class="btn" id="rt-cancel">Stop</button></div></div>`;
+  if (r.state === "ready") return `<div class="card stack ok-card"><b>${name} is running on this computer</b>
+    <span class="small">Served by llama.cpp on 127.0.0.1 using the ${esc(r.accel === "cpu" ? "processor" : r.accel === "metal" ? "Apple GPU (Metal)" : "GPU (Vulkan)")}. Prompts and answers stay on this computer.</span>
+    <div class="row"><button class="btn primary" data-model-close="1">Continue</button><button class="btn" id="rt-stop">Stop the model</button></div></div>`;
+  if (r.state === "error") return `<div class="card stack warn"><b>The model did not start</b><span class="small" style="color:var(--red)">${esc(r.error)}</span>
+    ${r.log ? `<details><summary class="small">Details from llama-server</summary><pre class="log">${esc(r.log)}</pre></details>` : ""}
+    <span class="small muted">Try again below. If it keeps failing, try a smaller model, or send the details to the Cynqra team.</span></div>`;
+  return "";
+}
+
+function modelScreen() {
+  const r = rt(), working = RT_WORKING.includes(r.state);
+  const cards = (r.catalog || []).map((m) => {
+    const running = m.id === r.model && r.state === "ready";
+    const label = m.installed ? "Start" : m.partial_gb ? `Resume download (${m.partial_gb} of ${m.size_gb} GB)` : `Download ${m.size_gb} GB and start`;
+    const action = running ? `<span class="pill green">Running</span>`
+      : `<button class="btn ${m.recommended ? "primary" : ""}" data-rt-start="${esc(m.id)}" ${working || S.busy ? "disabled" : ""}>${label}</button>`;
+    return `<div class="mcard ${m.recommended ? "rec" : ""} ${running ? "on" : ""}">
+      <div class="between"><b>${esc(m.name)}</b><span class="row" style="gap:6px">${m.recommended ? `<span class="pill teal">Recommended for this computer</span>` : ""}
+        ${m.fits ? "" : `<span class="pill amber">Needs ${m.min_gb} GB of memory</span>`}</span></div>
+      <p class="small" style="margin:6px 0 10px">${esc(m.about)}</p>
+      <div class="between"><span class="small muted mono">${m.size_gb} GB · ${Math.round(m.ctx / 1024)}K context${m.installed ? " · downloaded" : ""}</span>${action}</div></div>`;
+  }).join("");
+  const accel = (r.servers || []).includes("vulkan") ? `<label class="lbl" for="rt-gpu">Graphics card (Vulkan)</label>
+      <select id="rt-gpu" data-keep="no" ${working ? "disabled" : ""}><option value="auto" ${r.gpu !== "on" ? "selected" : ""}>Off: use the processor (works everywhere)</option>
+        <option value="on" ${r.gpu === "on" ? "selected" : ""}>On: use an NVIDIA, AMD or Intel Arc card with 8 GB or more</option></select>
+      <span class="small muted">If the card cannot hold the model, Cynqra falls back to the processor by itself. Applies the next time a model starts.</span>`
+    : (r.servers || []).includes("metal") ? `<span class="small muted">This Mac's GPU is used through Metal.</span>` : "";
+  const back = S.st.meta.phase !== "new" || r.state === "ready";
+  return `<div class="wiz"><div class="wiz-top"><div class="row"><span class="wordmark">Cynqra</span><span class="muted small">Model</span></div>
+      <div class="row">${back && S.modelOpen ? `<button class="btn sm" data-model-close="1">Back</button>` : ""}<button class="btn sm" data-app-quit="1">Quit</button></div></div>
+    <div class="wiz-body"><div class="wiz-left">
+      <h1 class="hero">The model your organization runs on.</h1>
+      <p class="lede">Cynqra's CTO, PM and engineers are an open-weight model running on this computer through llama.cpp. It is downloaded once; after that no prompt, answer or code leaves this computer.</p>
+      <div class="card stack"><div class="kv"><span>This computer</span><span>${esc(r.platform)}</span></div>
+        <div class="kv"><span>Memory</span><span>${r.ram_gb ? `${r.ram_gb} GB` : "unknown"}</span></div>
+        <div class="kv"><span>Model server</span><span>llama.cpp, ${esc((r.servers || []).join(", ") || "missing")}</span></div>${accel}</div>
+      ${modelStatus()}
+      <div class="err" role="alert">${esc(S.err)}</div>
+    </div><div class="wiz-right"><div class="stack">${cards}</div>
+      <p class="small muted">Models come from their publishers on Hugging Face (Unsloth quantizations of Alibaba's Qwen models, Apache 2.0). Which model suits which computer comes from Cynqra's September 2026 research.</p></div></div></div>`;
+}
+
 /* ---------- shell ---------- */
 function modePill() {
   const st = S.st;
+  if (isDesktop()) return `<span class="pill blue wrap">Model: ${esc(rt().model_name || "not running")}${rt().state === "ready" ? ", this computer" : ""}</span>`;
   if (st.meta.mode === "live") return `<span class="pill blue">Live mode: ${esc(st.intelligence || "model")}</span>`;
   return `<span class="pill amber">Demo mode: scripted workers</span>`;
 }
@@ -223,18 +319,19 @@ function shell() {
       ${nav}
       <div class="foot">${modePill()}
         <button class="btn danger ${st.meta.frozen ? "on" : ""}" id="kill">${st.meta.frozen ? "Release kill switch" : "Kill switch"}</button>
-        <button class="btn sm" id="reset" title="Archive this run and start again">New run</button>${guideToggle()}</div></nav>
+        <button class="btn sm" id="reset" title="Archive this run and start again">New run</button>${guideToggle()}
+        ${isDesktop() ? `<div class="row" style="gap:8px"><button class="btn sm" data-model-open="1">Model</button><button class="btn sm" data-app-quit="1">Quit</button></div>` : ""}</div></nav>
     <main class="main">
       <header class="top"><h1>${VIEWS.find((v) => v[0] === S.view)[1]}</h1>
         <div class="row small" style="gap:20px">
           <div class="row" style="gap:8px"><span>Budget</span><div class="meter ${pct >= 95 ? "bad" : pct >= 80 ? "warn" : ""}" role="img" aria-label="Budget ${pct} percent used"><i style="width:${pct}%"></i></div>
             <span class="mono">${b.spent} / ${b.cap}</span></div>
           <span>Founder interventions <b class="mono">${st.metrics.founder_interventions ?? 0}</b></span>
-          ${statusPill()}
+          ${modelActivity()}${statusPill()}
           <button class="btn sm" id="step" ${!running || st.auto.on || S.busy ? "disabled" : ""}>Step</button>
           <button class="btn sm ${st.auto.on ? "" : "primary"}" id="auto" ${!running ? "disabled" : ""}>${st.auto.on ? "Pause" : "Run"}</button>
         </div></header>
-      <div class="view">${S.err ? `<div class="err" role="alert">${esc(S.err)}</div>` : ""}${st.meta.notice ? `<div class="notice">${esc(st.meta.notice)}${st.meta.phase === "stopped_error" ? ` <button class="btn sm primary" id="resume" ${S.busy ? "disabled" : ""}>Try the same step again</button>` : ""}</div>` : ""}${views[S.view]()}</div>
+      <div class="view">${modelBanner()}${S.err ? `<div class="err" role="alert">${esc(S.err)}</div>` : ""}${st.meta.notice ? `<div class="notice">${esc(st.meta.notice)}${st.meta.phase === "stopped_error" ? ` <button class="btn sm primary" id="resume" ${S.busy ? "disabled" : ""}>Try the same step again</button>` : ""}</div>` : ""}${views[S.view]()}</div>
     </main></div>`;
 }
 
@@ -470,7 +567,7 @@ function bind() {
   const on = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
   on("structure", () => {
     const isNew = S.st.meta.phase === "new", name = isNew ? $("#coname").value : "", messy = $("#messy").value;
-    const mode = (($("input[name=mode]:checked") || {}).value) || S.mode;
+    const mode = isDesktop() ? "live" : ((($("input[name=mode]:checked") || {}).value) || S.mode);
     act(async () => {
       if (isNew) await api("/api/company", { name, mode });
       await api("/api/objective/draft", { messy });
@@ -497,7 +594,7 @@ function bind() {
   on("resume", () => act(() => api("/api/run/resume", {})));
   on("auto", () => act(() => api("/api/run/auto", { on: !S.st.auto.on })));
   on("kill", () => act(() => api("/api/killswitch", { on: !S.st.meta.frozen })));
-  on("reset", () => { if (window.confirm("Archive this run and start a new one? Nothing is deleted.")) act(async () => { await api("/api/reset", {}); S.view = "company"; S.seen = -1; S.mode = "demo"; }); });
+  on("reset", () => { if (window.confirm("Archive this run and start a new one? Nothing is deleted.")) act(async () => { await api("/api/reset", {}); S.view = "company"; S.seen = -1; S.mode = isDesktop() ? "live" : "demo"; }); });
   on("ask", () => {
     const q = $("#gq").value, subject = $("#gs").value.trim();
     act(async () => {
@@ -506,6 +603,18 @@ function bind() {
     });
   });
   $$("[data-worker]").forEach((b) => b.onclick = () => { S.worker = b.dataset.worker; paint(true); });
+  $$("[data-rt-start]").forEach((b) => b.onclick = () => { const model = b.dataset.rtStart; act(() => api("/api/runtime/start", { model })); });
+  on("rt-cancel", () => act(() => api("/api/runtime/cancel", {})));
+  on("rt-stop", () => act(() => api("/api/runtime/stop", {})));
+  $$("[data-model-open]").forEach((b) => b.onclick = () => { S.modelOpen = true; S.err = ""; paint(true); });
+  $$("[data-model-close]").forEach((b) => b.onclick = () => { S.modelOpen = false; S.err = ""; paint(true); });
+  const gpu = $("#rt-gpu");
+  if (gpu) gpu.onchange = () => { const v = gpu.value; act(() => api("/api/runtime/gpu", { gpu: v })); };
+  $$("[data-app-quit]").forEach((b) => b.onclick = () => {
+    if (!window.confirm("Quit Cynqra? The model and any product Cynqra deployed on this computer stop. Your runs are kept.")) return;
+    api("/api/app/quit", {}).catch(() => {});
+    document.body.innerHTML = `<div class="closed"><span class="wordmark">Cynqra</span><p>Cynqra has quit. You can close this window.</p></div>`;
+  });
   const rt = $("#replay-task");
   if (rt) rt.onchange = () => { S.replayTask = rt.value; S.replayKey = ""; loadReplay().then(() => paint(true)); };
   $$("[data-decide]").forEach((b) => b.onclick = () => {

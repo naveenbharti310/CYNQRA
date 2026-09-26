@@ -257,3 +257,14 @@ textarea.note{min-height:70px;resize:vertical;font-size:14px}
 .guide-bar .btn:hover{background:#2C2F31}
 @media (max-width:760px){.guide-bar{flex-direction:column;align-items:flex-start;padding:12px 16px;gap:8px}#app.with-guide{padding-bottom:var(--guide-h,260px)}.guide-body{max-height:30vh;overflow:auto}}
 #app.with-guide + .toasts{bottom:calc(var(--guide-h,140px) + 16px)}
+
+/* desktop app: model screen */
+.mcard{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 20px}
+.mcard.rec{border-color:var(--accent)}
+.mcard.on{background:var(--accent-soft)}
+.meter.wide{width:100%;height:10px}
+.meter.wide i{height:10px}
+.ok-card{border-color:var(--green)}
+pre.log{max-height:220px;overflow:auto;font:12px/1.45 var(--mono);background:var(--nav);padding:10px;border-radius:8px;white-space:pre-wrap;word-break:break-all}
+.closed{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--ink2)}
+.pill.wrap{white-space:normal}

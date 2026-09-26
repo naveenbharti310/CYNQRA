@@ -15,6 +15,14 @@ GET  /api/replay/<task_id>
 GET  /api/graph?q=approves|owns|depends&subject=...
 GET  /api/export                    builds and downloads the export bundle
 POST /api/reset                     archives this run and starts a new one
+
+Desktop app only (App made with a runtime):
+POST /api/runtime/start             {model}  download the model if needed, then start it
+POST /api/runtime/cancel            pause a download, or stop a start in progress
+POST /api/runtime/stop              stop the model server
+POST /api/runtime/remove            {model}  delete a downloaded model
+POST /api/runtime/gpu               {gpu: auto|on|off}
+POST /api/app/quit                  close the app: the model server and the deployed product stop
 """
 from __future__ import annotations
 
@@ -33,6 +41,7 @@ from .deploy import stop_all
 from .engine import Engine, EngineError
 from .intelligence import IntelligenceError
 from .protocol import ProtocolError
+from .runtime import ModelRuntimeError
 
 UI = Path(__file__).resolve().parent.parent / "ui"
 mimetypes.add_type("font/woff2", ".woff2")
@@ -40,10 +49,13 @@ mimetypes.add_type("text/javascript", ".js")
 
 
 class App:
-    def __init__(self, data_root: Path, intelligence_factory=None):
+    def __init__(self, data_root: Path, intelligence_factory=None, runtime=None):
         self.root = Path(data_root)
         self.root.mkdir(parents=True, exist_ok=True)
         self.factory = intelligence_factory
+        self.runtime = runtime  # the desktop app's model on this machine; None for the plain web app
+        self.quit = threading.Event()
+        self.last_seen = time.time()  # the window's last poll: the desktop app notices a closed window
         self.engine = self._new_engine()
         self.auto = {"on": False, "delay": 0.9}
         self.last_step: dict = {}
@@ -90,10 +102,37 @@ class App:
         return d
 
     def state(self) -> dict:
+        self.last_seen = time.time()
         s = self.engine.snapshot()
         s["auto"] = dict(self.auto)
         s["last_step"] = self.last_step
+        if self.runtime is not None:
+            s["desktop"] = True
+            s["runtime"] = self.runtime.snapshot()
         return s
+
+    def runtime_call(self, what: str, body: dict) -> dict:
+        rt = self.runtime
+        if rt is None:
+            raise EngineError("the model controls are part of the desktop app")
+        if what == "start":
+            if self.auto["on"] and self.engine.meta.get("phase") == "running":
+                raise EngineError("pause the run before changing the model")
+            rt.install_and_start(str(body.get("model") or ""))
+        elif what == "cancel":
+            rt.cancel()
+        elif what == "stop":
+            self.auto["on"] = False
+            rt.stop()
+        elif what == "remove":
+            rt.remove(str(body.get("model") or ""))
+        elif what == "gpu":
+            if body.get("gpu") not in ("auto", "on", "off"):
+                raise EngineError("gpu must be auto, on or off")
+            rt.save_settings(gpu=body["gpu"])
+        else:
+            raise KeyError(what)
+        return rt.snapshot()
 
     def close(self) -> None:
         self._stop.set()
@@ -129,7 +168,7 @@ def make_server(app: App, port: int = 8750) -> ThreadingHTTPServer:
         def _guard(self, fn):
             try:
                 return self._send(200, fn())
-            except (EngineError, IntelligenceError, ProtocolError, ValueError, KeyError) as exc:
+            except (EngineError, IntelligenceError, ProtocolError, ModelRuntimeError, ValueError, KeyError) as exc:
                 return self._send(400, {"error": str(exc)})
             except Exception as exc:  # noqa: BLE001 - shown to the founder, never a dropped connection
                 return self._send(500, {"error": f"{type(exc).__name__}: {exc}"})
@@ -137,6 +176,8 @@ def make_server(app: App, port: int = 8750) -> ThreadingHTTPServer:
         def do_GET(self):
             u = urlparse(self.path)
             path = u.path
+            if path == "/favicon.ico":
+                return self._send(200, (UI / "icon.png").read_bytes(), "image/png")
             if path in ("/", "/index.html"):
                 return self._send(200, (UI / "index.html").read_bytes(), "text/html; charset=utf-8")
             if path.startswith("/ui/"):
@@ -192,6 +233,14 @@ def make_server(app: App, port: int = 8750) -> ThreadingHTTPServer:
                 return self._send(200, app.auto)
             if path == "/api/reset":
                 app.reset()
+                return self._send(200, {"ok": True})
+            m = re.match(r"^/api/runtime/(start|cancel|stop|remove|gpu)$", path)
+            if m:
+                return self._guard(lambda: app.runtime_call(m.group(1), body))
+            if path == "/api/app/quit":
+                if app.runtime is None:
+                    return self._send(404, {"error": "not found"})
+                app.quit.set()
                 return self._send(200, {"ok": True})
             m = re.match(r"^/api/decisions/(dec_\w+)$", path)
             if m:

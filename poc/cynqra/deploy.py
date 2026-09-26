@@ -10,14 +10,13 @@ import json
 import shutil
 import socket
 import subprocess
-import sys
 import time
 import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
 
-from .verification import clean_env, run_unittests
+from .verification import NO_WINDOW, clean_env, python_exe, run_unittests
 
 STAGES = ["BUILD", "TEST", "PACKAGE", "PREVIEW", "VERIFY", "APPROVAL", "DEPLOY", "HEALTH_CHECK", "SMOKE_TEST", "LIVE"]
 _PROCS: list[subprocess.Popen] = []
@@ -34,9 +33,10 @@ def start(folder: Path, port: int, data_file: Path, log_file: Path | None = None
     log = open(log_file, "wb") if log_file else subprocess.DEVNULL
     try:
         proc = subprocess.Popen(
-            [sys.executable, "app.py"], cwd=str(folder),
+            [python_exe(), "app.py"], cwd=str(folder),
             env=clean_env({"PORT": str(port), "DATA_FILE": str(data_file)}),
-            stdout=log, stderr=subprocess.STDOUT if log_file else subprocess.DEVNULL,
+            stdout=log, stderr=subprocess.STDOUT if log_file else subprocess.DEVNULL, stdin=subprocess.DEVNULL,
+            creationflags=NO_WINDOW,
         )
     finally:
         if log_file:

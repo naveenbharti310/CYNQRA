@@ -5,7 +5,6 @@ import os
 import shutil
 import sqlite3
 import unittest
-from pathlib import Path
 
 from helpers import POC, TempDir  # noqa: F401  (sets sys.path)
 

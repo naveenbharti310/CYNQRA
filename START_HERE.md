@@ -1,11 +1,8 @@
 # CYNQRA HANDOVER
 
-> To run Cynqra for real on your laptop, with an open-source model and no API key: read
-> LAPTOP_SETUP.md, then INSTALL.bat (Windows) or ./install.sh (macOS, Linux), then ./cynqra run.
-
-> To show someone how Cynqra works: open 03_pages/how-cynqra-works.html, or the link in
-> DEMO_SCRIPT.md, and press Start. DEMO_SCRIPT.md has the talk track and the answers to the
-> questions people ask.
+> To run Cynqra for real: install the desktop app for Windows, macOS or Linux from
+> https://github.com/naveenbharti310/Passway/releases and follow CYNQRA_DESKTOP.md. It runs an
+> open-source model on the laptop itself; no API key, nothing else to install.
 
 > 26 September 2026: read M1_RESTART_26SEP2026.md first. It supersedes
 > STATE_OF_PLAY.md, which is kept as the 25 August record.
@@ -44,7 +41,8 @@ STATE_OF_PLAY.md       the 25 August record: what was proven, what was not
 02_harness/            the working tree exactly as it ran: spike runners, verifier kit,
                        protocol templates, the G0 material and the run 002 records
 03_pages/              browser readable reports, open any of them by double click
-poc/                   the working proof of concept: engine, UI, mockups, tests, real model test
+poc/                   the working proof of concept: engine, UI, desktop app, mockups, tests
+desktop/               builds the desktop app installers; CYNQRA_DESKTOP.md is the user guide
 RUN_M1.bat             double click to run the M1 spikes, or the POC against a real model
 RUN_POC.bat            double click to start the POC on Windows
 ```

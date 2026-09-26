@@ -257,8 +257,9 @@ class ModelSource:
     def __init__(self):
         resolved = model_adapter.resolve()
         if resolved is None:
-            raise IntelligenceError("Live mode needs a model: a local Ollama model (python poc/cynqra_cli.py doctor "
-                                    "explains how), or ANTHROPIC_API_KEY or OPENAI_API_KEY.")
+            raise IntelligenceError("Live mode needs a model: in the desktop app, start one in the Model screen; "
+                                    "otherwise a local model server (CYNQRA_LOCAL_BASE_URL or CYNQRA_OLLAMA_MODEL), "
+                                    "or ANTHROPIC_API_KEY or OPENAI_API_KEY.")
         self.label = resolved["label"]
         self.prompt_v2 = (HERE / "objective_prompt.txt").read_text(encoding="utf-8")
 

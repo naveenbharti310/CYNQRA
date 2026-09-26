@@ -61,6 +61,14 @@ matter locally:
   * keep_alive keeps the model loaded between the calls of one run.
 Local generation on a CPU is slow, so CYNQRA_TIMEOUT (seconds, default 1800
 for local servers) replaces the 600 second limit there.
+
+26 Sep 2026, fourth pass: the desktop app's llama-server, checked against the
+real b11201 build. A local OpenAI-compatible call is not retried by this
+module: the request is deterministic, so a resend costs minutes for the same
+answer, and a timeout after CYNQRA_TIMEOUT must not become three. llama-server
+answers an unparseable finished reply with HTTP 500 ("does not match the
+expected ... format") and an overlong prompt with HTTP 400
+exceed_context_size_error; both now read as what they are.
 """
 from __future__ import annotations
 
@@ -134,9 +142,9 @@ def _post_once(url: str, body: bytes, headers: dict, timeout: float = TIMEOUT_S)
         raise _Retryable(f"network error: {exc}") from exc
 
 
-def _post(url: str, payload: dict, headers: dict, timeout: float = TIMEOUT_S) -> dict:
+def _post(url: str, payload: dict, headers: dict, timeout: float = TIMEOUT_S, retry: bool = True) -> dict:
     body = json.dumps(payload).encode("utf-8")
-    for wait in RETRY_WAITS_S + (None,):
+    for wait in (RETRY_WAITS_S if retry else ()) + (None,):
         try:
             return _post_once(url, body, headers, timeout)
         except _Retryable as exc:
@@ -283,7 +291,20 @@ def _local_openai(prompt: str, model: str, max_tokens: int, want_json: bool = Fa
         payload["temperature"] = temperature if temperature is not None else float(os.environ["CYNQRA_TEMPERATURE"])
     if os.environ.get("CYNQRA_SEED"):
         payload["seed"] = int(os.environ["CYNQRA_SEED"])
-    data = _post(base + "/chat/completions", payload, headers, _local_timeout())
+    try:
+        # No transport retries: the request is deterministic (seed, temperature 0), so sending it again would
+        # spend minutes of a laptop's time for the same answer. The caller retries with its own temperature.
+        data = _post(base + "/chat/completions", payload, headers, _local_timeout(), retry=False)
+    except RuntimeError as exc:
+        text = str(exc)
+        if "exceed_context_size" in text or "exceeds the available context size" in text:
+            raise RuntimeError("the prompt is longer than the model's context window; use a model with a larger "
+                               "context, or a smaller objective") from exc
+        if "does not match the expected" in text:
+            raise RuntimeError("the model's answer did not follow the required format (the server could not parse it)") from exc
+        if "Connection refused" in text or "Errno 111" in text or "10061" in text:
+            raise RuntimeError(f"the model server at {base} is not running") from exc
+        raise
     choice = data["choices"][0]
     if choice.get("finish_reason") == "length":
         raise RuntimeError("reply truncated at max_tokens")

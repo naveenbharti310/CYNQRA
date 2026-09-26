@@ -15,6 +15,16 @@ LINE = re.compile(r"^(\w+) \(([\w.]+)\) \.\.\. (ok|FAIL|ERROR|skipped.*|expected
 HEAD = re.compile(r"^(\w+) \(([\w.]+)\)$")  # verbose output puts a docstring on the next line
 TAIL = re.compile(r" \.\.\. (ok|FAIL|ERROR|skipped.*|expected failure|unexpected success)$")
 VERDICTS = ("VERIFIED", "REJECTED", "REQUIRES_REWORK", "REQUIRES_HUMAN", "INCONCLUSIVE")
+NO_WINDOW = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW: tests and apps open no console on Windows
+
+
+def python_exe() -> str:
+    """The interpreter for workers' tests and deployed apps. The Windows desktop app runs under
+    pythonw.exe, which has no console; its children use the python.exe beside it, with no window."""
+    exe = Path(sys.executable)
+    if exe.name.lower() == "pythonw.exe" and (exe.parent / "python.exe").exists():
+        return str(exe.parent / "python.exe")
+    return sys.executable
 
 
 def clean_env(extra: dict | None = None) -> dict:
@@ -22,6 +32,7 @@ def clean_env(extra: dict | None = None) -> dict:
     keep = {k: os.environ[k] for k in ("PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "COMSPEC") if k in os.environ}
     keep["PYTHONDONTWRITEBYTECODE"] = "1"
     keep["PYTHONIOENCODING"] = "utf-8"
+    keep["PYTHONUTF8"] = "1"
     keep.update(extra or {})
     return keep
 
@@ -33,8 +44,9 @@ def run_unittests(folder: Path, timeout: int = 120) -> dict:
         return {"ran": 0, "passed": False, "tests": [], "failed": [], "output": "no test files", "returncode": None}
     try:
         proc = subprocess.run(
-            [sys.executable, "-m", "unittest", "discover", "-s", str(folder), "-p", "test_*.py", "-v"],
-            cwd=str(folder), capture_output=True, text=True, timeout=timeout, env=clean_env(),
+            [python_exe(), "-m", "unittest", "discover", "-s", str(folder), "-p", "test_*.py", "-v"],
+            cwd=str(folder), capture_output=True, encoding="utf-8", errors="replace", timeout=timeout, env=clean_env(),
+            creationflags=NO_WINDOW,
         )
         out = (proc.stdout or "") + (proc.stderr or "")
         code = proc.returncode
