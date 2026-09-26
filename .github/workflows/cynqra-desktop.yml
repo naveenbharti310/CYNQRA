@@ -2,11 +2,12 @@
 # fresh GitHub machine the way a user would and check it with a real open model.
 #
 #   every push             unit tests; build; install; self-test; open the window; a real model
-#                          structures an objective and writes code that passes its tests: Qwen3.5 9B
-#                          (the model a 16 GB laptop gets) on Windows and Linux, Qwen3.5 4B on the
-#                          7 GB macOS machine
-#   "[e2e]" in the commit  also a whole Cynqra run with Qwen3.5 9B on Linux and Windows: from the
-#                          founder's sentence to a deployed, verified product
+#                          structures an objective and writes code that passes its tests: Qwen3.6
+#                          35B-A3B 2-bit (the model a 16 GB laptop gets) on Windows and Linux, Qwen3.5
+#                          4B on the 7 GB macOS machine; launch like a user and quit; on Windows also
+#                          uninstall and reinstall into a folder with spaces and accents
+#   "[e2e]" in the commit  also a whole Cynqra run, from the founder's sentence to a deployed, verified
+#                          product: the 16 GB model on Linux and Windows, gpt-oss 20B on Linux
 #   "[release]"            also publishes the installers as a GitHub prerelease
 name: cynqra-desktop
 
@@ -23,7 +24,6 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  E2E_MODEL: qwen3.5-9b
   E2E_OBJECTIVE: >-
     I run a small bakery and my staff keep losing track of custom cake orders. I want a simple internal web
     page where they can log an order with the pickup date, see what is due in the next few days, and mark
@@ -46,9 +46,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {os: windows-latest, target: windows-x64, model: qwen3.5-9b}
+          - {os: windows-latest, target: windows-x64, model: qwen3.6-35b-a3b-q2}
           - {os: macos-latest, target: macos-arm64, model: qwen3.5-4b}
-          - {os: ubuntu-latest, target: linux-x64, model: qwen3.5-9b}
+          - {os: ubuntu-latest, target: linux-x64, model: qwen3.6-35b-a3b-q2}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 150
     env:
@@ -90,13 +90,17 @@ jobs:
 
       # ---- check the installed app ---------------------------------------------------------------
       - name: Self-test (bundled Python and llama-server, app server, engine, model files on Hugging Face)
+        timeout-minutes: 10
         run: $CYNQRA --selftest --online
       - name: Open the window and load the app
+        timeout-minutes: 5
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a $CYNQRA --window-test; else $CYNQRA --window-test; fi
       - name: A real open model on this machine (download, llama-server, objective, code that passes its tests)
+        timeout-minutes: 75
         run: $CYNQRA --check-model ${{ matrix.model }}
       - name: Launch like a user (Start menu shortcut), let the window load, Quit
+        timeout-minutes: 10
         if: ${{ !cancelled() && runner.os == 'Windows' }}
         shell: pwsh
         run: |
@@ -116,6 +120,11 @@ jobs:
           $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
           [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
           $bmp.Save("$PWD\out\windows-app-window.png")
+          $w = [Math]::Min(1280, $b.Width); $h = [int]($b.Height * $w / $b.Width)
+          $small = New-Object System.Drawing.Bitmap $bmp, $w, $h
+          $jpg = "$PWD\out\windows-app-window.jpg"
+          $small.Save($jpg, [System.Drawing.Imaging.ImageFormat]::Jpeg)
+          "SCREENSHOT-BEGIN"; [Convert]::ToBase64String([IO.File]::ReadAllBytes($jpg)) -split '(.{1,120})' | Where-Object { $_ }; "SCREENSHOT-END"
           if ($st.window_polls -lt 1) { throw "the Cynqra window did not load the app (no polls from its page)" }
           Invoke-RestMethod -Method Post "$url/api/app/quit" -Body '{}' -ContentType 'application/json'
           $p.WaitForExit(30000) | Out-Null
@@ -124,6 +133,7 @@ jobs:
           Get-Content "$data\app.log" -Tail 15
           "PASS: launched from the Start menu, the Edge app window loaded Cynqra, quit cleanly"
       - name: Uninstall, then reinstall into a folder with spaces and accents
+        timeout-minutes: 10
         if: ${{ !cancelled() && runner.os == 'Windows' }}
         shell: pwsh
         run: |
@@ -136,13 +146,14 @@ jobs:
           "PASS: uninstalled; downloaded models kept"
           $odd = "$env:RUNNER_TEMP\Program Files Tést\Cynqra Ü"
           $setup = Get-ChildItem dist\Cynqra-Setup-*.exe | Select-Object -First 1
-          Start-Process $setup.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$odd" -Wait
+          Start-Process $setup.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=""$odd""" -Wait
           if (-not (Test-Path "$odd\python\pythonw.exe")) { throw "not installed at $odd" }
           $env:CYNQRA_DATA_DIR = "$env:RUNNER_TEMP\Données de l'équipe\Cynqra"
           & "$odd\python\python.exe" -X utf8 "$odd\app\desktop.py" --selftest
           if ($LASTEXITCODE -ne 0) { throw "self-test failed from a path with spaces and accents" }
           "PASS: installed and self-tested at '$odd' with data in '$env:CYNQRA_DATA_DIR'"
       - name: Launch like a user (open Cynqra.app), let the window load, Quit
+        timeout-minutes: 10
         if: ${{ !cancelled() && runner.os != 'Windows' }}
         run: |
           if [ "$RUNNER_OS" = "macOS" ]; then DATA="$HOME/Library/Application Support/Cynqra"; else DATA="$HOME/.local/share/cynqra"; fi
@@ -184,8 +195,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {os: ubuntu-latest, target: linux-x64}
-          - {os: windows-latest, target: windows-x64}
+          - {os: ubuntu-latest, target: linux-x64, model: qwen3.6-35b-a3b-q2}
+          - {os: windows-latest, target: windows-x64, model: qwen3.6-35b-a3b-q2}
+          - {os: ubuntu-latest, target: linux-x64, model: gpt-oss-20b}
+    name: e2e (${{ matrix.target }}, ${{ matrix.model }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 358
     defaults:
@@ -211,7 +224,7 @@ jobs:
             "CYNQRA=$env:HOME/.local/bin/cynqra" | Out-File -Append $env:GITHUB_ENV
           }
       - name: The whole Cynqra journey with a real model, through the app's own API
-        run: $CYNQRA --e2e $E2E_MODEL "$E2E_OBJECTIVE" --max-minutes 340
+        run: $CYNQRA --e2e ${{ matrix.model }} "$E2E_OBJECTIVE" --max-minutes 340
       - name: Collect the report and the product the organization built
         if: always()
         run: |
@@ -223,7 +236,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: cynqra-e2e-${{ matrix.target }}
+          name: cynqra-e2e-${{ matrix.target }}-${{ matrix.model }}
           path: out/
 
   release:

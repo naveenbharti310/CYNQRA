@@ -174,15 +174,18 @@ class DownloadTests(DesktopBase):
         self.assertEqual(rt.download(MODEL).read_bytes(), self.blob)
 
     def test_catalog_recommends_by_memory(self):
-        self.assertEqual(runtime.recommended(16.0), "qwen3.5-9b")
-        self.assertEqual(runtime.recommended(24.0), "qwen3.5-9b")
+        self.assertEqual(runtime.recommended(15.6), "qwen3.6-35b-a3b-q2")  # a 16 GB laptop reports about 15.6
+        self.assertEqual(runtime.recommended(24.0), "qwen3.6-35b-a3b-iq3")
         self.assertEqual(runtime.recommended(32.0), "qwen3.6-35b-a3b")
-        self.assertEqual(runtime.recommended(None), "qwen3.5-9b")
+        self.assertEqual(runtime.recommended(11.5), "qwen3.5-9b")
+        self.assertEqual(runtime.recommended(8.0), "qwen3.5-4b")
+        self.assertEqual(runtime.recommended(None), "qwen3.6-35b-a3b-q2")
         rt = self.runtime()
-        rt.ram_gb = 16.0
+        rt.ram_gb = 15.6
         cat = {m["id"]: m for m in rt.catalog()}
-        self.assertTrue(cat["qwen3.5-9b"]["recommended"])
+        self.assertTrue(cat["qwen3.6-35b-a3b-q2"]["recommended"])
         self.assertFalse(cat["qwen3.6-35b-a3b"]["fits"])
+        self.assertNotIn("qwen3.6-35b-a3b-iq2", cat)  # failed the race: not offered
         self.assertTrue(all(m["files"] and m["ctx"] >= 24576 for m in runtime.CATALOG))
 
 

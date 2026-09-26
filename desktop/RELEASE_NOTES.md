@@ -8,8 +8,9 @@ No account, no API key; after the one-time model download nothing leaves the mac
 - **Mac (Apple silicon):** open `Cynqra-…-macos-arm64.dmg`, drag Cynqra to Applications. First open: System Settings > Privacy & Security > *Open Anyway* (not notarized).
 - **Linux:** `tar xzf Cynqra-…-linux-x64.tar.gz && ./Cynqra/install.sh`
 
-On first launch, pick the recommended model: **Qwen3.6 35B-A3B** (20.6 GB) with 32 GB of memory or
-more, **Qwen3.5 9B** (5.3 GB) with 16 to 24 GB. The app downloads it once and runs it locally.
+On first launch, pick the recommended model: **Qwen3.6 35B-A3B**, the strongest open coding model that
+fits a laptop, in the size your memory holds (20.6 GB for 32 GB and up, 12.3 GB for 24 GB, 11.4 GB for
+16 GB). The app downloads it once and runs it locally, on the GPU when there is a suitable one.
 
 The full guide, with what to test and troubleshooting: [CYNQRA_DESKTOP.md](https://github.com/naveenbharti310/Passway/blob/cynqra/CYNQRA_DESKTOP.md)
 

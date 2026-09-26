@@ -30,53 +30,59 @@ HF = os.environ.get("CYNQRA_HF_BASE", "https://huggingface.co").rstrip("/")
 NO_WINDOW = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW: no console flashes up on Windows
 GB = 1024 ** 3
 
-# The research's picks. Each model names the exact file at its publisher, then mirrors of the same
-# quantization. size_gb is the download in GiB; min_gb the machine memory it needs to run beside the app.
+# The models, best first. Each names the exact file at its publisher, then mirrors of the same quantization.
+# size_gb is the download in GiB; min_gb the machine memory it needs beside the app. The choices by memory
+# come from the research (poc/research/) and a measured race on a 16 GB machine without a GPU
+# (.github/workflows/cynqra-model-race.yml, 26 Sep 2026): on Cynqra's own work, Qwen3.6 35B-A3B at 2 and 3
+# bits read about twice as fast as the dense Qwen3.5 9B and wrote about 1.5 times as fast, and still passed
+# with 5 GB of the 16 held by other programs. The smallest 2-bit file failed and is kept out of the list.
 CATALOG = [
     {"id": "qwen3.6-35b-a3b", "name": "Qwen3.6 35B-A3B", "size_gb": 20.6, "min_gb": 28,
      "ctx": 32768, "predict": 8192, "think": "false",
      "files": [("unsloth/Qwen3.6-35B-A3B-GGUF", "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"),
                ("bartowski/Qwen_Qwen3.6-35B-A3B-GGUF", "Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf")],
-     "about": "The best choice with 32 GB of memory or more. The strongest open coding model that fits a "
-              "laptop; only 3B of its 35B parameters work on each word, so it is fast even without a GPU."},
-    {"id": "qwen3.5-9b", "name": "Qwen3.5 9B", "size_gb": 5.3, "min_gb": 12,
+     "about": "The best: the strongest open coding model that fits a laptop, at full 4-bit quality. Only 3B of "
+              "its 35B parameters work on each word, so it is fast even without a GPU. For 32 GB or more."},
+    {"id": "qwen3.6-35b-a3b-iq3", "name": "Qwen3.6 35B-A3B, 3-bit", "size_gb": 12.3, "min_gb": 20,
      "ctx": 24576, "predict": 6144, "think": "false",
-     "files": [("unsloth/Qwen3.5-9B-GGUF", "Qwen3.5-9B-Q4_K_M.gguf"),
-               ("lmstudio-community/Qwen3.5-9B-GGUF", "Qwen3.5-9B-Q4_K_M.gguf"),
-               ("bartowski/Qwen_Qwen3.5-9B-GGUF", "Qwen_Qwen3.5-9B-Q4_K_M.gguf")],
-     "about": "The choice for 16 to 24 GB. Good at following Cynqra's formats; a run takes one to a few "
-              "hours on a laptop without a GPU."},
+     "files": [("unsloth/Qwen3.6-35B-A3B-GGUF", "Qwen3.6-35B-A3B-UD-IQ3_XXS.gguf")],
+     "about": "The same model compressed to 3 bits a weight, for 24 GB. Passed Cynqra's checks in the race, "
+              "reading about twice as fast as Qwen3.5 9B."},
+    {"id": "qwen3.6-35b-a3b-q2", "name": "Qwen3.6 35B-A3B, 2-bit", "size_gb": 11.4, "min_gb": 13,
+     "ctx": 24576, "predict": 6144, "think": "false",
+     "files": [("unsloth/Qwen3.6-35B-A3B-GGUF", "Qwen3.6-35B-A3B-UD-Q2_K_XL.gguf")],
+     "about": "The same model compressed to under 3 bits a weight, for 16 GB. In the race it wrote code that "
+              "passed its tests first time, even with 5 GB held by other programs."},
+    {"id": "gpt-oss-20b", "name": "gpt-oss 20B", "size_gb": 11.3, "min_gb": 13,
+     "ctx": 32768, "predict": 8192, "think": "low",
+     "files": [("ggml-org/gpt-oss-20b-GGUF", "gpt-oss-20b-MXFP4.gguf")],
+     "about": "OpenAI's open model, a different family to compare with. 3.6B of 21B parameters work per word; "
+              "the fastest writer in the race. Its reasoning can be kept low, not off."},
     {"id": "qwen3.6-27b", "name": "Qwen3.6 27B", "size_gb": 15.7, "min_gb": 32,
      "ctx": 32768, "predict": 8192, "think": "false",
      "files": [("unsloth/Qwen3.6-27B-GGUF", "Qwen3.6-27B-Q4_K_M.gguf")],
      "about": "Stronger than 35B-A3B on hard code but three to four times slower: every parameter works on "
               "every word. For a Mac with 32 GB or more, or a GPU with 24 GB."},
-    # Candidates for 16 to 24 GB laptops, measured against Qwen3.5 9B before any of them is offered
-    # (hidden: true keeps a model out of the app's list; desktop.py --check-model can still run it).
-    {"id": "qwen3.6-35b-a3b-iq3", "name": "Qwen3.6 35B-A3B (3-bit)", "size_gb": 12.3, "min_gb": 20, "hidden": True,
+    {"id": "qwen3.5-9b", "name": "Qwen3.5 9B", "size_gb": 5.3, "min_gb": 10,
      "ctx": 24576, "predict": 6144, "think": "false",
-     "files": [("unsloth/Qwen3.6-35B-A3B-GGUF", "Qwen3.6-35B-A3B-UD-IQ3_XXS.gguf")],
-     "about": "The best model, compressed to 3 bits a weight so it fits 24 GB."},
-    {"id": "qwen3.6-35b-a3b-q2", "name": "Qwen3.6 35B-A3B (2-bit)", "size_gb": 11.4, "min_gb": 16, "hidden": True,
-     "ctx": 24576, "predict": 6144, "think": "false",
-     "files": [("unsloth/Qwen3.6-35B-A3B-GGUF", "Qwen3.6-35B-A3B-UD-Q2_K_XL.gguf")],
-     "about": "The best model, compressed to about 2.7 bits a weight so it fits 16 GB."},
-    {"id": "qwen3.6-35b-a3b-iq2", "name": "Qwen3.6 35B-A3B (2-bit, smallest)", "size_gb": 10.7, "min_gb": 16, "hidden": True,
-     "ctx": 24576, "predict": 6144, "think": "false",
-     "files": [("unsloth/Qwen3.6-35B-A3B-GGUF", "Qwen3.6-35B-A3B-UD-IQ2_M.gguf")],
-     "about": "The best model at its smallest useful size."},
-    {"id": "gpt-oss-20b", "name": "gpt-oss 20B", "size_gb": 11.3, "min_gb": 16, "hidden": True,
-     "ctx": 32768, "predict": 8192, "think": "low",
-     "files": [("ggml-org/gpt-oss-20b-GGUF", "gpt-oss-20b-MXFP4.gguf")],
-     "about": "OpenAI's open model: 3.6B of 21B parameters work per token. Its reasoning can be kept low, not off."},
+     "files": [("unsloth/Qwen3.5-9B-GGUF", "Qwen3.5-9B-Q4_K_M.gguf"),
+               ("lmstudio-community/Qwen3.5-9B-GGUF", "Qwen3.5-9B-Q4_K_M.gguf"),
+               ("bartowski/Qwen_Qwen3.5-9B-GGUF", "Qwen_Qwen3.5-9B-Q4_K_M.gguf")],
+     "about": "A smaller download for 10 to 12 GB. Passed Cynqra's checks, at about half the speed of the "
+              "Qwen3.6 35B-A3B models."},
     {"id": "qwen3.5-4b", "name": "Qwen3.5 4B", "size_gb": 2.6, "min_gb": 6,
      "ctx": 24576, "predict": 6144, "think": "false",
      "files": [("unsloth/Qwen3.5-4B-GGUF", "Qwen3.5-4B-Q4_K_M.gguf")],
      "about": "The smallest. Quick to download and run; checks that everything works on a weak machine, "
               "but its code fails Cynqra's checks more often."},
+    {"id": "qwen3.6-35b-a3b-iq2", "name": "Qwen3.6 35B-A3B, 2-bit (smallest)", "size_gb": 10.7, "min_gb": 13,
+     "hidden": True, "ctx": 24576, "predict": 6144, "think": "false",
+     "files": [("unsloth/Qwen3.6-35B-A3B-GGUF", "Qwen3.6-35B-A3B-UD-IQ2_M.gguf")],
+     "about": "Too lossy: in the race one test still failed after three rounds of fixes."},
 ]
 BY_ID = {m["id"]: m for m in CATALOG}
-DEFAULT_BIG, DEFAULT_SMALL = "qwen3.6-35b-a3b", "qwen3.5-9b"
+# Largest first: the best model whose memory need this machine meets.
+TIERS = ["qwen3.6-35b-a3b", "qwen3.6-35b-a3b-iq3", "qwen3.6-35b-a3b-q2", "qwen3.5-9b", "qwen3.5-4b"]
 
 
 class ModelRuntimeError(RuntimeError):
@@ -108,7 +114,10 @@ def total_ram_gb() -> float | None:
 
 
 def recommended(ram_gb: float | None) -> str:
-    return DEFAULT_BIG if (ram_gb or 0) >= BY_ID[DEFAULT_BIG]["min_gb"] else DEFAULT_SMALL
+    """The best model this much memory runs well. Unknown memory gets the 16 GB choice."""
+    if ram_gb is None:
+        return "qwen3.6-35b-a3b-q2"
+    return next((m for m in TIERS if ram_gb >= BY_ID[m]["min_gb"]), TIERS[-1])
 
 
 _TLS: list = []  # the TLS context that works on this machine, once found

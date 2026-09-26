@@ -39,12 +39,31 @@ Cynqra shows the models it can run, with the one for your laptop's memory marked
 (it resumes if interrupted and checks the file's SHA-256), starts it with llama.cpp, and goes to
 the first screen.
 
-| Model | Download | For | Why |
+| Laptop memory | Recommended model | Download |
+| --- | --- | --- |
+| 32 GB or more | **Qwen3.6 35B-A3B** (4-bit): the strongest open coding model that fits a laptop | 20.6 GB |
+| 24 GB | **Qwen3.6 35B-A3B, 3-bit** | 12.3 GB |
+| 16 GB | **Qwen3.6 35B-A3B, 2-bit** | 11.4 GB |
+| 8 to 12 GB | Qwen3.5 9B, or Qwen3.5 4B below 10 GB | 5.3 / 2.6 GB |
+
+Also offered: **gpt-oss 20B** (OpenAI's open model, 11.3 GB, 16 GB and up) and **Qwen3.6 27B**
+(dense: stronger on hard code, three to four times slower; for 32 GB Macs).
+
+Qwen3.6 35B-A3B is fast because only 3B of its 35B parameters work on each word. The 2- and 3-bit
+files are the same model compressed so it fits 16 and 24 GB. They were chosen by a race on a 16 GB
+machine without a GPU, doing Cynqra's own work (structure an objective, then write a module and its
+tests):
+
+| Model | Passed | Reads (tokens/s) | Writes (tokens/s) |
 | --- | --- | --- | --- |
-| **Qwen3.6 35B-A3B** | 20.6 GB | 32 GB of memory or more | The strongest open coding model that fits a laptop. Only 3B of its 35B parameters work on each token, so it is fast even without a GPU |
-| **Qwen3.5 9B** | 5.3 GB | 16 to 24 GB | Follows Cynqra's formats well and leaves room in 16 GB |
-| Qwen3.6 27B | 15.7 GB | 32 GB Mac, or a 24 GB GPU | Stronger on hard code, three to four times slower |
-| Qwen3.5 4B | 2.6 GB | Any | Quick check that everything works; its code fails checks more often |
+| Qwen3.6 35B-A3B, 2-bit | yes, code right first time | 22 | 7.7 |
+| same, with 5 GB held by other programs | yes, code right first time | 24 | 5.2 |
+| Qwen3.6 35B-A3B, 3-bit | yes, after one fix | 23 | 7.7 |
+| gpt-oss 20B | yes, code right first time | 17 | 9.1 |
+| Qwen3.5 9B | yes, after one fix | 12 | 5.1 |
+
+That machine has 4 slow processor threads; a current laptop is two to four times faster, and a Mac or
+a graphics card much more.
 
 The choice comes from Cynqra's September 2026 research (`poc/research/`). Macs use their GPU
 through Metal automatically. On Windows and Linux, **Graphics card: Automatic** uses an NVIDIA, AMD
@@ -72,7 +91,7 @@ product. Closing the window does the same. **New run** archives the run and star
 
 How long a run takes depends on the laptop. On a processor alone a step takes minutes, and a whole
 run of one to two dozen model calls takes from under an hour (35B-A3B on a fast machine, or any Mac)
-to a few hours (9B on a 16 GB laptop without a GPU). The measured numbers from GitHub's machines are
+to a few hours (a 16 GB laptop without a GPU). The measured numbers from GitHub's machines are
 in the release notes.
 
 ## Where things are
@@ -96,9 +115,9 @@ The app has three built-in checks. Run them from a terminal with the app's own P
 
 - `$C --selftest --online`: the bundled Python and llama-server run, the app serves its page, the
   engine runs tests and deploys on this machine, and every model file is where the app expects it.
-- `$C --check-model qwen3.5-9b`: the model downloads and starts, structures an objective, and writes
+- `$C --check-model qwen3.6-35b-a3b-q2`: the model downloads and starts, structures an objective, and writes
   a small module that must pass its own tests (fixing it for up to three rounds).
-- `$C --e2e qwen3.5-9b "your objective"`: a whole unattended run through the app's own API,
+- `$C --e2e qwen3.6-35b-a3b-q2 "your objective"`: a whole unattended run through the app's own API,
   approving every decision; it writes a report with every model call's real token counts and time.
 
 ## Troubleshooting
@@ -136,4 +155,4 @@ python-build-standalone, llama.cpp's `llama-server` release build (b11201), and 
 GitHub Actions (`.github/workflows/cynqra-desktop.yml`) builds all three on GitHub's Windows, macOS
 and Linux machines, installs each one the way a user would, runs the self-test, opens the window,
 and has a real model do Cynqra's work. With `[e2e]` in the commit message it also runs a whole
-Cynqra journey with Qwen3.5 9B on Windows and Linux. See `desktop/README.md`.
+Cynqra journey with the 16 GB model on Windows and Linux. See `desktop/README.md`.

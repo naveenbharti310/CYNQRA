@@ -139,8 +139,10 @@ def open_window(desk: Desktop, loaded: threading.Event | None = None) -> None:
     """Show the app and return when its window is closed or Quit is chosen."""
     if loaded is not None:
         def watch_load():
+            t0 = time.time()
             while not desk.app.quit.is_set():
                 if desk.app.window_polls:
+                    print(f"  the window's page polled the app after {time.time() - t0:.1f} s", flush=True)
                     loaded.set()
                     desk.app.quit.set()
                 time.sleep(0.2)
@@ -184,10 +186,11 @@ def _webview_window(desk: Desktop, webview) -> None:
 
     def watch_quit():
         desk.app.quit.wait()
+        print("  closing the window", flush=True)
         try:
             win.destroy()
-        except Exception:  # noqa: BLE001 - the window may already be gone
-            pass
+        except Exception as exc:  # noqa: BLE001 - the window may already be gone
+            print(f"  closing the window: {exc}", flush=True)
     threading.Thread(target=watch_quit, daemon=True).start()
     try:
         from AppKit import NSApplication, NSImage  # the Dock shows Cynqra's icon, not Python's
@@ -195,7 +198,9 @@ def _webview_window(desk: Desktop, webview) -> None:
             NSApplication.sharedApplication().setApplicationIconImage_(NSImage.alloc().initWithContentsOfFile_(str(ICON)))
     except Exception:  # noqa: BLE001 - cosmetic only
         pass
+    print("  pywebview window created; starting its loop", flush=True)
     webview.start()
+    print("  pywebview loop ended", flush=True)
 
 
 def running_instance(d: Path) -> str | None:
@@ -374,13 +379,21 @@ def window_test(args) -> int:
     loaded = threading.Event()
     timer = threading.Timer(args.timeout, desk.app.quit.set)
     timer.start()
+
+    def watchdog():  # a window toolkit that never hands control back must fail the test, not hang it
+        time.sleep(args.timeout + 45)
+        print(f"FAIL: the window did not close within {args.timeout + 45:.0f} s "
+              f"({'loaded' if loaded.is_set() else 'never loaded'}; {desk.app.window_polls} polls)", flush=True)
+        os._exit(1)
+    threading.Thread(target=watchdog, daemon=True).start()
     try:
         open_window(desk, loaded)
     finally:
         timer.cancel()
         desk.close()
     print(("PASS: the window opened and loaded the app" if loaded.is_set() else
-           f"FAIL: no page load within {args.timeout} s") + f" ({'pywebview' if sys.platform == 'darwin' else app_browser()})")
+           f"FAIL: no page load within {args.timeout} s") + f" ({'pywebview' if sys.platform == 'darwin' else app_browser()})",
+          flush=True)
     return 0 if loaded.is_set() else 1
 
 
