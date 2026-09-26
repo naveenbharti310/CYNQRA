@@ -461,7 +461,7 @@ class Engine:
             self.event("worker.hired", "worker", t["id"], {"role": t["role"], "intelligence": label})
 
     def _plan(self, note: str = "") -> None:
-        plan, usage = self.intel.plan(self.objective(), note=note)
+        plan, usage = self.intel.plan(self.objective()["structured"], note=note)
         self._record_call("plan", "w_pm", "plan", usage)
         order = []
         for i, t in enumerate(plan["tasks"]):

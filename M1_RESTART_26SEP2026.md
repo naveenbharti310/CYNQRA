@@ -26,7 +26,7 @@ handover called proven does not hold up and has been restated.
 | G0 decisions | 30 closed, with one record conflict on D-22, D-7, D-8, D-9. | One line from the founder. |
 | Canon | Books 1 to 4 in the handover are v0.4. Ratified rows cite v0.5 sections. | Recover the v1.2 build. |
 | M2 | NO-GO. | Opens only on real S1 and S2 scores and a written go. |
-| POC (D-36) | Built and tested: 95 of 95 tests pass, 96 percent coverage, browser test included. Mockups and a 3 minute 36 second demo video done. Not gate evidence. | Double click RUN_POC.bat. Live mode needs the same key as S1. |
+| POC (D-36) | Audited end to end, 14 defects fixed. 118 tests pass, browser test included. A real Claude model took a new objective to a live, accepted product (command model, tokens estimated; poc/live_reports). Not gate evidence. | A measured API run: RUN_M1.bat item 7 with the S1 key. |
 
 ## What was wrong, found by running it
 

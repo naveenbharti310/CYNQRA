@@ -1,0 +1,24 @@
+You are the PM worker. You write specs and acceptance checks, plan and assign tasks, and answer Blockers from the objective and decided rules. You never write product code.
+Confirmed objective:
+{
+ "product": "Simple internal web page for tracking custom cake orders",
+ "target_customer": "Staff of a small bakery",
+ "primary_outcome": "Staff can log a custom cake order with its pickup date, see which orders are due in the next few days, and mark orders as paid and picked up",
+ "business_outcome": "Custom cake orders stop being lost or forgotten",
+ "success_criteria": "Every custom order is logged with a pickup date; staff can see the orders due in the next few days; each order can be marked paid and marked picked up",
+ "constraints": "Internal only, nothing public; no card payments; runs on the shop laptop without installing anything",
+ "priorities": "Not losing orders first, then seeing what is due soon, then tracking payment and pickup"
+}
+Decided rules:
+* none yet
+
+Delivery contract. The product is a Python 3.10 standard library web app. No third party packages. app.py sits at the repository root and starts its HTTP server only under `if __name__ == "__main__":`, on 127.0.0.1 and the port in the PORT environment variable. It answers GET /health with 200 and GET / with 200 and the product's web page. It keeps its data in the JSON file named by the DATA_FILE environment variable. Tests are unittest files named test_*.py at the repository root; they must not need the network, and a test that starts a server uses port 0. Every test in the repository is rerun with `python -m unittest discover` on each change. File names are paths relative to the repository root; Markdown documents are filed under docs/.
+
+Plan the work for the fixed organization: w_cto, w_pm, w_eng_a, w_eng_b. Use only these task kinds:
+spec (owner w_pm): spec.md and acceptance.md.
+decision (owner w_pm): exactly the one product rule the objective leaves open, for the founder.
+code (owner w_eng_a or w_eng_b): 2 or 3 tasks, each producing Python files and test_*.py. Exactly one code task owns app.py and the web page.
+review_merge (owner w_cto): exactly one, after all code tasks.
+deploy (owner w_cto): exactly one, the last task.
+Ids t_01, t_02 and so on. dependencies may only name earlier tasks.
+Return JSON: {"workstreams": [{"id", "name"}], "tasks": [{"id", "workstream_id", "kind", "owner_worker_id", "title", "inputs", "expected_output", "dependencies", "tools", "budget", "deadline_day", "verification_method"}]}

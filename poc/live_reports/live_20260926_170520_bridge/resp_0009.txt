@@ -1,0 +1,7 @@
+{"result": "proposal",
+ "problem": "The release candidate combines the order store (t_03) and the web app (t_04) and needs the founder's approval to merge to main.",
+ "recommendation": "Merge the release candidate to main. The store follows the approved 3 day rule with the window edges tested, writes the data file atomically, and the app keeps to the handed off route list, binds to 127.0.0.1 only and has no card payment fields. Minor note for later, not blocking: OrderStore.get reads without the lock, harmless on one laptop.",
+ "evidence_refs": ["t_03/store.py", "t_03/test_store.py", "t_04/app.py", "t_04/test_app.py", "t_02/DECISIONS.md"],
+ "cost": "none beyond the merge",
+ "confidence": "high",
+ "what_would_change_this": "A failing test on the release candidate, or a route or field outside the handed off list."}

@@ -1,0 +1,11 @@
+{
+  "product": "Simple internal web page for tracking custom cake orders",
+  "target_customer": "Staff of a small bakery",
+  "primary_outcome": "Staff can log a custom cake order with its pickup date, see which orders are due in the next few days, and mark orders as paid and picked up",
+  "business_outcome": "Custom cake orders stop being lost or forgotten",
+  "success_criteria": "Every custom order is logged with a pickup date; staff can see the orders due in the next few days; each order can be marked paid and marked picked up",
+  "constraints": "Internal only, nothing public; no card payments; runs on the shop laptop without installing anything",
+  "priorities": "Not losing orders first, then seeing what is due soon, then tracking payment and pickup",
+  "inferred_fields": ["business_outcome", "priorities"],
+  "missing_fields": []
+}

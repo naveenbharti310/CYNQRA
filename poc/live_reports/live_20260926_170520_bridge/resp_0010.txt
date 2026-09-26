@@ -1,0 +1,7 @@
+{"result": "proposal",
+ "problem": "Main holds the verified order tracker; it is not running for the staff yet. A production deploy is HIGH risk and needs the founder.",
+ "recommendation": "Deploy main to the shop laptop as a local process on 127.0.0.1, then check GET /health and GET / on the live URL; if either fails, stop the new process and keep the previous one.",
+ "evidence_refs": ["t_05 merge to main, full test run passed", "preview health and smoke run by the deployment service"],
+ "cost": "one local process, no hosting cost",
+ "confidence": "high",
+ "what_would_change_this": "A failed preview health or smoke check, or the founder wanting it reachable from other machines, which the objective rules out."}

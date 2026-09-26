@@ -83,3 +83,39 @@ tokens; and poc/live_check.py is the real model test, reachable from RUN_M1.bat 
 
 102 POC tests pass (7 new), 15 spike tests and 3 kit tests pass. The real model run itself
 is still unrun here: this environment has no API key. Its report lands in poc/live_reports.
+
+## 26 September, third pass: end to end audit and a real model run
+
+Read every POC module against what a real model sends, not what the scripted demo sends.
+Fourteen defects, all fixed with tests in tests/test_real_model_paths.py (16 tests):
+
+1. The planner was shown an empty objective: the whole record was passed where the
+   structured fields belong. Found by the real model run below; the demo ignores its inputs.
+2. Task ids from the model became URL and decision ids; an id like T1 or task-1 made its
+   decisions impossible to approve. Plans are renumbered t_01 onward, dependencies remapped,
+   budgets coerced, and a refused plan is retried once with the reason.
+3. A reply with no files stopped the whole run as if the provider had failed. It is now a
+   protocol error: rework, then escalation.
+4. Refused writes looped without end. They escalate after three attempts.
+5. A bad assignment or Blocker answer sent the task to rework with no handoff. It now
+   retries the same step, and an approved escalation returns to the step that failed.
+6. Files in subfolders were written but never verified or integrated.
+7. An app that broke the delivery contract passed its own tests and failed only at deploy,
+   where no worker could fix it. Code tasks that write app.py are now started during
+   verification: /health and / must answer, and the app's own output goes into the feedback.
+8. The delivery contract never told the model about GET /, starting the server only under
+   __main__, DATA_FILE, or where tests live.
+9. Rework showed the worker only the failure, not its own previous files; code tasks now
+   also see the repository file list.
+10. A model or network error left the run dead. Try the same step again resumes it.
+11. A planning failure left a confirmed objective with no plan and no way back.
+12. The budget breaker tripping mid write was counted against the worker.
+13. Unexpected errors dropped the HTTP connection instead of returning a message.
+14. Tests with docstrings were missing from the recorded test ids.
+
+Results: 118 POC tests pass (16 new in this pass), 15 spike tests and 3 kit tests pass.
+
+Real model run: PASS on a new objective, a bakery order tracker, with Claude answering every
+worker prompt through tests/model_bridge.py. Six of six tasks verified first pass, live,
+product tests pass on rerun, and the delivered page works in Chromium. Tokens are estimated,
+so it is not a measured API result. Details in live_reports/README.md.

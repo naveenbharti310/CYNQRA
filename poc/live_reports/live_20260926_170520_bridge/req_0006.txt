@@ -1,0 +1,81 @@
+You are Engineer A. You write Python and unittest tests inside your own workspace only.
+Confirmed objective:
+{
+ "product": "Simple internal web page for tracking custom cake orders",
+ "target_customer": "Staff of a small bakery",
+ "primary_outcome": "Staff can log a custom cake order with its pickup date, see which orders are due in the next few days, and mark orders as paid and picked up",
+ "business_outcome": "Custom cake orders stop being lost or forgotten",
+ "success_criteria": "Every custom order is logged with a pickup date; staff can see the orders due in the next few days; each order can be marked paid and marked picked up",
+ "constraints": "Internal only, nothing public; no card payments; runs on the shop laptop without installing anything",
+ "priorities": "Not losing orders first, then seeing what is due soon, then tracking payment and pickup"
+}
+Decided rules:
+* Due soon means a pickup date from today through the next 3 days, today included (today plus 3 days). Orders not picked up whose pickup date is before today are overdue and are listed first. Picked up orders never appear in the due list.
+
+Delivery contract. The product is a Python 3.10 standard library web app. No third party packages. app.py sits at the repository root and starts its HTTP server only under `if __name__ == "__main__":`, on 127.0.0.1 and the port in the PORT environment variable. It answers GET /health with 200 and GET / with 200 and the product's web page. It keeps its data in the JSON file named by the DATA_FILE environment variable. Tests are unittest files named test_*.py at the repository root; they must not need the network, and a test that starts a server uses port 0. Every test in the repository is rerun with `python -m unittest discover` on each change. File names are paths relative to the repository root; Markdown documents are filed under docs/.
+
+Task t_03: Order store. Expected output: store.py and test_store.py.
+Handoff: {"acceptance_check": "Write store.py and test_store.py. store.py is standard library only and keeps orders in one JSON file whose path is passed in. Interface, used by the web app task, do not rename: OrderStore(path) loads the file if it exists; add(customer, cake, pickup_date, phone='', notes='') returns the new order dict and raises ValueError with a clear message when customer or cake is blank or pickup_date is not a real YYYY-MM-DD date; get(order_id); all(); set_paid(order_id, paid: bool); set_picked_up(order_id, picked_up: bool) (both raise KeyError for an unknown id and return the updated order); open_orders() lists orders not picked up, soonest pickup first; due_soon(today: datetime.date) returns orders not picked up whose pickup_date is before today (overdue, listed first) or from today through today plus 3 days, today included, soonest first. Order dict keys: id, customer, cake, pickup_date, phone, notes, paid, picked_up, created_at; paid and picked_up start False. Every change is saved to the file at once, written atomically. Tests cover A1 to A7 including the edges of the 3 day window (today plus 3 is due, today plus 4 is not) and survival across a reload from the file.", "context_ref": "objective v1, spec t_01, due soon rule t_02", "artifacts": ["t_01/spec.md", "t_01/acceptance.md", "t_02/DECISIONS.md"]}
+Files already in the repository: ["docs/DECISIONS.md", "docs/acceptance.md", "docs/spec.md"]
+Files handed to you:
+--- DECISIONS.md ---
+## What counts as due in the next few days (dec_t_02, approved by the founder)
+
+Due soon means a pickup date from today through the next 3 days, today included (today plus 3 days). Orders not picked up whose pickup date is before today are overdue and are listed first. Picked up orders never appear in the due list.
+
+
+--- acceptance.md ---
+# Acceptance checks
+
+A1. Logging an order with customer, cake and pickup date saves it; it is still there after the app restarts (stored in the DATA_FILE JSON file).
+A2. Logging an order without a pickup date, or with a date that is not YYYY-MM-DD, is refused with a clear message. Customer and cake are required too.
+A3. The due list shows orders whose pickup date falls inside the due window decided by the founder (t_02), soonest first. Orders already picked up are not in the due list.
+A4. An order past its pickup date and not picked up is shown as overdue at the top of the due list.
+A5. Marking an order paid sets paid to yes; it can be set back to no. Paid never involves card details.
+A6. Marking an order picked up sets picked_up to yes and removes it from the due list and the open list; it can be undone.
+A7. The open list shows every order not yet picked up, whatever its date.
+A8. GET /health answers 200 and GET / shows the order page. The app binds to 127.0.0.1 only.
+A9. Nothing to install: standard library Python, the whole suite passes with python -m unittest discover.
+
+--- spec.md ---
+# Custom cake order tracker: product spec
+
+## Problem
+Bakery staff lose track of custom cake orders. Orders are forgotten or picked up unpaid.
+
+## Users
+Staff of a small bakery, on the shop laptop. Internal only: nothing public, no customer accounts.
+
+## What staff can do
+1. Log an order: customer name, what the cake is, pickup date (required), and an optional phone number and notes.
+2. See orders due in the next few days, soonest pickup first, with overdue orders that are not picked up shown on top.
+   The exact window for "the next few days" is a product rule the founder decides (task t_02).
+3. Mark an order as paid. Mark an order as picked up. Each can be undone if clicked by mistake.
+4. See every open order (not yet picked up), so nothing is lost even if it is outside the due window.
+
+## Order fields
+- id: assigned by the app
+- customer: text, required
+- cake: text, required, what to make
+- pickup_date: a date, YYYY-MM-DD, required
+- phone, notes: optional text
+- paid: yes or no, starts at no
+- picked_up: yes or no, starts at no
+- created_at: when it was logged
+
+## Constraints, stated by the founder
+- Internal only, nothing public: the app listens on 127.0.0.1 only, and there is no sign up or public page.
+- No card payments: "paid" is a checkbox staff tick when the customer has paid at the counter. The app never takes or stores card details.
+- Runs on the shop laptop without installing anything: Python standard library only, one JSON data file, no database server, no packages.
+
+## Out of scope
+Customer notifications, pricing and invoices, reports, multiple shops, user logins.
+
+## Success criteria
+- Every custom order is logged with a pickup date.
+- Staff can see the orders due in the next few days.
+- Each order can be marked paid and marked picked up.
+
+
+If a fact you need is missing and you would have to guess it, raise a Blocker instead.
+Return one JSON object: {"result": "done", "summary": "...", "files": {"name.ext": "full file content"}, "acceptance_check": "..."} or {"result": "blocked", "category": "missing_input", "description": "...", "needs_from": "w_pm"}

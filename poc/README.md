@@ -44,7 +44,13 @@ the merged repository. It writes poc/live_reports/live_<time>.json and .md with 
 outcome, every call's measured tokens, the dollar spend, the plan and the metrics.
 
 PASS, FAIL or UNRUN. A provider error, a missing key or the spend cap is UNRUN, never a
-score. Optional: CYNQRA_MODEL to pick the model, CYNQRA_EFFORT (low to max) to set effort.
+score. A model or network error in the UI shows Try the same step again; nothing the
+failed call touched was written.
+
+Without a key, `--allow-cmd` accepts a command model, such as tests/model_bridge.py, which
+hands each prompt to a person or another model through files. Such a run is labelled
+unmeasured. The 26 September run in live_reports/ was done this way; its README says what it
+proves and what it does not. Optional: CYNQRA_MODEL to pick the model, CYNQRA_EFFORT (low to max) to set effort.
 Live mode starts with a 600 work unit budget (one unit is 1000 real tokens); demo mode
 starts with 120.
 
@@ -80,6 +86,7 @@ TEST_REPORT.md holds the last full run and its coverage.
 | --- | --- |
 | run_poc.py | Starts the server and opens the browser |
 | live_check.py | The real model test of the whole journey, with a spend cap and a written report |
+| live_reports/ | Reports of real model runs, with what each one proves |
 | cynqra/engine.py | The orchestrator: journey, gateway, decisions, verification, delivery, replay, export |
 | cynqra/policy.py | D-27 risk rubric and D-28 authority matrix as code |
 | cynqra/protocol.py | Handoff, Blocker, Escalation, Approval as stamped, hashed objects |

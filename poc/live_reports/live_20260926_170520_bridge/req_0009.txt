@@ -1,0 +1,511 @@
+You are the CTO worker. You review work against the objective, decide the technical approach and propose merges and deploys. You never deploy or message anyone yourself.
+Confirmed objective:
+{
+ "product": "Simple internal web page for tracking custom cake orders",
+ "target_customer": "Staff of a small bakery",
+ "primary_outcome": "Staff can log a custom cake order with its pickup date, see which orders are due in the next few days, and mark orders as paid and picked up",
+ "business_outcome": "Custom cake orders stop being lost or forgotten",
+ "success_criteria": "Every custom order is logged with a pickup date; staff can see the orders due in the next few days; each order can be marked paid and marked picked up",
+ "constraints": "Internal only, nothing public; no card payments; runs on the shop laptop without installing anything",
+ "priorities": "Not losing orders first, then seeing what is due soon, then tracking payment and pickup"
+}
+Decided rules:
+* Due soon means a pickup date from today through the next 3 days, today included (today plus 3 days). Orders not picked up whose pickup date is before today are overdue and are listed first. Picked up orders never appear in the due list.
+
+Delivery contract. The product is a Python 3.10 standard library web app. No third party packages. app.py sits at the repository root and starts its HTTP server only under `if __name__ == "__main__":`, on 127.0.0.1 and the port in the PORT environment variable. It answers GET /health with 200 and GET / with 200 and the product's web page. It keeps its data in the JSON file named by the DATA_FILE environment variable. Tests are unittest files named test_*.py at the repository root; they must not need the network, and a test that starts a server uses port 0. Every test in the repository is rerun with `python -m unittest discover` on each change. File names are paths relative to the repository root; Markdown documents are filed under docs/.
+
+Task t_05: Review and merge the release candidate. Expected output: A merge proposal with the release candidate test run.
+Handoff: {"acceptance_check": "Review and merge the release candidate. Expected: A merge proposal with the release candidate test run. Verified by: Full test run on main.", "context_ref": "objective v1", "artifacts": ["t_03/store.py", "t_03/test_store.py", "t_04/app.py", "t_04/index.html", "t_04/test_app.py"]}
+Files handed to you:
+--- app.py ---
+"""Custom cake order tracker web app. Standard library only.
+
+Run: PORT=8000 DATA_FILE=orders.json python app.py   (listens on 127.0.0.1 only)
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+from datetime import date
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from store import OrderStore
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+TOGGLE = re.compile(r"^/api/orders/([A-Za-z0-9_-]+)/(paid|picked_up)$")
+
+
+def make_server(port: int, data_file: str | None = None) -> ThreadingHTTPServer:
+    store = OrderStore(data_file or os.environ.get("DATA_FILE") or "orders.json")
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            return
+
+        def _send(self, code: int, body, kind: str = "application/json; charset=utf-8"):
+            data = body if isinstance(body, bytes) else json.dumps(body).encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _json(self) -> dict:
+            n = int(self.headers.get("Content-Length") or 0)
+            data = json.loads(self.rfile.read(n).decode("utf-8") or "{}") if n else {}
+            if not isinstance(data, dict):
+                raise ValueError("send a JSON object")
+            return data
+
+        def do_GET(self):
+            path = self.path.split("?", 1)[0]
+            if path == "/health":
+                return self._send(200, {"ok": True})
+            if path in ("/", "/index.html"):
+                with open(os.path.join(HERE, "index.html"), "rb") as fh:
+                    return self._send(200, fh.read(), "text/html; charset=utf-8")
+            if path == "/api/orders":
+                today = date.today()
+                return self._send(200, {"today": today.isoformat(), "due": store.due_soon(today),
+                                        "open": store.open_orders()})
+            return self._send(404, {"error": "not found"})
+
+        def do_POST(self):
+            path = self.path.split("?", 1)[0]
+            try:
+                body = self._json()
+            except ValueError as exc:
+                return self._send(400, {"error": f"bad JSON: {exc}"})
+            if path == "/api/orders":
+                try:
+                    order = store.add(body.get("customer"), body.get("cake"), body.get("pickup_date"),
+                                      body.get("phone", ""), body.get("notes", ""))
+                except ValueError as exc:
+                    return self._send(400, {"error": str(exc)})
+                return self._send(201, order)
+            m = TOGGLE.match(path)
+            if m:
+                order_id, field = m.groups()
+                value = bool(body.get(field))
+                try:
+                    order = store.set_paid(order_id, value) if field == "paid" else store.set_picked_up(order_id, value)
+                except KeyError:
+                    return self._send(404, {"error": f"no order {order_id}"})
+                return self._send(200, order)
+            return self._send(404, {"error": "not found"})
+
+    return ThreadingHTTPServer(("127.0.0.1", port), Handler)
+
+
+if __name__ == "__main__":
+    server = make_server(int(os.environ.get("PORT", "8000")))
+    print(f"Order tracker on http://127.0.0.1:{server.server_address[1]}", flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+
+--- index.html ---
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cake orders</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; background: #faf7f2; color: #2b2118; }
+  main { max-width: 880px; margin: 0 auto; padding: 20px 16px 48px; }
+  h1 { font-size: 26px; margin: 0 0 16px; }
+  h2 { font-size: 18px; margin: 28px 0 8px; }
+  form { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; background: #fff;
+         border: 1px solid #e6dccf; border-radius: 10px; padding: 14px; }
+  label { display: flex; flex-direction: column; font-size: 13px; gap: 4px; }
+  input, textarea { font: inherit; padding: 7px 9px; border: 1px solid #cdbfae; border-radius: 6px; }
+  button { font: inherit; padding: 9px 14px; border: 0; border-radius: 6px; background: #8a4b2a; color: #fff; cursor: pointer; align-self: end; }
+  .error { color: #b3261e; min-height: 1.2em; margin: 6px 0 0; }
+  table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #e6dccf; border-radius: 10px; overflow: hidden; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #efe7dc; font-size: 14px; vertical-align: top; }
+  tr.overdue td { background: #fdecea; }
+  .tag { font-size: 12px; font-weight: 600; color: #b3261e; }
+  .empty { color: #7a6a5a; font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Custom cake orders</h1>
+  <form id="new-order">
+    <label>Customer <input name="customer" required></label>
+    <label>Cake <input name="cake" required placeholder="What to make"></label>
+    <label>Pickup date <input name="pickup_date" type="date" required></label>
+    <label>Phone <input name="phone"></label>
+    <label>Notes <textarea name="notes" rows="1"></textarea></label>
+    <button type="submit">Log order</button>
+  </form>
+  <p class="error" id="error" role="alert"></p>
+
+  <h2>Due soon <span class="empty" id="today"></span></h2>
+  <div id="due"></div>
+  <h2>All open orders</h2>
+  <div id="open"></div>
+</main>
+<script>
+"use strict";
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+
+async function call(path, body) {
+  const opts = body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)};
+  const r = await fetch(path, opts);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || `request failed (${r.status})`);
+  return data;
+}
+
+function table(orders) {
+  if (!orders.length) return `<p class="empty">Nothing here.</p>`;
+  const rows = orders.map((o) => `<tr class="${o.overdue ? "overdue" : ""}">
+    <td>${esc(o.pickup_date)}${o.overdue ? ' <span class="tag">OVERDUE</span>' : ""}</td>
+    <td>${esc(o.customer)}${o.phone ? `<br><small>${esc(o.phone)}</small>` : ""}</td>
+    <td>${esc(o.cake)}${o.notes ? `<br><small>${esc(o.notes)}</small>` : ""}</td>
+    <td><label><input type="checkbox" data-id="${esc(o.id)}" data-field="paid" ${o.paid ? "checked" : ""}> Paid</label></td>
+    <td><label><input type="checkbox" data-id="${esc(o.id)}" data-field="picked_up" ${o.picked_up ? "checked" : ""}> Picked up</label></td>
+  </tr>`).join("");
+  return `<table><thead><tr><th>Pickup</th><th>Customer</th><th>Cake</th><th></th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+async function load() {
+  const data = await call("/api/orders");
+  document.getElementById("today").textContent = `(today is ${data.today}, next 3 days)`;
+  document.getElementById("due").innerHTML = table(data.due);
+  document.getElementById("open").innerHTML = table(data.open);
+}
+
+document.getElementById("new-order").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const form = ev.target, err = document.getElementById("error");
+  err.textContent = "";
+  try {
+    await call("/api/orders", Object.fromEntries(new FormData(form).entries()));
+    form.reset();
+  } catch (e) { err.textContent = e.message; }
+  await load();
+});
+
+document.addEventListener("change", async (ev) => {
+  const box = ev.target;
+  if (!box.dataset || !box.dataset.field) return;
+  try { await call(`/api/orders/${box.dataset.id}/${box.dataset.field}`, {[box.dataset.field]: box.checked}); }
+  catch (e) { document.getElementById("error").textContent = e.message; }
+  await load();
+});
+
+load().catch((e) => { document.getElementById("error").textContent = e.message; });
+</script>
+</body>
+</html>
+
+--- store.py ---
+"""Custom cake order store. Standard library only, one JSON file, atomic writes."""
+from __future__ import annotations
+
+import json
+import os
+import tempfile
+import threading
+import uuid
+from datetime import date, datetime, timedelta
+
+DUE_WINDOW_DAYS = 3  # decided rule t_02: today through today plus 3 days, today included
+FIELDS = ("id", "customer", "cake", "pickup_date", "phone", "notes", "paid", "picked_up", "created_at")
+
+
+def parse_date(value) -> date:
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError("pickup date is required, as YYYY-MM-DD")
+    try:
+        return datetime.strptime(text, "%Y-%m-%d").date()
+    except ValueError:
+        raise ValueError(f"pickup date {text!r} is not a real date in the form YYYY-MM-DD") from None
+
+
+class OrderStore:
+    def __init__(self, path):
+        self.path = str(path)
+        self._lock = threading.Lock()
+        self._orders: dict[str, dict] = {}
+        if os.path.exists(self.path):
+            with open(self.path, encoding="utf-8") as fh:
+                text = fh.read().strip()
+            data = json.loads(text) if text else []
+            for o in data:
+                self._orders[o["id"]] = o
+
+    def _save(self) -> None:
+        folder = os.path.dirname(os.path.abspath(self.path))
+        os.makedirs(folder, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix=".orders_", suffix=".json", dir=folder)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(list(self._orders.values()), fh, indent=1)
+            os.replace(tmp, self.path)
+        except BaseException:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+            raise
+
+    def add(self, customer, cake, pickup_date, phone="", notes="") -> dict:
+        customer = str(customer or "").strip()
+        cake = str(cake or "").strip()
+        if not customer:
+            raise ValueError("customer is required")
+        if not cake:
+            raise ValueError("cake is required: say what to make")
+        when = parse_date(pickup_date)
+        order = {
+            "id": uuid.uuid4().hex[:8],
+            "customer": customer,
+            "cake": cake,
+            "pickup_date": when.isoformat(),
+            "phone": str(phone or "").strip(),
+            "notes": str(notes or "").strip(),
+            "paid": False,
+            "picked_up": False,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        with self._lock:
+            self._orders[order["id"]] = order
+            self._save()
+        return dict(order)
+
+    def get(self, order_id) -> dict:
+        if order_id not in self._orders:
+            raise KeyError(order_id)
+        return dict(self._orders[order_id])
+
+    def all(self) -> list[dict]:
+        return [dict(o) for o in sorted(self._orders.values(), key=lambda o: (o["pickup_date"], o["created_at"]))]
+
+    def _set(self, order_id, key, value: bool) -> dict:
+        with self._lock:
+            if order_id not in self._orders:
+                raise KeyError(order_id)
+            self._orders[order_id][key] = bool(value)
+            self._save()
+            return dict(self._orders[order_id])
+
+    def set_paid(self, order_id, paid: bool) -> dict:
+        return self._set(order_id, "paid", paid)
+
+    def set_picked_up(self, order_id, picked_up: bool) -> dict:
+        return self._set(order_id, "picked_up", picked_up)
+
+    def open_orders(self) -> list[dict]:
+        return [o for o in self.all() if not o["picked_up"]]
+
+    def due_soon(self, today: date) -> list[dict]:
+        """Overdue first, then pickup dates from today through today plus DUE_WINDOW_DAYS, soonest first."""
+        last = today + timedelta(days=DUE_WINDOW_DAYS)
+        overdue, due = [], []
+        for o in self.open_orders():
+            d = date.fromisoformat(o["pickup_date"])
+            if d < today:
+                overdue.append(dict(o, overdue=True))
+            elif d <= last:
+                due.append(dict(o, overdue=False))
+        return overdue + due
+
+--- test_app.py ---
+import json
+import os
+import tempfile
+import threading
+import unittest
+import urllib.error
+import urllib.request
+from datetime import date, timedelta
+
+from app import make_server
+
+
+class AppTests(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.data = os.path.join(self.dir.name, "orders.json")
+        self.server = make_server(0, self.data)
+        self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.dir.cleanup()
+
+    def get(self, path):
+        try:
+            with urllib.request.urlopen(self.base + path, timeout=5) as r:
+                return r.status, r.read()
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.read()
+
+    def post(self, path, body):
+        raw = body if isinstance(body, bytes) else json.dumps(body).encode()
+        req = urllib.request.Request(self.base + path, data=raw, method="POST", headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read())
+
+    def add(self, days=1, **kw):
+        body = {"customer": "Priya", "cake": "Chocolate", "pickup_date": (date.today() + timedelta(days=days)).isoformat()}
+        body.update(kw)
+        return self.post("/api/orders", body)
+
+    def test_health_and_page(self):  # A8
+        self.assertEqual(self.get("/health"), (200, b'{"ok": true}'))
+        code, page = self.get("/")
+        self.assertEqual(code, 200)
+        self.assertIn(b"Custom cake orders", page)
+        self.assertNotIn(b"card number", page.lower())
+        self.assertEqual(self.server.server_address[0], "127.0.0.1")
+
+    def test_log_order_and_it_persists(self):  # A1
+        code, order = self.add(notes="no nuts")
+        self.assertEqual(code, 201)
+        self.server.shutdown()
+        self.server.server_close()
+        self.server = make_server(0, self.data)
+        self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        code, body = self.get("/api/orders")
+        self.assertEqual([o["id"] for o in json.loads(body)["open"]], [order["id"]])
+
+    def test_bad_orders_are_refused_with_a_message(self):  # A2
+        for bad in ({"pickup_date": ""}, {"pickup_date": "tomorrow"}, {"customer": ""}, {"cake": ""}):
+            code, body = self.add(**bad)
+            self.assertEqual(code, 400)
+            self.assertTrue(body["error"])
+        self.assertEqual(self.post("/api/orders", b"not json")[0], 400)
+
+    def test_due_list_uses_the_three_day_rule(self):  # A3, A4
+        _, late = self.add(days=-1)
+        _, soon = self.add(days=3)
+        self.add(days=4)
+        data = json.loads(self.get("/api/orders")[1])
+        self.assertEqual(data["today"], date.today().isoformat())
+        self.assertEqual([o["id"] for o in data["due"]], [late["id"], soon["id"]])
+        self.assertTrue(data["due"][0]["overdue"])
+        self.assertEqual(len(data["open"]), 3)
+
+    def test_paid_and_picked_up_toggle(self):  # A5, A6, A7
+        _, o = self.add()
+        code, o2 = self.post(f"/api/orders/{o['id']}/paid", {"paid": True})
+        self.assertEqual((code, o2["paid"]), (200, True))
+        code, o3 = self.post(f"/api/orders/{o['id']}/picked_up", {"picked_up": True})
+        self.assertEqual((code, o3["picked_up"]), (200, True))
+        data = json.loads(self.get("/api/orders")[1])
+        self.assertEqual((data["due"], data["open"]), ([], []))
+        self.post(f"/api/orders/{o['id']}/picked_up", {"picked_up": False})
+        self.assertEqual(len(json.loads(self.get("/api/orders")[1])["open"]), 1)
+
+    def test_unknown_ids_and_routes_are_404(self):
+        self.assertEqual(self.post("/api/orders/nope/paid", {"paid": True})[0], 404)
+        self.assertEqual(self.get("/nowhere")[0], 404)
+        self.assertEqual(self.post("/api/nowhere", {})[0], 404)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+--- test_store.py ---
+import json
+import os
+import tempfile
+import unittest
+from datetime import date, timedelta
+
+from store import DUE_WINDOW_DAYS, OrderStore
+
+
+class StoreTests(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.dir.name, "orders.json")
+        self.store = OrderStore(self.path)
+        self.today = date(2026, 10, 1)
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def day(self, n):
+        return (self.today + timedelta(days=n)).isoformat()
+
+    def test_add_saves_and_survives_reload(self):  # A1
+        o = self.store.add("Priya", "Two tier chocolate", "2026-10-03", phone="555 0101", notes="no nuts")
+        again = OrderStore(self.path)
+        self.assertEqual(again.get(o["id"]), o)
+        self.assertEqual(set(o), {"id", "customer", "cake", "pickup_date", "phone", "notes", "paid", "picked_up", "created_at"})
+        self.assertFalse(o["paid"])
+        self.assertFalse(o["picked_up"])
+        with open(self.path, encoding="utf-8") as fh:
+            self.assertEqual(len(json.load(fh)), 1)
+
+    def test_required_fields_and_dates_are_checked(self):  # A2
+        for customer, cake, when in [("", "cake", "2026-10-03"), ("Sam", " ", "2026-10-03"), ("Sam", "cake", ""),
+                                     ("Sam", "cake", "03/10/2026"), ("Sam", "cake", "2026-02-30"), ("Sam", "cake", None)]:
+            with self.assertRaises(ValueError):
+                self.store.add(customer, cake, when)
+        self.assertEqual(self.store.all(), [])
+
+    def test_due_window_edges(self):  # A3
+        self.assertEqual(DUE_WINDOW_DAYS, 3)
+        ids = {n: self.store.add(f"C{n}", "cake", self.day(n))["id"] for n in (0, 1, 3, 4, 10)}
+        due = [o["id"] for o in self.store.due_soon(self.today)]
+        self.assertEqual(due, [ids[0], ids[1], ids[3]])
+
+    def test_overdue_first_and_picked_up_left_out(self):  # A3, A4, A6
+        late = self.store.add("Late", "cake", self.day(-2))
+        soon = self.store.add("Soon", "cake", self.day(1))
+        gone = self.store.add("Gone", "cake", self.day(0))
+        self.store.set_picked_up(gone["id"], True)
+        due = self.store.due_soon(self.today)
+        self.assertEqual([o["id"] for o in due], [late["id"], soon["id"]])
+        self.assertTrue(due[0]["overdue"])
+        self.assertFalse(due[1]["overdue"])
+
+    def test_paid_toggles_and_persists(self):  # A5
+        o = self.store.add("Ana", "Lemon sponge", self.day(2))
+        self.assertTrue(self.store.set_paid(o["id"], True)["paid"])
+        self.assertTrue(OrderStore(self.path).get(o["id"])["paid"])
+        self.assertFalse(self.store.set_paid(o["id"], False)["paid"])
+
+    def test_picked_up_removes_from_lists_and_can_be_undone(self):  # A6, A7
+        o = self.store.add("Ben", "Birthday cake", self.day(1))
+        far = self.store.add("Far", "Wedding cake", self.day(30))
+        self.store.set_picked_up(o["id"], True)
+        self.assertEqual([x["id"] for x in self.store.open_orders()], [far["id"]])
+        self.assertEqual(self.store.due_soon(self.today), [])
+        self.store.set_picked_up(o["id"], False)
+        self.assertEqual([x["id"] for x in self.store.open_orders()], [o["id"], far["id"]])
+
+    def test_unknown_id_is_a_key_error(self):
+        with self.assertRaises(KeyError):
+            self.store.set_paid("nope", True)
+        with self.assertRaises(KeyError):
+            self.store.set_picked_up("nope", True)
+        with self.assertRaises(KeyError):
+            self.store.get("nope")
+
+    def test_empty_file_loads(self):
+        open(self.path, "w").close()
+        self.assertEqual(OrderStore(self.path).all(), [])
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+If a fact you need is missing and you would have to guess it, raise a Blocker instead.
+Return one JSON object: {"result": "proposal", "problem": "...", "recommendation": "...", "evidence_refs": [], "cost": "...", "confidence": "low, medium or high", "what_would_change_this": "..."}

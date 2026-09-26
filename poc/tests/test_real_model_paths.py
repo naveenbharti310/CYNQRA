@@ -161,6 +161,34 @@ class WorkerReplyTests(unittest.TestCase):
         self.assertEqual(self.e.task("t_03")["status"], "PLANNED")
 
 
+class PromptContentTests(unittest.TestCase):
+    """What the model is shown. The scripted demo ignores its inputs, so only this catches a blank prompt."""
+
+    def setUp(self):
+        self.saved = no_model_env()
+        self.tmp = TempDir()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+        restore_env(self.saved)
+
+    def test_the_planner_sees_the_confirmed_objective(self):
+        seen = {}
+
+        class Spy(ScriptedSource):
+            def plan(self, objective, note=""):
+                seen.update(objective)
+                return super().plan(objective, note)
+
+        e = Engine(self.tmp.path, intelligence=Spy())
+        e.create_company("Harbor Recruiting")
+        e.draft_objective(SCENARIO["messy"])
+        e.confirm_objective()
+        e.close()
+        self.assertEqual(seen.get("product"), SCENARIO["objective"]["product"])
+        self.assertTrue(all(seen.get(k) for k in ("target_customer", "success_criteria", "constraints")))
+
+
 class OutageTests(unittest.TestCase):
     def setUp(self):
         self.saved = no_model_env()

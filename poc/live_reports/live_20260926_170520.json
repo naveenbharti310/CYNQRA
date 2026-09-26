@@ -1,0 +1,394 @@
+{
+ "started_at": "2026-09-26T17:02:12+00:00",
+ "objective": "I run a small bakery and my staff keep losing track of custom cake orders. I want a simple internal web page where they can log an order with the pickup date, see what is due in the next few days, and mark orders as paid and picked up. Nothing public, no card payments, and it has to run on the shop laptop without installing anything.",
+ "max_usd": 3.0,
+ "model": {
+  "kind": "cmd",
+  "label": "shell command",
+  "tokens": "estimated"
+ },
+ "effort": "model default",
+ "counts_as_measured_result": false,
+ "health": {
+  "url": "http://127.0.0.1:49997",
+  "status": 200
+ },
+ "product_tests": {
+  "ran": true,
+  "passed": true,
+  "output": "test_bad_orders_are_refused_with_a_message (test_app.AppTests.test_bad_orders_are_refused_with_a_message) ... ok\ntest_due_list_uses_the_three_day_rule (test_app.AppTests.test_due_list_uses_the_three_day_rule) ... ok\ntest_health_and_page (test_app.AppTests.test_health_and_page) ... ok\ntest_log_order_and_it_persists (test_app.AppTests.test_log_order_and_it_persists) ... ok\ntest_paid_and_picked_up_toggle (test_app.AppTests.test_paid_and_picked_up_toggle) ... ok\ntest_unknown_ids_and_routes_are_404 (test_app.AppTests.test_unknown_ids_and_routes_are_404) ... ok\ntest_add_saves_and_survives_reload (test_store.StoreTests.test_add_saves_and_survives_reload) ... ok\ntest_due_window_edges (test_store.StoreTests.test_due_window_edges) ... ok\ntest_empty_file_loads (test_store.StoreTests.test_empty_file_loads) ... ok\ntest_overdue_first_and_picked_up_left_out (test_store.StoreTests.test_overdue_first_and_picked_up_left_out) ... ok\ntest_paid_toggles_and_persists (test_store.StoreTests.test_paid_toggles_and_persists) ... ok\ntest_picked_up_removes_from_lists_and_can_be_undone (test_store.StoreTests.test_picked_up_removes_from_lists_and_can_be_undone) ... ok\ntest_required_fields_and_dates_are_checked (test_store.StoreTests.test_required_fields_and_dates_are_checked) ... ok\ntest_unknown_id_is_a_key_error (test_store.StoreTests.test_unknown_id_is_a_key_error) ... ok\n\n----------------------------------------------------------------------\nRan 14 tests in 3.549s\n\nOK\n"
+ },
+ "outcome": "PASS",
+ "reason": "accepted, live, healthy, and the product's tests pass on rerun",
+ "seconds": 188.3,
+ "phase": "accepted",
+ "notice": "",
+ "usd": 0.0,
+ "tokens_in": 14945,
+ "tokens_out": 8405,
+ "calls": [
+  {
+   "id": "call_0001",
+   "task_id": "objective",
+   "worker": "objective_system",
+   "purpose": "structure_objective",
+   "label": "shell command",
+   "tokens_in": 251,
+   "tokens_out": 211,
+   "estimated": true,
+   "latency_s": 1.246
+  },
+  {
+   "id": "call_0002",
+   "task_id": "plan",
+   "worker": "w_pm",
+   "purpose": "plan",
+   "label": "shell command",
+   "tokens_in": 628,
+   "tokens_out": 624,
+   "estimated": true,
+   "latency_s": 13.737
+  },
+  {
+   "id": "call_0003",
+   "task_id": "t_01",
+   "worker": "w_pm",
+   "purpose": "work",
+   "label": "shell command",
+   "tokens_in": 597,
+   "tokens_out": 812,
+   "estimated": true,
+   "latency_s": 17.736
+  },
+  {
+   "id": "call_0004",
+   "task_id": "t_02",
+   "worker": "w_pm",
+   "purpose": "work",
+   "label": "shell command",
+   "tokens_in": 1333,
+   "tokens_out": 180,
+   "estimated": true,
+   "latency_s": 7.734
+  },
+  {
+   "id": "call_0005",
+   "task_id": "t_03",
+   "worker": "w_pm",
+   "purpose": "assign",
+   "label": "shell command",
+   "tokens_in": 581,
+   "tokens_out": 335,
+   "estimated": true,
+   "latency_s": 11.735
+  },
+  {
+   "id": "call_0006",
+   "task_id": "t_03",
+   "worker": "w_eng_a",
+   "purpose": "work",
+   "label": "shell command",
+   "tokens_in": 1744,
+   "tokens_out": 2136,
+   "estimated": true,
+   "latency_s": 32.246
+  },
+  {
+   "id": "call_0007",
+   "task_id": "t_04",
+   "worker": "w_pm",
+   "purpose": "assign",
+   "label": "shell command",
+   "tokens_in": 596,
+   "tokens_out": 385,
+   "estimated": true,
+   "latency_s": 17.74
+  },
+  {
+   "id": "call_0008",
+   "task_id": "t_04",
+   "worker": "w_eng_b",
+   "purpose": "work",
+   "label": "shell command",
+   "tokens_in": 2824,
+   "tokens_out": 3336,
+   "estimated": true,
+   "latency_s": 43.759
+  },
+  {
+   "id": "call_0009",
+   "task_id": "t_05",
+   "worker": "w_cto",
+   "purpose": "work",
+   "label": "shell command",
+   "tokens_in": 5738,
+   "tokens_out": 206,
+   "estimated": true,
+   "latency_s": 15.236
+  },
+  {
+   "id": "call_0010",
+   "task_id": "t_06",
+   "worker": "w_cto",
+   "purpose": "work",
+   "label": "shell command",
+   "tokens_in": 653,
+   "tokens_out": 180,
+   "estimated": true,
+   "latency_s": 8.732
+  }
+ ],
+ "decisions": [
+  {
+   "kind": "confirm_objective",
+   "action": "approve"
+  },
+  {
+   "id": "dec_approve_plan",
+   "kind": "approve_plan",
+   "risk": "LOW",
+   "task_id": null,
+   "problem": "Cynqra proposes the fixed organization and a plan for your objective.",
+   "action": "approve"
+  },
+  {
+   "id": "dec_t_02",
+   "kind": "decision",
+   "risk": "MEDIUM",
+   "task_id": "t_02",
+   "problem": "The objective says staff should see what is due in the next few days, and nothing says how many days that is.",
+   "action": "approve"
+  },
+  {
+   "id": "dec_t_05",
+   "kind": "review_merge",
+   "risk": "MEDIUM",
+   "task_id": "t_05",
+   "problem": "The release candidate combines the order store (t_03) and the web app (t_04) and needs the founder's approval to merge to main.",
+   "action": "approve"
+  },
+  {
+   "id": "dec_t_06",
+   "kind": "deploy",
+   "risk": "HIGH",
+   "task_id": "t_06",
+   "problem": "Main holds the verified order tracker; it is not running for the staff yet. A production deploy is HIGH risk and needs the founder.",
+   "action": "approve"
+  },
+  {
+   "id": "dec_accept_delivery",
+   "kind": "accept_delivery",
+   "risk": "LOW",
+   "task_id": null,
+   "problem": "Every task is verified and the product is live.",
+   "action": "approve"
+  }
+ ],
+ "steps": [
+  {
+   "did": "assigned",
+   "task": "t_01",
+   "to": "w_pm"
+  },
+  {
+   "did": "completed",
+   "task": "t_01"
+  },
+  {
+   "did": "verified",
+   "task": "t_01"
+  },
+  {
+   "did": "assigned",
+   "task": "t_02",
+   "to": "w_pm"
+  },
+  {
+   "did": "proposed",
+   "task": "t_02",
+   "decision": "dec_t_02"
+  },
+  {
+   "did": "verified",
+   "task": "t_02"
+  },
+  {
+   "did": "assigned",
+   "task": "t_03",
+   "to": "w_eng_a"
+  },
+  {
+   "did": "completed",
+   "task": "t_03"
+  },
+  {
+   "did": "verified",
+   "task": "t_03"
+  },
+  {
+   "did": "assigned",
+   "task": "t_04",
+   "to": "w_eng_b"
+  },
+  {
+   "did": "completed",
+   "task": "t_04"
+  },
+  {
+   "did": "verified",
+   "task": "t_04"
+  },
+  {
+   "did": "assigned",
+   "task": "t_05",
+   "to": "w_cto"
+  },
+  {
+   "did": "proposed",
+   "task": "t_05",
+   "decision": "dec_t_05"
+  },
+  {
+   "did": "verified",
+   "task": "t_05"
+  },
+  {
+   "did": "assigned",
+   "task": "t_06",
+   "to": "w_cto"
+  },
+  {
+   "did": "proposed",
+   "task": "t_06",
+   "decision": "dec_t_06"
+  },
+  {
+   "did": "verified",
+   "task": "t_06"
+  },
+  {
+   "did": "delivered"
+  }
+ ],
+ "objective_structured": {
+  "product": "Simple internal web page for tracking custom cake orders",
+  "target_customer": "Staff of a small bakery",
+  "primary_outcome": "Staff can log a custom cake order with its pickup date, see which orders are due in the next few days, and mark orders as paid and picked up",
+  "business_outcome": "Custom cake orders stop being lost or forgotten",
+  "success_criteria": "Every custom order is logged with a pickup date; staff can see the orders due in the next few days; each order can be marked paid and marked picked up",
+  "constraints": "Internal only, nothing public; no card payments; runs on the shop laptop without installing anything",
+  "priorities": "Not losing orders first, then seeing what is due soon, then tracking payment and pickup"
+ },
+ "inferred_fields": [
+  "business_outcome",
+  "priorities"
+ ],
+ "plan": [
+  {
+   "id": "t_01",
+   "kind": "spec",
+   "owner_worker_id": "w_pm",
+   "title": "Order tracker spec and acceptance checks",
+   "status": "VERIFIED",
+   "attempts": 0
+  },
+  {
+   "id": "t_02",
+   "kind": "decision",
+   "owner_worker_id": "w_pm",
+   "title": "What counts as due in the next few days",
+   "status": "VERIFIED",
+   "attempts": 0
+  },
+  {
+   "id": "t_03",
+   "kind": "code",
+   "owner_worker_id": "w_eng_a",
+   "title": "Order store",
+   "status": "VERIFIED",
+   "attempts": 0
+  },
+  {
+   "id": "t_04",
+   "kind": "code",
+   "owner_worker_id": "w_eng_b",
+   "title": "Web app and order screen",
+   "status": "VERIFIED",
+   "attempts": 0
+  },
+  {
+   "id": "t_05",
+   "kind": "review_merge",
+   "owner_worker_id": "w_cto",
+   "title": "Review and merge the release candidate",
+   "status": "VERIFIED",
+   "attempts": 0
+  },
+  {
+   "id": "t_06",
+   "kind": "deploy",
+   "owner_worker_id": "w_cto",
+   "title": "Deploy to the shop laptop",
+   "status": "VERIFIED",
+   "attempts": 0
+  }
+ ],
+ "verifications": [
+  {
+   "id": "v_001",
+   "task_id": "t_01",
+   "verdict": "VERIFIED",
+   "tier": null
+  },
+  {
+   "id": "v_002",
+   "task_id": "t_02",
+   "verdict": "VERIFIED",
+   "tier": null
+  },
+  {
+   "id": "v_003",
+   "task_id": "t_03",
+   "verdict": "VERIFIED",
+   "tier": null
+  },
+  {
+   "id": "v_004",
+   "task_id": "t_04",
+   "verdict": "VERIFIED",
+   "tier": null
+  },
+  {
+   "id": "v_005",
+   "task_id": "t_05",
+   "verdict": "VERIFIED",
+   "tier": null
+  },
+  {
+   "id": "v_006",
+   "task_id": "t_06",
+   "verdict": "VERIFIED",
+   "tier": null
+  }
+ ],
+ "metrics": {
+  "founder_interventions": 6,
+  "tasks_total": 6,
+  "tasks_verified": 6,
+  "defects_caught_before_verified": 0,
+  "blockers_cleared_without_founder": 0,
+  "actions_stopped_by_policy": 0,
+  "worker_protocol_objects": 8,
+  "protocol_objects_per_verified_task": 1.3,
+  "escalations_today": 3,
+  "escalation_budget": 5,
+  "seconds_to_live": 169.7,
+  "events": 92
+ },
+ "budget": {
+  "cap": 4000,
+  "spent": 50,
+  "warned": [],
+  "state": "ok"
+ }
+}

@@ -1,0 +1,7 @@
+{"result": "proposal",
+ "problem": "The objective says staff should see what is due in the next few days, and nothing says how many days that is.",
+ "recommendation": "Due soon means a pickup date from today through the next 3 days, today included (today plus 3 days). Orders not picked up whose pickup date is before today are overdue and are listed first. Picked up orders never appear in the due list.",
+ "evidence_refs": ["objective v1 primary outcome", "t_01/spec.md", "t_01/acceptance.md A3 and A4"],
+ "cost": "none, a product rule",
+ "confidence": "medium",
+ "what_would_change_this": "Custom cakes that usually need more than three days of preparation, which would call for a longer window such as seven days."}
