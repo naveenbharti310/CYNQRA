@@ -119,3 +119,27 @@ Real model run: PASS on a new objective, a bakery order tracker, with Claude ans
 worker prompt through tests/model_bridge.py. Six of six tasks verified first pass, live,
 product tests pass on rerun, and the delivered page works in Chromium. Tokens are estimated,
 so it is not a measured API result. Details in live_reports/README.md.
+
+## 26 September, fourth pass: live mode through the real UI
+
+Driving the live mode UI in Chromium with a real model found four defects the demo browser
+test could not, because it never chose Live, never edited a field and its model answers
+instantly:
+
+1. Choosing Live never worked. Every button handler repainted before reading its inputs,
+   and the repaint rebuilt the mode radios with Demo checked.
+2. For the same reason, founder edits to the objective fields and the budget cap were reset
+   before Confirm sent them.
+3. A step holds the engine lock through its model call, and the state read and kill switch
+   waited on it: the screen froze and the kill switch was dead while a model answered. Both
+   now run without the lock; an answer that lands after the kill switch is discarded without
+   counting against the worker.
+4. Every repaint replayed every card's fade in, so the screen flickered through a run.
+
+The browser test now edits a field and the budget cap and checks the server kept them, and
+checks a repaint does not replay the animation; both fail on the old UI.
+test_real_model_paths.SlowModelTests covers 3 and fails on the old engine.
+tests/e2e/live_walk.js drives live mode through the UI with any model.
+
+Results: 119 POC tests pass, 15 spike tests and 3 kit tests pass. Live UI run: PASS, see
+live_reports/README.md.

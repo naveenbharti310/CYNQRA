@@ -1,0 +1,649 @@
+You are the CTO worker. You review work against the objective, decide the technical approach and propose merges and deploys. You never deploy or message anyone yourself.
+Confirmed objective:
+{
+ "product": "Small internal tool for assigning and tracking daily dog walks",
+ "target_customer": "The owner and walkers of a six person dog walking company",
+ "primary_outcome": "The owner assigns each day's walks to walkers, each walker sees their walks for today, and a walker marks a walk done with a short note",
+ "business_outcome": "Every scheduled walk is assigned and its completion is recorded, so no walk is missed or forgotten",
+ "success_criteria": "The owner can assign each walk for a day to a walker; a walker sees only their walks for today; a walker can mark a walk done with a short note",
+ "constraints": "Only the team uses it; no payments; opens quickly on the office PC without installing anything",
+ "priorities": "Assigning the day's walks first, then walkers seeing today's walks, then marking walks done with a note"
+}
+Decided rules:
+* No logins. The owner keeps a list of walker names in the tool. A walker picks their name from that list on the walker screen and the choice is remembered in that browser. The owner screen is the only place walks are created or assigned. This is a convenience, not security, which fits an internal tool on the office PC.
+
+Delivery contract. The product is a Python 3.10 standard library web app. No third party packages. app.py sits at the repository root and starts its HTTP server only under `if __name__ == "__main__":`, on 127.0.0.1 and the port in the PORT environment variable. It answers GET /health with 200 and GET / with 200 and the product's web page. It keeps its data in the JSON file named by the DATA_FILE environment variable. Tests are unittest files named test_*.py at the repository root; they must not need the network, and a test that starts a server uses port 0. Every test in the repository is rerun with `python -m unittest discover` on each change. File names are paths relative to the repository root; Markdown documents are filed under docs/.
+
+Task t_05: Review and merge the release candidate. Expected output: A merge proposal with the release candidate test run.
+Handoff: {"acceptance_check": "Review and merge the release candidate. Expected: A merge proposal with the release candidate test run. Verified by: Full test run on main.", "context_ref": "objective v1", "artifacts": ["t_03/test_walks.py", "t_03/walks.py", "t_04/app.py", "t_04/index.html", "t_04/test_app.py"]}
+Files handed to you:
+--- app.py ---
+"""Dog walk tracker web app. Standard library only.
+
+Run: PORT=8000 DATA_FILE=walks.json python app.py   (listens on 127.0.0.1 only)
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+from datetime import date
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
+
+from walks import WalkStore
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+WALK_ACTION = re.compile(r"^/api/walks/([A-Za-z0-9_-]+)/(assign|done|undo)$")
+
+
+def make_server(port: int, data_file: str | None = None) -> ThreadingHTTPServer:
+    store = WalkStore(data_file or os.environ.get("DATA_FILE") or "walks.json")
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            return
+
+        def _send(self, code, body, kind="application/json; charset=utf-8"):
+            data = body if isinstance(body, bytes) else json.dumps(body).encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _json(self) -> dict:
+            n = int(self.headers.get("Content-Length") or 0)
+            data = json.loads(self.rfile.read(n).decode("utf-8")) if n else {}
+            if not isinstance(data, dict):
+                raise ValueError("send a JSON object")
+            return data
+
+        def do_GET(self):
+            u = urlparse(self.path)
+            q = {k: v[0] for k, v in parse_qs(u.query).items()}
+            try:
+                if u.path == "/health":
+                    return self._send(200, {"ok": True})
+                if u.path in ("/", "/index.html"):
+                    with open(os.path.join(HERE, "index.html"), "rb") as fh:
+                        return self._send(200, fh.read(), "text/html; charset=utf-8")
+                if u.path == "/api/walkers":
+                    return self._send(200, {"walkers": store.walkers()})
+                if u.path == "/api/day":
+                    on = q.get("date") or date.today().isoformat()
+                    return self._send(200, {"date": on, "walks": store.day(on)})
+                if u.path == "/api/today":
+                    walker = q.get("walker", "")
+                    today = date.today()
+                    return self._send(200, {"today": today.isoformat(), "walker": walker,
+                                            "walks": store.today_for(walker, today)})
+            except ValueError as exc:
+                return self._send(400, {"error": str(exc)})
+            return self._send(404, {"error": "not found"})
+
+        def do_POST(self):
+            path = urlparse(self.path).path
+            try:
+                body = self._json()
+            except ValueError as exc:
+                return self._send(400, {"error": f"bad JSON: {exc}"})
+            try:
+                if path == "/api/walkers":
+                    return self._send(201, {"name": store.add_walker(body.get("name")), "walkers": store.walkers()})
+                if path == "/api/walkers/remove":
+                    try:
+                        store.remove_walker(str(body.get("name") or ""))
+                    except KeyError:
+                        return self._send(404, {"error": "no such walker"})
+                    return self._send(200, {"walkers": store.walkers()})
+                if path == "/api/walks":
+                    return self._send(201, store.add_walk(body.get("date"), body.get("time"), body.get("dog"),
+                                                          body.get("details", ""), body.get("walker", "")))
+                m = WALK_ACTION.match(path)
+                if m:
+                    walk_id, action = m.groups()
+                    try:
+                        if action == "assign":
+                            walk = store.assign(walk_id, body.get("walker", ""))
+                        elif action == "done":
+                            walk = store.mark_done(walk_id, body.get("note"))
+                        else:
+                            walk = store.undo_done(walk_id)
+                    except KeyError:
+                        return self._send(404, {"error": f"no walk {walk_id}"})
+                    return self._send(200, walk)
+            except ValueError as exc:
+                return self._send(400, {"error": str(exc)})
+            return self._send(404, {"error": "not found"})
+
+    return ThreadingHTTPServer(("127.0.0.1", port), Handler)
+
+
+if __name__ == "__main__":
+    server = make_server(int(os.environ.get("PORT", "8000")))
+    print(f"Walk tracker on http://127.0.0.1:{server.server_address[1]}", flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+
+--- index.html ---
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Walks</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; background: #f4f7f5; color: #1d2b24; }
+  main { max-width: 900px; margin: 0 auto; padding: 18px 16px 48px; }
+  h1 { font-size: 24px; margin: 0 0 12px; }
+  h2 { font-size: 17px; margin: 22px 0 8px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+  .tabs button { background: #dfe8e2; color: #1d2b24; }
+  .tabs button.on { background: #2f6b4f; color: #fff; }
+  .card { background: #fff; border: 1px solid #d6e0da; border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+  label { display: flex; flex-direction: column; font-size: 13px; gap: 3px; }
+  input, select, textarea { font: inherit; padding: 6px 8px; border: 1px solid #b9c8bf; border-radius: 6px; }
+  button { font: inherit; padding: 7px 12px; border: 0; border-radius: 6px; background: #2f6b4f; color: #fff; cursor: pointer; }
+  button.plain { background: #e6ece8; color: #1d2b24; }
+  .error { color: #b3261e; min-height: 1.2em; margin: 4px 0 10px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid #e8eeea; font-size: 14px; vertical-align: top; }
+  .done { color: #2f6b4f; font-weight: 600; }
+  .muted { color: #5f7268; font-size: 14px; }
+  .chip { display: inline-flex; gap: 6px; align-items: center; background: #eef3f0; border-radius: 99px; padding: 3px 4px 3px 10px; margin: 2px; }
+  .chip button { padding: 2px 8px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Dog walks</h1>
+  <div class="tabs"><button id="tab-owner" class="on">Owner</button><button id="tab-walker">Walker</button></div>
+  <p class="error" id="error" role="alert"></p>
+
+  <section id="owner">
+    <div class="card"><h2 style="margin-top:0">Walkers</h2>
+      <div id="walker-chips"></div>
+      <form id="add-walker" class="row"><label>Name <input name="name" required></label><button>Add walker</button></form>
+    </div>
+    <div class="card"><h2 style="margin-top:0">Add a walk</h2>
+      <form id="add-walk" class="row">
+        <label>Date <input name="date" type="date" required></label>
+        <label>Time <input name="time" type="time" required></label>
+        <label>Dog <input name="dog" required></label>
+        <label>Details <input name="details" placeholder="Address, gate code"></label>
+        <label>Walker <select name="walker" class="walker-select"></select></label>
+        <button>Add walk</button>
+      </form>
+    </div>
+    <div class="card"><div class="row"><h2 style="margin:0 12px 0 0">Walks on</h2><input type="date" id="day"></div>
+      <div id="day-walks"></div></div>
+  </section>
+
+  <section id="walker" class="hidden">
+    <div class="card row"><label>I am <select id="me" class="walker-select"></select></label>
+      <span class="muted" id="today-label"></span></div>
+    <div id="my-walks"></div>
+  </section>
+</main>
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const todayISO = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
+let walkers = [];
+
+async function call(path, body) {
+  const opts = body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)};
+  const r = await fetch(path, opts);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || `request failed (${r.status})`);
+  return data;
+}
+function fail(e) { $("#error").textContent = e.message; }
+function ok() { $("#error").textContent = ""; }
+function options(selected, blank) {
+  return (blank ? `<option value="">${blank}</option>` : "") +
+    walkers.map((w) => `<option value="${esc(w)}" ${w === selected ? "selected" : ""}>${esc(w)}</option>`).join("");
+}
+
+async function loadWalkers() {
+  walkers = (await call("/api/walkers")).walkers;
+  $("#walker-chips").innerHTML = walkers.length ? walkers.map((w) => `<span class="chip">${esc(w)}<button class="plain" data-remove="${esc(w)}">Remove</button></span>`).join("")
+    : `<p class="muted">No walkers yet.</p>`;
+  $("#add-walk select[name=walker]").innerHTML = options("", "Unassigned");
+  const me = localStorage.getItem("walker") || "";
+  $("#me").innerHTML = options(me, "Pick your name");
+}
+
+async function loadDay() {
+  const day = $("#day").value || todayISO();
+  const walks = (await call(`/api/day?date=${encodeURIComponent(day)}`)).walks;
+  $("#day-walks").innerHTML = walks.length ? `<table><thead><tr><th>Time</th><th>Dog</th><th>Details</th><th>Walker</th><th>Done</th></tr></thead><tbody>${
+    walks.map((w) => `<tr><td>${esc(w.time)}</td><td>${esc(w.dog)}</td><td>${esc(w.details)}</td>
+      <td><select data-assign="${esc(w.id)}">${options(w.walker, "Unassigned")}</select></td>
+      <td>${w.done ? `<span class="done">Done</span> ${esc(w.note)} <button class="plain" data-undo="${esc(w.id)}">Undo</button>` : "Not yet"}</td></tr>`).join("")
+  }</tbody></table>` : `<p class="muted">No walks on ${esc(day)}.</p>`;
+}
+
+async function loadMine() {
+  const me = $("#me").value;
+  if (!me) { $("#my-walks").innerHTML = `<p class="muted">Pick your name to see today's walks.</p>`; $("#today-label").textContent = ""; return; }
+  const data = await call(`/api/today?walker=${encodeURIComponent(me)}`);
+  $("#today-label").textContent = `Today, ${data.today}`;
+  $("#my-walks").innerHTML = data.walks.length ? data.walks.map((w) => `<div class="card">
+      <b>${esc(w.time)} ${esc(w.dog)}</b> <span class="muted">${esc(w.details)}</span>
+      ${w.done ? `<p class="done">Done: ${esc(w.note)}</p>` : `<div class="row" style="margin-top:8px"><label style="flex:1">Note <input data-note="${esc(w.id)}" maxlength="280" placeholder="How did it go?"></label><button data-done="${esc(w.id)}">Done</button></div>`}
+    </div>`).join("") : `<p class="muted">No walks for you today.</p>`;
+}
+
+async function refresh() { try { await loadWalkers(); await loadDay(); await loadMine(); } catch (e) { fail(e); } }
+
+$("#tab-owner").onclick = () => { $("#owner").classList.remove("hidden"); $("#walker").classList.add("hidden"); $("#tab-owner").classList.add("on"); $("#tab-walker").classList.remove("on"); };
+$("#tab-walker").onclick = () => { $("#walker").classList.remove("hidden"); $("#owner").classList.add("hidden"); $("#tab-walker").classList.add("on"); $("#tab-owner").classList.remove("on"); };
+$("#add-walker").onsubmit = async (ev) => { ev.preventDefault(); try { await call("/api/walkers", {name: ev.target.name.value}); ev.target.reset(); ok(); } catch (e) { fail(e); } refresh(); };
+$("#add-walk").onsubmit = async (ev) => { ev.preventDefault(); try { await call("/api/walks", Object.fromEntries(new FormData(ev.target).entries())); ok(); } catch (e) { fail(e); } refresh(); };
+$("#day").onchange = () => refresh();
+$("#me").onchange = () => { localStorage.setItem("walker", $("#me").value); refresh(); };
+document.addEventListener("click", async (ev) => {
+  const b = ev.target;
+  try {
+    if (b.dataset.remove) { await call("/api/walkers/remove", {name: b.dataset.remove}); }
+    else if (b.dataset.undo) { await call(`/api/walks/${b.dataset.undo}/undo`, {}); }
+    else if (b.dataset.done) { await call(`/api/walks/${b.dataset.done}/done`, {note: document.querySelector(`[data-note="${b.dataset.done}"]`).value}); }
+    else return;
+    ok();
+  } catch (e) { fail(e); }
+  refresh();
+});
+document.addEventListener("change", async (ev) => {
+  const s = ev.target;
+  if (!s.dataset.assign) return;
+  try { await call(`/api/walks/${s.dataset.assign}/assign`, {walker: s.value}); ok(); } catch (e) { fail(e); }
+  refresh();
+});
+$("#day").value = todayISO();
+$("#add-walk input[name=date]").value = todayISO();
+refresh();
+</script>
+</body>
+</html>
+
+--- test_app.py ---
+import json
+import os
+import tempfile
+import threading
+import unittest
+import urllib.error
+import urllib.parse
+import urllib.request
+from datetime import date, timedelta
+
+from app import make_server
+
+
+class AppTests(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.data = os.path.join(self.dir.name, "walks.json")
+        self.start()
+
+    def start(self):
+        self.server = make_server(0, self.data)
+        self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def stop(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+    def tearDown(self):
+        self.stop()
+        self.dir.cleanup()
+
+    def get(self, path):
+        try:
+            with urllib.request.urlopen(self.base + path, timeout=5) as r:
+                body = r.read()
+                return r.status, (json.loads(body) if r.headers.get_content_type() == "application/json" else body)
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read())
+
+    def post(self, path, body=None):
+        raw = body if isinstance(body, bytes) else json.dumps(body or {}).encode()
+        req = urllib.request.Request(self.base + path, data=raw, method="POST", headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read())
+
+    def today(self, n=0):
+        return (date.today() + timedelta(days=n)).isoformat()
+
+    def test_health_and_page(self):  # B8
+        self.assertEqual(self.get("/health"), (200, {"ok": True}))
+        code, page = self.get("/")
+        self.assertEqual(code, 200)
+        self.assertIn(b"Dog walks", page)
+        for word in (b"payment", b"card number", b"price"):
+            self.assertNotIn(word, page.lower())
+        self.assertEqual(self.server.server_address[0], "127.0.0.1")
+
+    def test_walkers_add_and_remove(self):  # B1
+        self.assertEqual(self.post("/api/walkers", {"name": "Maya"})[0], 201)
+        self.assertEqual(self.post("/api/walkers", {"name": "maya"})[0], 400)
+        self.assertEqual(self.post("/api/walkers", {"name": ""})[0], 400)
+        self.assertEqual(self.get("/api/walkers"), (200, {"walkers": ["Maya"]}))
+        self.assertEqual(self.post("/api/walkers/remove", {"name": "Maya"}), (200, {"walkers": []}))
+        self.assertEqual(self.post("/api/walkers/remove", {"name": "Maya"})[0], 404)
+
+    def test_walks_assign_and_day_view(self):  # B2, B3, B4
+        self.post("/api/walkers", {"name": "Maya"})
+        self.post("/api/walkers", {"name": "Tom"})
+        self.assertEqual(self.post("/api/walks", {"date": self.today(), "time": "9am", "dog": "Rex"})[0], 400)
+        self.assertEqual(self.post("/api/walks", {"date": self.today(), "time": "09:00", "dog": "Rex", "walker": "Stranger"})[0], 400)
+        _, late = self.post("/api/walks", {"date": self.today(), "time": "15:00", "dog": "Bo"})
+        code, early = self.post("/api/walks", {"date": self.today(), "time": "08:00", "dog": "Rex", "walker": "Maya"})
+        self.assertEqual(code, 201)
+        code, moved = self.post(f"/api/walks/{late['id']}/assign", {"walker": "Tom"})
+        self.assertEqual((code, moved["walker"]), (200, "Tom"))
+        self.assertEqual(self.post(f"/api/walks/{late['id']}/assign", {"walker": "Stranger"})[0], 400)
+        code, day = self.get("/api/day?date=" + self.today())
+        self.assertEqual([w["id"] for w in day["walks"]], [early["id"], late["id"]])
+        self.assertEqual(self.get("/api/day?date=nonsense")[0], 400)
+        self.assertEqual(self.get("/api/day")[1]["date"], self.today())
+
+    def test_walker_sees_only_their_walks_today(self):  # B5
+        for n in ("Maya", "Tom"):
+            self.post("/api/walkers", {"name": n})
+        _, mine = self.post("/api/walks", {"date": self.today(), "time": "10:00", "dog": "Rex", "walker": "Maya"})
+        self.post("/api/walks", {"date": self.today(), "time": "11:00", "dog": "Bo", "walker": "Tom"})
+        self.post("/api/walks", {"date": self.today(1), "time": "09:00", "dog": "Cy", "walker": "Maya"})
+        code, data = self.get("/api/today?walker=" + urllib.parse.quote("Maya"))
+        self.assertEqual((code, data["today"], [w["id"] for w in data["walks"]]), (200, self.today(), [mine["id"]]))
+        self.assertEqual(self.get("/api/today")[1]["walks"], [])
+
+    def test_done_with_note_and_undo(self):  # B6
+        self.post("/api/walkers", {"name": "Maya"})
+        _, w = self.post("/api/walks", {"date": self.today(), "time": "10:00", "dog": "Rex", "walker": "Maya"})
+        self.assertEqual(self.post(f"/api/walks/{w['id']}/done", {"note": ""})[0], 400)
+        self.assertEqual(self.post(f"/api/walks/{w['id']}/done", {"note": "x" * 281})[0], 400)
+        code, done = self.post(f"/api/walks/{w['id']}/done", {"note": "Great walk"})
+        self.assertEqual((code, done["done"], done["note"]), (200, True, "Great walk"))
+        self.assertTrue(done["done_at"])
+        code, undone = self.post(f"/api/walks/{w['id']}/undo")
+        self.assertEqual((code, undone["done"]), (200, False))
+
+    def test_data_survives_restart(self):  # B7
+        self.post("/api/walkers", {"name": "Maya"})
+        _, w = self.post("/api/walks", {"date": self.today(), "time": "10:00", "dog": "Rex", "walker": "Maya"})
+        self.stop()
+        self.start()
+        self.assertEqual(self.get("/api/walkers")[1]["walkers"], ["Maya"])
+        self.assertEqual([x["id"] for x in self.get("/api/day?date=" + self.today())[1]["walks"]], [w["id"]])
+
+    def test_errors_and_unknown_routes(self):
+        self.assertEqual(self.post("/api/walks/nope/done", {"note": "x"})[0], 404)
+        self.assertEqual(self.post("/api/walks/nope/undo")[0], 404)
+        self.assertEqual(self.post("/api/walks", b"not json")[0], 400)
+        self.assertEqual(self.get("/nowhere")[0], 404)
+        self.assertEqual(self.post("/api/nowhere")[0], 404)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+--- test_walks.py ---
+import json
+import os
+import tempfile
+import unittest
+from datetime import date, datetime
+
+from walks import WalkStore
+
+
+class WalkStoreTests(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.dir.name, "walks.json")
+        self.s = WalkStore(self.path)
+        for name in ("Maya", "Tom"):
+            self.s.add_walker(name)
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def test_walker_list(self):  # B1
+        self.assertEqual(self.s.walkers(), ["Maya", "Tom"])
+        for bad in ("", "  ", "maya"):
+            with self.assertRaises(ValueError):
+                self.s.add_walker(bad)
+        self.s.remove_walker("Tom")
+        self.assertEqual(self.s.walkers(), ["Maya"])
+        with self.assertRaises(KeyError):
+            self.s.remove_walker("Nobody")
+
+    def test_add_walk_validates(self):  # B2
+        for d, t, dog in [("2026-13-01", "09:00", "Rex"), ("tomorrow", "09:00", "Rex"), ("2026-10-01", "9am", "Rex"),
+                          ("2026-10-01", "24:00", "Rex"), ("2026-10-01", "09:00", " ")]:
+            with self.assertRaises(ValueError):
+                self.s.add_walk(d, t, dog)
+        w = self.s.add_walk("2026-10-01", "09:30", "Rex", "Blue gate", "Maya")
+        self.assertEqual(set(w), {"id", "date", "time", "dog", "details", "walker", "done", "note", "done_at"})
+        self.assertFalse(w["done"])
+
+    def test_assign_only_to_listed_walkers(self):  # B3
+        w = self.s.add_walk("2026-10-01", "09:30", "Rex")
+        self.assertEqual(w["walker"], "")
+        self.assertEqual(self.s.assign(w["id"], "Tom")["walker"], "Tom")
+        with self.assertRaises(ValueError):
+            self.s.assign(w["id"], "Stranger")
+        with self.assertRaises(ValueError):
+            self.s.add_walk("2026-10-01", "10:00", "Bo", walker="Stranger")
+        self.assertEqual(self.s.assign(w["id"], "")["walker"], "")
+        with self.assertRaises(KeyError):
+            self.s.assign("nope", "Tom")
+
+    def test_removing_a_walker_unassigns_their_walks(self):
+        w = self.s.add_walk("2026-10-01", "09:30", "Rex", walker="Tom")
+        self.s.remove_walker("Tom")
+        self.assertEqual(self.s.get(w["id"])["walker"], "")
+
+    def test_day_view_sorted_by_time(self):  # B4
+        b = self.s.add_walk("2026-10-01", "14:00", "Bo", walker="Tom")
+        a = self.s.add_walk("2026-10-01", "08:15", "Ace", walker="Maya")
+        self.s.add_walk("2026-10-02", "07:00", "Cy", walker="Maya")
+        self.assertEqual([w["id"] for w in self.s.day("2026-10-01")], [a["id"], b["id"]])
+
+    def test_today_for_shows_only_that_walkers_walks_today(self):  # B5
+        today = date(2026, 10, 1)
+        late = self.s.add_walk("2026-10-01", "16:00", "Rex", walker="Maya")
+        early = self.s.add_walk("2026-10-01", "08:00", "Ace", walker="Maya")
+        self.s.add_walk("2026-10-01", "09:00", "Bo", walker="Tom")
+        self.s.add_walk("2026-10-02", "09:00", "Cy", walker="Maya")
+        self.s.add_walk("2026-10-01", "10:00", "Dot")
+        self.assertEqual([w["id"] for w in self.s.today_for("Maya", today)], [early["id"], late["id"]])
+        self.assertEqual(self.s.today_for("", today), [])
+
+    def test_mark_done_needs_a_short_note(self):  # B6
+        w = self.s.add_walk("2026-10-01", "09:00", "Rex", walker="Maya")
+        for bad in ("", "   ", "x" * 281):
+            with self.assertRaises(ValueError):
+                self.s.mark_done(w["id"], bad)
+        done = self.s.mark_done(w["id"], "  Good walk, drank water  ", now=datetime(2026, 10, 1, 9, 40))
+        self.assertEqual((done["done"], done["note"], done["done_at"]), (True, "Good walk, drank water", "2026-10-01T09:40"))
+        self.assertEqual(len(self.s.mark_done(w["id"], "y" * 280)["note"]), 280)
+        undone = self.s.undo_done(w["id"])
+        self.assertEqual((undone["done"], undone["note"], undone["done_at"]), (False, "", ""))
+        with self.assertRaises(KeyError):
+            self.s.mark_done("nope", "note")
+
+    def test_everything_survives_a_restart(self):  # B7
+        w = self.s.add_walk("2026-10-01", "09:00", "Rex", walker="Maya")
+        self.s.mark_done(w["id"], "done")
+        again = WalkStore(self.path)
+        self.assertEqual(again.walkers(), ["Maya", "Tom"])
+        self.assertEqual(again.get(w["id"]), self.s.get(w["id"]))
+        with open(self.path, encoding="utf-8") as fh:
+            self.assertEqual(len(json.load(fh)["walks"]), 1)
+
+    def test_empty_file_loads(self):
+        open(self.path, "w").close()
+        self.assertEqual(WalkStore(self.path).walkers(), [])
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+--- walks.py ---
+"""Walk store for the dog walk tracker. Standard library only, one JSON file, atomic writes."""
+from __future__ import annotations
+
+import json
+import os
+import re
+import tempfile
+import threading
+import uuid
+from datetime import date, datetime
+
+TIME = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+NOTE_MAX = 280
+
+
+def _date(value) -> str:
+    text = str(value or "").strip()
+    try:
+        return datetime.strptime(text, "%Y-%m-%d").date().isoformat()
+    except ValueError:
+        raise ValueError(f"date {text!r} must be a real date as YYYY-MM-DD") from None
+
+
+class WalkStore:
+    def __init__(self, path):
+        self.path = str(path)
+        self._lock = threading.RLock()
+        self._walkers: list[str] = []
+        self._walks: dict[str, dict] = {}
+        if os.path.exists(self.path):
+            with open(self.path, encoding="utf-8") as fh:
+                text = fh.read().strip()
+            data = json.loads(text) if text else {}
+            self._walkers = list(data.get("walkers", []))
+            self._walks = {w["id"]: w for w in data.get("walks", [])}
+
+    def _save(self) -> None:
+        folder = os.path.dirname(os.path.abspath(self.path))
+        os.makedirs(folder, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix=".walks_", suffix=".json", dir=folder)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump({"walkers": self._walkers, "walks": list(self._walks.values())}, fh, indent=1)
+            os.replace(tmp, self.path)
+        except BaseException:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+            raise
+
+    # walkers ------------------------------------------------------------
+    def walkers(self) -> list[str]:
+        return sorted(self._walkers, key=str.lower)
+
+    def add_walker(self, name) -> str:
+        name = str(name or "").strip()
+        if not name:
+            raise ValueError("walker name is required")
+        with self._lock:
+            if name.lower() in (w.lower() for w in self._walkers):
+                raise ValueError(f"{name} is already on the walker list")
+            self._walkers.append(name)
+            self._save()
+        return name
+
+    def remove_walker(self, name) -> None:
+        with self._lock:
+            if name not in self._walkers:
+                raise KeyError(name)
+            self._walkers.remove(name)
+            for w in self._walks.values():
+                if w["walker"] == name:
+                    w["walker"] = ""
+            self._save()
+
+    def _check_walker(self, walker) -> str:
+        walker = str(walker or "").strip()
+        if walker and walker not in self._walkers:
+            raise ValueError(f"{walker} is not on the walker list")
+        return walker
+
+    # walks --------------------------------------------------------------
+    def add_walk(self, date, time, dog, details="", walker="") -> dict:
+        d = _date(date)
+        t = str(time or "").strip()
+        if not TIME.match(t):
+            raise ValueError(f"time {t!r} must be HH:MM in 24 hours")
+        dog = str(dog or "").strip()
+        if not dog:
+            raise ValueError("dog name is required")
+        with self._lock:
+            walk = {"id": uuid.uuid4().hex[:8], "date": d, "time": t, "dog": dog,
+                    "details": str(details or "").strip(), "walker": self._check_walker(walker),
+                    "done": False, "note": "", "done_at": ""}
+            self._walks[walk["id"]] = walk
+            self._save()
+        return dict(walk)
+
+    def _get(self, walk_id) -> dict:
+        if walk_id not in self._walks:
+            raise KeyError(walk_id)
+        return self._walks[walk_id]
+
+    def get(self, walk_id) -> dict:
+        return dict(self._get(walk_id))
+
+    def assign(self, walk_id, walker) -> dict:
+        with self._lock:
+            w = self._get(walk_id)
+            w["walker"] = self._check_walker(walker)
+            self._save()
+            return dict(w)
+
+    def day(self, on) -> list[dict]:
+        d = _date(on)
+        return [dict(w) for w in sorted(self._walks.values(), key=lambda w: (w["time"], w["dog"])) if w["date"] == d]
+
+    def today_for(self, walker, today) -> list[dict]:
+        d = today.isoformat() if isinstance(today, date) else _date(today)
+        return [w for w in self.day(d) if walker and w["walker"] == walker]
+
+    def mark_done(self, walk_id, note, now=None) -> dict:
+        note = str(note or "").strip()
+        if not note:
+            raise ValueError("add a short note when marking a walk done")
+        if len(note) > NOTE_MAX:
+            raise ValueError(f"the note is {len(note)} characters; keep it to {NOTE_MAX}")
+        with self._lock:
+            w = self._get(walk_id)
+            w.update({"done": True, "note": note,
+                      "done_at": (now or datetime.now()).isoformat(timespec="minutes")})
+            self._save()
+            return dict(w)
+
+    def undo_done(self, walk_id) -> dict:
+        with self._lock:
+            w = self._get(walk_id)
+            w.update({"done": False, "note": "", "done_at": ""})
+            self._save()
+            return dict(w)
+
+
+If a fact you need is missing and you would have to guess it, raise a Blocker instead.
+Return one JSON object: {"result": "proposal", "problem": "...", "recommendation": "...", "evidence_refs": [], "cost": "...", "confidence": "low, medium or high", "what_would_change_this": "..."}

@@ -1,0 +1,20 @@
+You are the PM worker. You write specs and acceptance checks, plan and assign tasks, and answer Blockers from the objective and decided rules. You never write product code.
+Confirmed objective:
+{
+ "product": "Small internal tool for assigning and tracking daily dog walks",
+ "target_customer": "The owner and walkers of a six person dog walking company",
+ "primary_outcome": "The owner assigns each day's walks to walkers, each walker sees their walks for today, and a walker marks a walk done with a short note",
+ "business_outcome": "Every scheduled walk is assigned and its completion is recorded, so no walk is missed or forgotten",
+ "success_criteria": "The owner can assign each walk for a day to a walker; a walker sees only their walks for today; a walker can mark a walk done with a short note",
+ "constraints": "Only the team uses it; no payments; opens quickly on the office PC without installing anything",
+ "priorities": "Assigning the day's walks first, then walkers seeing today's walks, then marking walks done with a note"
+}
+Decided rules:
+* No logins. The owner keeps a list of walker names in the tool. A walker picks their name from that list on the walker screen and the choice is remembered in that browser. The owner screen is the only place walks are created or assigned. This is a convenience, not security, which fits an internal tool on the office PC.
+
+Delivery contract. The product is a Python 3.10 standard library web app. No third party packages. app.py sits at the repository root and starts its HTTP server only under `if __name__ == "__main__":`, on 127.0.0.1 and the port in the PORT environment variable. It answers GET /health with 200 and GET / with 200 and the product's web page. It keeps its data in the JSON file named by the DATA_FILE environment variable. Tests are unittest files named test_*.py at the repository root; they must not need the network, and a test that starts a server uses port 0. Every test in the repository is rerun with `python -m unittest discover` on each change. File names are paths relative to the repository root; Markdown documents are filed under docs/.
+
+Assign task t_04 (Web app with owner and walker screens) to w_eng_a. Expected output: app.py, index.html and test_app.py.
+Artifacts that exist: ["t_01/DECISIONS.md", "t_02/acceptance.md", "t_02/spec.md", "t_03/test_walks.py", "t_03/walks.py"]
+List only the artifacts the engineer needs. Put every closed list or rule they must not invent into acceptance_check.
+Return JSON: {"artifacts": [ids], "context_ref": "...", "acceptance_check": "..."}

@@ -4,8 +4,10 @@
 
 const S = {
   st: null, view: "company", worker: "w_eng_b", replayTask: null, replay: null, replayKey: "",
-  seen: -1, sig: "", err: "", busy: false, graph: null, mode: "demo",
+  seen: -1, sig: "", err: "", busy: false, graph: null, mode: "demo", shown: new Set(),
 };
+/* Cards animate in only the first time they appear; a repaint must not replay it for every card. */
+const fresh = (key) => { if (S.shown.has(key)) return ""; S.shown.add(key); return "fresh"; };
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -327,9 +329,9 @@ function vWork() {
     return `<span class="small muted">${esc(statusText(t))}</span>`;
   };
   const colHtml = cols.map(([name, sts]) => `<div class="col"><span class="caps" style="font-weight:600">${name}</span>
-    ${ts.filter((t) => sts.includes(t.status)).map((t) => `<div class="tcard ${active === t.id ? "active" : ""}"><span class="meta">${esc(t.id)} · ${esc(t.owner_worker_id)} · ${esc(t.risk_tier)}</span>
+    ${ts.filter((t) => sts.includes(t.status)).map((t) => `<div class="tcard ${active === t.id ? "active" : ""} ${fresh("t:" + t.id + ":" + t.status)}"><span class="meta">${esc(t.id)} · ${esc(t.owner_worker_id)} · ${esc(t.risk_tier)}</span>
       <span class="ttl">${esc(t.title)}</span>${note(t)}</div>`).join("")}</div>`).join("");
-  const tape = (st.protocols || []).slice().reverse().map((p) => `<div class="pobj ${esc(p.kind)}"><span class="h">${esc(p.kind)} · ${esc(p.sender)} to ${esc(p.to)} · ${esc(p.task_id)}</span>
+  const tape = (st.protocols || []).slice().reverse().map((p) => `<div class="pobj ${esc(p.kind)} ${fresh("p:" + p.id)}"><span class="h">${esc(p.kind)} · ${esc(p.sender)} to ${esc(p.to)} · ${esc(p.task_id)}</span>
     <span class="small">${esc(p.summary)}</span>${p.artifacts && p.artifacts.length ? `<span class="small muted mono">${esc(p.artifacts.join(", "))}</span>` : ""}</div>`).join("");
   return `<p class="small muted" style="margin:0">Completed means a worker says it is done. Verified means the Verification Service agrees.</p>
     <div class="work"><div class="cols">${colHtml}</div>
@@ -343,7 +345,7 @@ function vDecisions() {
         <textarea class="note" id="edit_${d.id}">${esc(d.recommendation)}</textarea>` : d.kind === "budget_breaker" ?
       `<label class="lbl" for="cap_${d.id}">New cap, work units</label><input type="number" id="cap_${d.id}" value="${esc(st.budget.cap + 60)}">` : "";
     const side = d.extra && d.extra.side_action ? `<div class="deny"><span class="h">${esc(d.extra.side_action.status.toUpperCase())} · external_message</span><span class="small">${esc(d.extra.side_action.summary)} ${esc(d.extra.side_action.reason)}</span></div>` : "";
-    return `<div class="dcard"><div class="between"><span class="mono small muted">${esc(d.id)} · from ${esc(wt(d.source))}</span>${riskPill(d.risk)}</div>
+    return `<div class="dcard ${fresh("d:" + d.id)}"><div class="between"><span class="mono small muted">${esc(d.id)} · from ${esc(wt(d.source))}</span>${riskPill(d.risk)}</div>
       <h2>${esc(KIND_TITLE[d.kind] || d.kind)}${d.task_id ? `: ${esc(d.task_id)}` : ""}</h2>
       <div class="dgrid"><div><span class="caps">Problem</span><p>${esc(d.problem)}</p></div><div><span class="caps">Recommendation</span><p>${esc(d.recommendation)}</p></div>
         <div><span class="caps">Evidence</span><p>${esc((d.evidence_refs || []).join("; ") || "none")}</p></div><div><span class="caps">What would change this</span><p>${esc(d.what_would_change_this)}</p></div></div>

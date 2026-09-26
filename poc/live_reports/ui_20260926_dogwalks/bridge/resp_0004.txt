@@ -1,0 +1,7 @@
+{"result": "proposal",
+ "problem": "Walkers must see only their own walks for today, and the objective rules out anything to install and says only the team uses it; it does not say how a walker tells the tool who they are.",
+ "recommendation": "No logins. The owner keeps a list of walker names in the tool. A walker picks their name from that list on the walker screen and the choice is remembered in that browser. The owner screen is the only place walks are created or assigned. This is a convenience, not security, which fits an internal tool on the office PC.",
+ "evidence_refs": ["objective v1 constraints", "objective v1 success criteria"],
+ "cost": "none, a product rule",
+ "confidence": "medium",
+ "what_would_change_this": "A need to stop one walker seeing or changing another walker's walks, which would need passwords or PINs."}

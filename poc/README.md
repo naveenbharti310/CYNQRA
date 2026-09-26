@@ -78,6 +78,8 @@ card (the work goes back with your note).
     python -m unittest -v
 
 The browser test runs when Node and Playwright are installed and is skipped otherwise.
+For live mode through the UI with a real model, start `run_poc.py` with a key set, then
+`node tests/e2e/live_walk.js http://127.0.0.1:8750 <screenshot dir> "<objective>"`.
 TEST_REPORT.md holds the last full run and its coverage.
 
 ## Folder map

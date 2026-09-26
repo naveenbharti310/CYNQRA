@@ -31,3 +31,36 @@ estimated from characters and `counts_as_measured_result` is false. The API wire
 covered by `tests/test_adapter.py` against a local server speaking the Anthropic and OpenAI
 formats. A measured run needs `ANTHROPIC_API_KEY`: `python poc/live_check.py`, or
 RUN_M1.bat item 7. It is not gate evidence for S1, S2 or S3.
+
+## 26 September 2026, 17:50: PASS through the live mode UI, command model
+
+The same kind of run, driven through the real screens instead of the engine:
+`run_poc.py` in live mode, Chromium clicking what a founder clicks (`tests/e2e/live_walk.js`),
+and Claude answering every worker prompt through the bridge. New objective: a six person
+dog walking company that assigns daily walks to walkers, who mark them done with a note.
+
+What it exercised, in order: Live chosen in the wizard; the objective structured; the plan
+rejected once from the UI and the founder's note reaching the planner, which answered with a
+different plan; a product rule approved from the Decisions screen; a rehearsed provider
+outage on t_03's assignment, shown as Stopped with "Try the same step again", clicked, and
+the same step asked again; two code tasks, merge, deploy and acceptance approved from the
+UI; the live product opened; the audit replay complete, 8 of 8 facts. Every task verified
+first pass. `ui_20260926_dogwalks/ui_walk_result.json` has the driver's own record, and all
+13 prompts and replies are in `ui_20260926_dogwalks/bridge/` (prompt 6 is the rehearsed
+outage and has no reply).
+
+Then the delivered product was used in Chromium: two walkers added, three walks assigned,
+Maya saw only her two walks earliest first, marked one done with a note, an empty note was
+refused with the spec's message, and her name was remembered after a reload
+(`12_product_owner.png`, `13_product_walker.png`).
+
+What the attempt found before it could pass, all fixed with checks that fail on the old code:
+
+1. Choosing Live in the UI never worked: the company was always created in demo mode.
+   The first attempt ran entirely on the scripted demo and was thrown away.
+2. Founder edits to objective fields and the budget cap were discarded on Confirm.
+3. The screen froze and the kill switch could not be pressed while a model was answering.
+4. Every repaint replayed the fade in of every card, so the screen flickered throughout a
+   run; `05_stopped.png` was taken before this fix and shows it.
+
+Same limits as the first run: tokens estimated, no cost, not a measured API result.

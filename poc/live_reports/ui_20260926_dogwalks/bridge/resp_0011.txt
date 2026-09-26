@@ -1,0 +1,7 @@
+{"result": "proposal",
+ "problem": "The release candidate combines the walk store (t_03) and the web app (t_04) and needs the founder's approval to merge to main.",
+ "recommendation": "Merge the release candidate to main. The store validates dates, times, notes of 1 to 280 characters and walkers against the list; the app keeps to the handed off routes, binds to 127.0.0.1 only, has no payment fields, and follows the no login identity rule with the name remembered in the browser.",
+ "evidence_refs": ["t_03/walks.py", "t_03/test_walks.py", "t_04/app.py", "t_04/test_app.py", "t_01/DECISIONS.md"],
+ "cost": "none beyond the merge",
+ "confidence": "high",
+ "what_would_change_this": "A failing test on the release candidate, or the founder wanting walkers kept from seeing each other's walks, which the rule does not do."}

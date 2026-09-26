@@ -1,0 +1,83 @@
+You are Engineer B. You write Python and unittest tests inside your own workspace only.
+Confirmed objective:
+{
+ "product": "Small internal tool for assigning and tracking daily dog walks",
+ "target_customer": "The owner and walkers of a six person dog walking company",
+ "primary_outcome": "The owner assigns each day's walks to walkers, each walker sees their walks for today, and a walker marks a walk done with a short note",
+ "business_outcome": "Every scheduled walk is assigned and its completion is recorded, so no walk is missed or forgotten",
+ "success_criteria": "The owner can assign each walk for a day to a walker; a walker sees only their walks for today; a walker can mark a walk done with a short note",
+ "constraints": "Only the team uses it; no payments; opens quickly on the office PC without installing anything",
+ "priorities": "Assigning the day's walks first, then walkers seeing today's walks, then marking walks done with a note"
+}
+Decided rules:
+* No logins. The owner keeps a list of walker names in the tool. A walker picks their name from that list on the walker screen and the choice is remembered in that browser. The owner screen is the only place walks are created or assigned. This is a convenience, not security, which fits an internal tool on the office PC.
+
+Delivery contract. The product is a Python 3.10 standard library web app. No third party packages. app.py sits at the repository root and starts its HTTP server only under `if __name__ == "__main__":`, on 127.0.0.1 and the port in the PORT environment variable. It answers GET /health with 200 and GET / with 200 and the product's web page. It keeps its data in the JSON file named by the DATA_FILE environment variable. Tests are unittest files named test_*.py at the repository root; they must not need the network, and a test that starts a server uses port 0. Every test in the repository is rerun with `python -m unittest discover` on each change. File names are paths relative to the repository root; Markdown documents are filed under docs/.
+
+Task t_03: Walk store. Expected output: walks.py and test_walks.py.
+Handoff: {"acceptance_check": "Write walks.py and test_walks.py, standard library only. Interface used by the web app task, do not rename: WalkStore(path) keeps walkers and walks in one JSON file at path, loading it if it exists, every change saved at once and atomically. walkers() returns the sorted list of names; add_walker(name) strips the name, raises ValueError if blank or already on the list (case insensitive); remove_walker(name) raises KeyError if absent and leaves that walker's walks unassigned (walker set to ''). add_walk(date, time, dog, details='', walker='') returns the walk dict; date must be a real YYYY-MM-DD, time HH:MM in 24 hours, dog non blank, walker '' or a name on the list, else ValueError. assign(walk_id, walker) with walker '' or a listed name. day(date) returns every walk on that date sorted by time. today_for(walker, today) returns only walks on today assigned to that walker, sorted by time. mark_done(walk_id, note, now=None) needs a note of 1 to 280 characters after stripping, sets done True, note and done_at (ISO time); undo_done(walk_id) sets done False and clears note and done_at. Unknown walk ids raise KeyError. Walk dict keys: id, date, time, dog, details, walker, done, note, done_at. Tests cover B1 to B7.", "context_ref": "objective v1, identity rule t_01, spec t_02", "artifacts": ["t_02/spec.md", "t_02/acceptance.md", "t_01/DECISIONS.md"]}
+Files already in the repository: ["docs/DECISIONS.md", "docs/acceptance.md", "docs/spec.md"]
+Files handed to you:
+--- DECISIONS.md ---
+## How a walker picks who they are without logins (dec_t_01, approved by the founder)
+
+No logins. The owner keeps a list of walker names in the tool. A walker picks their name from that list on the walker screen and the choice is remembered in that browser. The owner screen is the only place walks are created or assigned. This is a convenience, not security, which fits an internal tool on the office PC.
+
+
+--- acceptance.md ---
+# Acceptance checks
+
+B1. The owner adds walker names; a name is required, duplicates are refused, and names can be removed.
+B2. The owner adds a walk with a real date, a time as HH:MM and a dog name; anything missing or malformed is refused with a clear message.
+B3. A walk can be assigned only to a name on the walker list, reassigned, or left unassigned.
+B4. The owner's day view lists every walk for the chosen date, earliest time first, with walker and done state.
+B5. A walker's today view lists only walks for today assigned to that walker, earliest time first; other walkers' walks and other days never appear.
+B6. Marking a walk done needs a note of 1 to 280 characters; it records done and the time it was marked. It can be undone by the owner.
+B7. Everything is kept in the DATA_FILE JSON file and survives a restart.
+B8. GET /health answers 200 and GET / serves the page; the app binds to 127.0.0.1 only; no payment fields anywhere.
+B9. Nothing to install: standard library only; the whole suite passes with python -m unittest discover.
+
+--- spec.md ---
+# Dog walk tracker: product spec
+
+## Problem
+A six person dog walking company needs every day's walks assigned and done, with nothing missed.
+
+## Users
+- The owner: keeps the walker list, creates each day's walks and assigns each walk to a walker.
+- Walkers: see their walks for today and mark a walk done with a short note.
+Only the team uses it; there is nothing public.
+
+## Walker identity (decided rule, t_01)
+No logins. The owner keeps a list of walker names. A walker picks their name on the walker
+screen and the browser remembers it. Only the owner screen creates or assigns walks. This is
+a convenience, not security.
+
+## What people can do
+1. Owner: add or remove a walker name.
+2. Owner: add a walk for a date: dog name, pickup address or note, time (HH:MM), and the walker it is assigned to.
+   The owner can reassign a walk to another walker, or leave it unassigned for now.
+3. Owner: see all walks for a chosen day, with each walk's walker and whether it is done.
+4. Walker: pick their name and see only their walks for today, earliest time first.
+5. Walker: mark a walk done with a short note (up to 280 characters). A done walk shows the note and when it was marked.
+
+## Walk fields
+id, date (YYYY-MM-DD), time (HH:MM), dog, details, walker (a name from the list, or empty),
+done (yes or no), note, done_at.
+
+## Constraints, stated by the founder
+- Only the team uses it: it listens on 127.0.0.1 on the office PC, with no public page and no sign up.
+- No payments: there are no prices, invoices or card fields anywhere.
+- Opens quickly on the office PC without installing anything: Python standard library only, one JSON data file, one page with no external resources.
+
+## Out of scope
+Payments, customer accounts, route planning, notifications, recurring schedules.
+
+## Success criteria
+- The owner can assign each walk for a day to a walker.
+- A walker sees only their walks for today.
+- A walker can mark a walk done with a short note.
+
+
+If a fact you need is missing and you would have to guess it, raise a Blocker instead.
+Return one JSON object: {"result": "done", "summary": "...", "files": {"name.ext": "full file content"}, "acceptance_check": "..."} or {"result": "blocked", "category": "missing_input", "description": "...", "needs_from": "w_pm"}

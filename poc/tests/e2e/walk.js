@@ -65,6 +65,15 @@ function loadPlaywright() {
       }
       await shot(`04_${v}`);
     }
+    await page.click('button[data-view="work"]');
+    await page.waitForTimeout(800);
+    await page.click('button[data-view="work"]');
+    await page.waitForTimeout(50);
+    const opacity = Number(await page.$eval(".tcard", (el) => getComputedStyle(el).opacity));
+    if (opacity < 0.99) errors.push(`cards replay their fade in on every repaint (opacity ${opacity} just after one)`);
+    steps.push("a repaint does not replay the card animation");
+    await page.click('button[data-view="delivery"]');
+    await page.waitForTimeout(300);
     const live = await page.getAttribute("#live-link", "href");
     const app = await browser.newPage();
     await app.goto(live);

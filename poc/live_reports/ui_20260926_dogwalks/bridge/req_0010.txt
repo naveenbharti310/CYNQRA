@@ -1,0 +1,224 @@
+You are Engineer A. You write Python and unittest tests inside your own workspace only.
+Confirmed objective:
+{
+ "product": "Small internal tool for assigning and tracking daily dog walks",
+ "target_customer": "The owner and walkers of a six person dog walking company",
+ "primary_outcome": "The owner assigns each day's walks to walkers, each walker sees their walks for today, and a walker marks a walk done with a short note",
+ "business_outcome": "Every scheduled walk is assigned and its completion is recorded, so no walk is missed or forgotten",
+ "success_criteria": "The owner can assign each walk for a day to a walker; a walker sees only their walks for today; a walker can mark a walk done with a short note",
+ "constraints": "Only the team uses it; no payments; opens quickly on the office PC without installing anything",
+ "priorities": "Assigning the day's walks first, then walkers seeing today's walks, then marking walks done with a note"
+}
+Decided rules:
+* No logins. The owner keeps a list of walker names in the tool. A walker picks their name from that list on the walker screen and the choice is remembered in that browser. The owner screen is the only place walks are created or assigned. This is a convenience, not security, which fits an internal tool on the office PC.
+
+Delivery contract. The product is a Python 3.10 standard library web app. No third party packages. app.py sits at the repository root and starts its HTTP server only under `if __name__ == "__main__":`, on 127.0.0.1 and the port in the PORT environment variable. It answers GET /health with 200 and GET / with 200 and the product's web page. It keeps its data in the JSON file named by the DATA_FILE environment variable. Tests are unittest files named test_*.py at the repository root; they must not need the network, and a test that starts a server uses port 0. Every test in the repository is rerun with `python -m unittest discover` on each change. File names are paths relative to the repository root; Markdown documents are filed under docs/.
+
+Task t_04: Web app with owner and walker screens. Expected output: app.py, index.html and test_app.py.
+Handoff: {"acceptance_check": "Write app.py, index.html and test_app.py. Use WalkStore from walks.py unchanged. app.py opens WalkStore at DATA_FILE (default walks.json), serves on 127.0.0.1 and PORT, and starts only under if __name__ == '__main__'; expose make_server(port, data_file) returning a ThreadingHTTPServer for tests on port 0. Routes, closed list, JSON unless noted: GET /health 200 {\"ok\": true}; GET / the page (index.html); GET /api/walkers -> {\"walkers\": [...]}; POST /api/walkers {name} -> 201; POST /api/walkers/remove {name} -> 200, 404 if absent; GET /api/day?date=YYYY-MM-DD -> {\"date\", \"walks\"} (default today); POST /api/walks {date, time, dog, details, walker} -> 201 walk; POST /api/walks/<id>/assign {walker} -> 200 walk; GET /api/today?walker=NAME -> {\"today\", \"walker\", \"walks\"} using the server's local date; POST /api/walks/<id>/done {note} -> 200 walk; POST /api/walks/<id>/undo -> 200 walk. ValueError or bad JSON -> 400 {\"error\": message}; unknown walk id -> 404; any other path -> 404. index.html: one page, no external resources, two tabs: Owner (walker list with add and remove, a date picker, the day's walks with a walker dropdown to assign, and a form to add a walk) and Walker (pick your name from the list, remembered in localStorage per the identity rule, today's walks earliest first, a note box and Done button per walk, done walks show their note). Show the app's error text on refusal. No payment fields. Tests cover every route and B1 to B8.", "context_ref": "objective v1, identity rule t_01, spec t_02, store t_03", "artifacts": ["t_03/walks.py", "t_02/spec.md", "t_02/acceptance.md", "t_01/DECISIONS.md"]}
+Files already in the repository: ["docs/DECISIONS.md", "docs/acceptance.md", "docs/spec.md", "test_walks.py", "walks.py"]
+Files handed to you:
+--- DECISIONS.md ---
+## How a walker picks who they are without logins (dec_t_01, approved by the founder)
+
+No logins. The owner keeps a list of walker names in the tool. A walker picks their name from that list on the walker screen and the choice is remembered in that browser. The owner screen is the only place walks are created or assigned. This is a convenience, not security, which fits an internal tool on the office PC.
+
+
+--- acceptance.md ---
+# Acceptance checks
+
+B1. The owner adds walker names; a name is required, duplicates are refused, and names can be removed.
+B2. The owner adds a walk with a real date, a time as HH:MM and a dog name; anything missing or malformed is refused with a clear message.
+B3. A walk can be assigned only to a name on the walker list, reassigned, or left unassigned.
+B4. The owner's day view lists every walk for the chosen date, earliest time first, with walker and done state.
+B5. A walker's today view lists only walks for today assigned to that walker, earliest time first; other walkers' walks and other days never appear.
+B6. Marking a walk done needs a note of 1 to 280 characters; it records done and the time it was marked. It can be undone by the owner.
+B7. Everything is kept in the DATA_FILE JSON file and survives a restart.
+B8. GET /health answers 200 and GET / serves the page; the app binds to 127.0.0.1 only; no payment fields anywhere.
+B9. Nothing to install: standard library only; the whole suite passes with python -m unittest discover.
+
+--- spec.md ---
+# Dog walk tracker: product spec
+
+## Problem
+A six person dog walking company needs every day's walks assigned and done, with nothing missed.
+
+## Users
+- The owner: keeps the walker list, creates each day's walks and assigns each walk to a walker.
+- Walkers: see their walks for today and mark a walk done with a short note.
+Only the team uses it; there is nothing public.
+
+## Walker identity (decided rule, t_01)
+No logins. The owner keeps a list of walker names. A walker picks their name on the walker
+screen and the browser remembers it. Only the owner screen creates or assigns walks. This is
+a convenience, not security.
+
+## What people can do
+1. Owner: add or remove a walker name.
+2. Owner: add a walk for a date: dog name, pickup address or note, time (HH:MM), and the walker it is assigned to.
+   The owner can reassign a walk to another walker, or leave it unassigned for now.
+3. Owner: see all walks for a chosen day, with each walk's walker and whether it is done.
+4. Walker: pick their name and see only their walks for today, earliest time first.
+5. Walker: mark a walk done with a short note (up to 280 characters). A done walk shows the note and when it was marked.
+
+## Walk fields
+id, date (YYYY-MM-DD), time (HH:MM), dog, details, walker (a name from the list, or empty),
+done (yes or no), note, done_at.
+
+## Constraints, stated by the founder
+- Only the team uses it: it listens on 127.0.0.1 on the office PC, with no public page and no sign up.
+- No payments: there are no prices, invoices or card fields anywhere.
+- Opens quickly on the office PC without installing anything: Python standard library only, one JSON data file, one page with no external resources.
+
+## Out of scope
+Payments, customer accounts, route planning, notifications, recurring schedules.
+
+## Success criteria
+- The owner can assign each walk for a day to a walker.
+- A walker sees only their walks for today.
+- A walker can mark a walk done with a short note.
+
+--- walks.py ---
+"""Walk store for the dog walk tracker. Standard library only, one JSON file, atomic writes."""
+from __future__ import annotations
+
+import json
+import os
+import re
+import tempfile
+import threading
+import uuid
+from datetime import date, datetime
+
+TIME = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+NOTE_MAX = 280
+
+
+def _date(value) -> str:
+    text = str(value or "").strip()
+    try:
+        return datetime.strptime(text, "%Y-%m-%d").date().isoformat()
+    except ValueError:
+        raise ValueError(f"date {text!r} must be a real date as YYYY-MM-DD") from None
+
+
+class WalkStore:
+    def __init__(self, path):
+        self.path = str(path)
+        self._lock = threading.RLock()
+        self._walkers: list[str] = []
+        self._walks: dict[str, dict] = {}
+        if os.path.exists(self.path):
+            with open(self.path, encoding="utf-8") as fh:
+                text = fh.read().strip()
+            data = json.loads(text) if text else {}
+            self._walkers = list(data.get("walkers", []))
+            self._walks = {w["id"]: w for w in data.get("walks", [])}
+
+    def _save(self) -> None:
+        folder = os.path.dirname(os.path.abspath(self.path))
+        os.makedirs(folder, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix=".walks_", suffix=".json", dir=folder)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump({"walkers": self._walkers, "walks": list(self._walks.values())}, fh, indent=1)
+            os.replace(tmp, self.path)
+        except BaseException:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+            raise
+
+    # walkers ------------------------------------------------------------
+    def walkers(self) -> list[str]:
+        return sorted(self._walkers, key=str.lower)
+
+    def add_walker(self, name) -> str:
+        name = str(name or "").strip()
+        if not name:
+            raise ValueError("walker name is required")
+        with self._lock:
+            if name.lower() in (w.lower() for w in self._walkers):
+                raise ValueError(f"{name} is already on the walker list")
+            self._walkers.append(name)
+            self._save()
+        return name
+
+    def remove_walker(self, name) -> None:
+        with self._lock:
+            if name not in self._walkers:
+                raise KeyError(name)
+            self._walkers.remove(name)
+            for w in self._walks.values():
+                if w["walker"] == name:
+                    w["walker"] = ""
+            self._save()
+
+    def _check_walker(self, walker) -> str:
+        walker = str(walker or "").strip()
+        if walker and walker not in self._walkers:
+            raise ValueError(f"{walker} is not on the walker list")
+        return walker
+
+    # walks --------------------------------------------------------------
+    def add_walk(self, date, time, dog, details="", walker="") -> dict:
+        d = _date(date)
+        t = str(time or "").strip()
+        if not TIME.match(t):
+            raise ValueError(f"time {t!r} must be HH:MM in 24 hours")
+        dog = str(dog or "").strip()
+        if not dog:
+            raise ValueError("dog name is required")
+        with self._lock:
+            walk = {"id": uuid.uuid4().hex[:8], "date": d, "time": t, "dog": dog,
+                    "details": str(details or "").strip(), "walker": self._check_walker(walker),
+                    "done": False, "note": "", "done_at": ""}
+            self._walks[walk["id"]] = walk
+            self._save()
+        return dict(walk)
+
+    def _get(self, walk_id) -> dict:
+        if walk_id not in self._walks:
+            raise KeyError(walk_id)
+        return self._walks[walk_id]
+
+    def get(self, walk_id) -> dict:
+        return dict(self._get(walk_id))
+
+    def assign(self, walk_id, walker) -> dict:
+        with self._lock:
+            w = self._get(walk_id)
+            w["walker"] = self._check_walker(walker)
+            self._save()
+            return dict(w)
+
+    def day(self, on) -> list[dict]:
+        d = _date(on)
+        return [dict(w) for w in sorted(self._walks.values(), key=lambda w: (w["time"], w["dog"])) if w["date"] == d]
+
+    def today_for(self, walker, today) -> list[dict]:
+        d = today.isoformat() if isinstance(today, date) else _date(today)
+        return [w for w in self.day(d) if walker and w["walker"] == walker]
+
+    def mark_done(self, walk_id, note, now=None) -> dict:
+        note = str(note or "").strip()
+        if not note:
+            raise ValueError("add a short note when marking a walk done")
+        if len(note) > NOTE_MAX:
+            raise ValueError(f"the note is {len(note)} characters; keep it to {NOTE_MAX}")
+        with self._lock:
+            w = self._get(walk_id)
+            w.update({"done": True, "note": note,
+                      "done_at": (now or datetime.now()).isoformat(timespec="minutes")})
+            self._save()
+            return dict(w)
+
+    def undo_done(self, walk_id) -> dict:
+        with self._lock:
+            w = self._get(walk_id)
+            w.update({"done": False, "note": "", "done_at": ""})
+            self._save()
+            return dict(w)
+
+
+If a fact you need is missing and you would have to guess it, raise a Blocker instead.
+Return one JSON object: {"result": "done", "summary": "...", "files": {"name.ext": "full file content"}, "acceptance_check": "..."} or {"result": "blocked", "category": "missing_input", "description": "...", "needs_from": "w_pm"}
