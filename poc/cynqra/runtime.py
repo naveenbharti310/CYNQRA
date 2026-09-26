@@ -392,6 +392,8 @@ class Runtime:
                                              creationflags=NO_WINDOW)
             base = f"http://127.0.0.1:{port}"
             why = self._wait_ready(base, wait)
+            if not why and gpu_args != ["-ngl", "0"]:
+                why = self._probe(base)  # a GPU can load a model and still be unable to compute with it
             if not why:
                 self.base = base
                 self.use(model, base)
@@ -421,6 +423,28 @@ class Runtime:
                 pass
             time.sleep(0.5)
         return f"not ready after {int(wait)} s"
+
+    def _probe(self, base: str) -> str:
+        """One tiny answer from a server that started on a GPU. A driver that cannot really compute (seen on a
+        virtual Mac's emulated GPU: loaded fine, then no answer in an hour) fails here, and the start falls back
+        to the processor instead of freezing the founder's first run."""
+        self._set(state="checking-gpu")
+        limit = float(os.environ.get("CYNQRA_GPU_PROBE_S") or 120)
+        body = json.dumps({"messages": [{"role": "user", "content": "Reply with the word OK."}], "max_tokens": 4,
+                           "temperature": 0, "chat_template_kwargs": {"enable_thinking": False}}).encode()
+        t0 = time.time()
+        try:
+            req = urllib.request.Request(base + "/v1/chat/completions", data=body, method="POST",
+                                         headers={"Content-Type": "application/json", "User-Agent": "cynqra-desktop"})
+            with urllib.request.urlopen(req, timeout=limit) as r:
+                reply = json.loads(r.read())
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            return f"the GPU loaded the model but did not answer a 4-token test within {int(limit)} s ({exc})"
+        tps = float((reply.get("timings") or {}).get("predicted_per_second") or 0)
+        self._set(gpu_probe_s=round(time.time() - t0, 1), gpu_probe_tps=round(tps, 1))
+        if 0 < tps < 1.5:  # a real GPU writes tens of tokens a second; a crawl means it cannot really compute
+            return f"the GPU answered at {tps:.1f} tokens/s, slower than the processor would be"
+        return ""
 
     def use(self, model: dict, base: str) -> None:
         """Point model_adapter at the running server, with the research's request settings. Only the

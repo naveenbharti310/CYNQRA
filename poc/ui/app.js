@@ -198,7 +198,7 @@ function planStep() {
 const isDesktop = () => !!(S.st && S.st.desktop && S.st.runtime);
 const rt = () => (S.st && S.st.runtime) || {};
 const gb = (b) => (b >= 1073741824 ? (b / 1073741824).toFixed(1) : (b / 1073741824).toFixed(2));
-const RT_WORKING = ["downloading", "checking", "starting"];
+const RT_WORKING = ["downloading", "checking", "starting", "checking-gpu"];
 
 function rtSignature() {
   if (!isDesktop()) return "";
@@ -241,6 +241,8 @@ function modelStatus() {
       <div class="row"><button class="btn" id="rt-cancel">Pause download</button></div></div>`;
   }
   if (r.state === "checking") return `<div class="card stack"><b>Checking the download</b><span class="small muted">Comparing ${name} with its published SHA-256. Under a minute.</span></div>`;
+  if (r.state === "checking-gpu") return `<div class="card stack"><div class="row"><i class="dot pulse" style="color:var(--accent)"></i><b>Testing the graphics card</b></div>
+    <span class="small muted">${name} is loaded on the GPU; Cynqra asks it for one short answer before using it. If the card cannot answer, the processor is used instead.</span></div>`;
   if (r.state === "starting") return `<div class="card stack"><div class="row"><i class="dot pulse" style="color:var(--accent)"></i><b>Starting ${name}</b></div>
     <span class="small muted">llama.cpp is loading the model into memory${r.accel ? ` (${esc(r.accel === "cpu" ? "processor" : r.accel)})` : ""}. From a few seconds to two minutes.</span>
     <div class="row"><button class="btn" id="rt-cancel">Stop</button></div></div>`;

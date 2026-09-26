@@ -122,7 +122,8 @@ class DesktopBase(unittest.TestCase):
 
     def tearDown(self):
         runtime.HF = self._hf
-        for k in ("FAKE_LLAMA_REQUESTS", "FAKE_LLAMA_FAIL_GPU", "FAKE_LLAMA_EXIT", "FAKE_LLAMA_LOAD_S"):
+        for k in ("FAKE_LLAMA_REQUESTS", "FAKE_LLAMA_FAIL_GPU", "FAKE_LLAMA_EXIT", "FAKE_LLAMA_LOAD_S",
+                  "FAKE_LLAMA_STUCK_GPU", "CYNQRA_GPU_PROBE_S"):
             os.environ.pop(k, None)
         self.hf.close()
         self.tmp.cleanup()
@@ -216,6 +217,25 @@ class ServerTests(DesktopBase):
         rt.start(MODEL)
         self.assertEqual(rt.status["state"], "ready")
         self.assertIn("-ngl 0", rt.log_tail().splitlines()[0])
+
+    def test_a_gpu_that_loads_but_cannot_answer_falls_back_to_the_processor(self):
+        os.environ["FAKE_LLAMA_STUCK_GPU"] = "5"
+        os.environ["CYNQRA_GPU_PROBE_S"] = "1"
+        self.addCleanup(os.environ.pop, "FAKE_LLAMA_STUCK_GPU", None)
+        self.addCleanup(os.environ.pop, "CYNQRA_GPU_PROBE_S", None)
+        rt = self.runtime(metal=FAKE_SERVER)
+        rt.start(MODEL)
+        self.assertEqual(rt.status["state"], "ready")
+        self.assertIn("-ngl 0", rt.log_tail().splitlines()[0])  # restarted on the processor
+        out = model_adapter.complete("Convert the founder objective", want_json=True,
+                                     schema={"type": "object", "properties": {"a": {"type": "string"}}})
+        self.assertIsNone(out["error"])
+
+    def test_a_working_gpu_passes_its_probe(self):
+        rt = self.runtime(metal=FAKE_SERVER)
+        rt.start(MODEL)
+        self.assertIn("-ngl auto", rt.log_tail().splitlines()[0])
+        self.assertIn("gpu_probe_s", rt.status)
 
     def test_acceleration_plan(self):
         rt = self.runtime(cpu="c", vulkan="v")

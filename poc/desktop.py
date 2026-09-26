@@ -8,7 +8,8 @@
   --selftest [--online]            check this installation; exit 0 when every check passes
   --window-test                    open the window, wait until its page has loaded, close it
   --check-model MODEL              download and start MODEL, then have it structure an objective
-                                   and write a module that must pass its own tests
+                                   and write a module that must pass its own tests (exit 0 pass,
+                                   2 the model's work fell short, 1 something broke)
   --e2e MODEL "objective"          download and start MODEL, then run a whole Cynqra journey through
                                    the app's own HTTP API (what the window does), approving every
                                    decision; writes a report; exit 0 on PASS
@@ -513,12 +514,15 @@ def check_model(args) -> int:
         result["error"] = str(exc)[:500]
     finally:
         desk.close()
+    result["outcome"] = "pass" if ok else "error" if result.get("error") else "quality"
     out = Path(os.environ["CYNQRA_REPORTS_DIR"]) / f"check_{args.check_model}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, indent=1), encoding="utf-8")
     print(("PASS" if ok else "FAIL") + f": {BY_ID[args.check_model]['name']} on {platform.platform()}. "
           f"Reading {result.get('read_tps', 0)} tokens/s, writing {result.get('write_tps', 0)} tokens/s. {out}")
-    return 0 if ok else 1
+    # 0 passed; 2 the model answered every call but its work fell short (a model's quality, not the app's);
+    # 1 something broke on the way (download, llama-server, a call that errored)
+    return {"pass": 0, "quality": 2}.get(result["outcome"], 1)
 
 
 def speed(u: dict) -> str:

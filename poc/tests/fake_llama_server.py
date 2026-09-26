@@ -7,7 +7,8 @@ work replies go back as file blocks, the layout local models are asked for. Ever
 is appended to FAKE_LLAMA_REQUESTS (a file) so tests can check what the app sent.
 
 Knobs (environment): FAKE_LLAMA_FAIL_GPU=1 exits like a failed GPU allocation unless -ngl is 0;
-FAKE_LLAMA_DEVICES is what --list-devices prints;
+FAKE_LLAMA_DEVICES is what --list-devices prints; FAKE_LLAMA_STUCK_GPU seconds of silence per answer
+unless -ngl is 0;
 FAKE_LLAMA_EXIT=1 exits at once like a model that cannot load; FAKE_LLAMA_LOAD_S seconds of
 loading before /health answers 200.
 """
@@ -88,6 +89,8 @@ def main() -> int:
             if self.path != "/v1/chat/completions":
                 return self._send(404, {"error": "not found"})
             prompt = body["messages"][-1]["content"]
+            if os.environ.get("FAKE_LLAMA_STUCK_GPU") and args.ngl != "0":
+                time.sleep(float(os.environ["FAKE_LLAMA_STUCK_GPU"]))  # a GPU that loads but cannot compute
             busy.update(on=True, n=0, p=len(prompt) // 4)
             try:
                 text = fake_model.answer(prompt)

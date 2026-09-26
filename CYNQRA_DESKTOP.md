@@ -10,9 +10,9 @@ leaves the machine.
 
 | Your laptop | File | Size |
 | --- | --- | --- |
-| Windows 10 or 11, 64-bit | `Cynqra-Setup-<version>-windows-x64.exe` | about 90 MB |
-| Mac with Apple silicon (M1 to M4), macOS 12 or newer | `Cynqra-<version>-macos-arm64.dmg` | about 60 MB |
-| Linux, 64-bit (Ubuntu 22.04 or newer, or similar) | `Cynqra-<version>-linux-x64.tar.gz` | about 80 MB |
+| Windows 10 or 11, 64-bit | `Cynqra-Setup-<version>-windows-x64.exe` | 40 MB |
+| Mac with Apple silicon (M1 to M5), macOS 12 or newer | `Cynqra-<version>-macos-arm64.dmg` | 82 MB |
+| Linux, 64-bit (Ubuntu 22.04 or newer, or similar) | `Cynqra-<version>-linux-x64.tar.gz` | 82 MB |
 
 Each file has a `.sha256` next to it if you want to check the download.
 

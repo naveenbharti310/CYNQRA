@@ -169,3 +169,47 @@ stub ollama command; install.ps1 could not be run here (no PowerShell).
 Unrun: a real open model. This cloud environment's network policy blocks ollama.com,
 registry.ollama.ai and huggingface.co, so no model weights could be downloaded. The first real
 runs happen on the team's laptops; LAPTOP_SETUP.md says what to send back.
+
+## 26 September, sixth pass: the desktop app, tested on real Windows, macOS and Linux machines
+
+The fifth pass is superseded: its Ollama installers and cynqra_cli.py were replaced by an
+installable desktop app (CYNQRA_DESKTOP.md). It bundles Python 3.12.14 and llama.cpp's
+llama-server b11201, downloads the model once from Hugging Face (checked against the published
+SHA-256), and runs it on 127.0.0.1. The installers are built by .github/workflows/cynqra-desktop.yml
+on GitHub's machines, then installed there the way a user would and tested with real models.
+
+Measured on those machines (Windows Server 2025, macOS 26 on Apple M1, Ubuntu 24.04):
+
+| Check | Windows | macOS | Linux |
+| --- | --- | --- | --- |
+| Installer builds (size) | 40 MB .exe | 82 MB .dmg | 82 MB .tar.gz |
+| Installs like a user (silent installer, dmg copy, install.sh) | pass | pass | pass |
+| Self-test: bundled Python and llama-server run, app server, engine journey with real tests and deploy, model files on Hugging Face | 7 of 7 | 7 of 7 | 7 of 7 |
+| App window loads Cynqra (Edge app mode, pywebview, Chrome) | pass | pass | pass |
+| Launch like a user (Start menu, open Cynqra.app, menu entry), Quit stops app and llama-server | pass | pass | pass |
+| Real model: download, llama-server, objective, code that passes its own tests | pass (Qwen3.6 35B-A3B 2-bit: 23 tests right first time) | the emulated GPU froze (below) | pass (Qwen3.6 35B-A3B 2-bit: 15 tests right first time; one objective field left for the founder) |
+| Uninstall keeps the models; reinstall and self-test in `Program Files Tést\Cynqra Ü` with data in `Données de l'équipe` | pass | | |
+
+The first real runs found three defects, each fixed and covered by a test:
+- Qwen3.5 9B wrote code in a layout the strict file parser read as no files at all. The parser
+  now reads the common drifts, and a reply without files is asked for once more.
+- On macOS the window test passed but the process never exited (pywebview leaves a thread
+  behind). The app now ends its process once everything is stopped.
+- The Windows reinstall test passed a folder with spaces to the installer unquoted (a test bug).
+- On GitHub's virtual Mac, llama-server loaded the model on the emulated GPU (Metal) in 105 s and
+  then gave no answer to a 150-token request within the hour. A GPU that loads a model but cannot
+  compute would freeze a founder's first run, so every GPU start is now followed by a 4-token test
+  answer; a start that cannot answer within 2 minutes, or answers slower than 1.5 tokens/s, falls
+  back to the processor by itself.
+
+Model race on the 16 GB Linux machine, CPU only, Cynqra's own work (tokens per second are
+llama-server's own timings): Qwen3.5 9B passed after one fix, reading 12 and writing 5.1;
+Qwen3.6 35B-A3B 2-bit wrote passing code first time, reading 22 and writing 7.7, and still passed
+with 5 GB of the 16 held by another process; the 3-bit file passed after one fix at the same
+speed; gpt-oss 20B passed first time, reading 17 and writing 9.1; the smallest 2-bit file failed.
+The recommended model now follows memory: Qwen3.6 35B-A3B at 4, 3 and 2 bits for 32, 24 and 16 GB.
+
+Unrun here: a GPU (GitHub's standard machines have none), so the Vulkan path is exercised only
+up to device detection and the fallback to the processor; the macOS real-model check on the
+7 GB machine; Gatekeeper and SmartScreen prompts, which appear only for a file downloaded by a
+browser. Whole end-to-end runs with a real model on Windows and Linux are in progress.
