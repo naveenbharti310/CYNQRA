@@ -279,7 +279,7 @@ class AppApiTests(DesktopBase):
         st = desktop.http(self.base + "/api/state")
         self.assertTrue(st["desktop"])
         self.assertEqual(st["runtime"]["state"], "none")
-        self.assertEqual(len(st["runtime"]["catalog"]), len(runtime.CATALOG))
+        self.assertEqual(len(st["runtime"]["catalog"]), len([m for m in runtime.CATALOG if not m.get("hidden")]))
         desktop.http(self.base + "/api/runtime/start", {"model": MODEL})
         for _ in range(200):
             st = desktop.http(self.base + "/api/state")
@@ -303,6 +303,12 @@ class AppApiTests(DesktopBase):
         self.assertFalse(self.app.quit.is_set())
         desktop.http(self.base + "/api/app/quit", {})
         self.assertTrue(self.app.quit.is_set())
+
+    def test_only_the_apps_own_page_counts_as_an_open_window(self):
+        desktop.http(self.base + "/api/state")
+        self.assertEqual(desktop.http(self.base + "/api/state")["window_polls"], 0)
+        desktop.http(self.base + "/api/state?window=1")
+        self.assertEqual(desktop.http(self.base + "/api/state")["window_polls"], 1)
 
     def test_favicon_and_icon(self):
         with urllib.request.urlopen(self.base + "/favicon.ico") as r:
@@ -364,6 +370,9 @@ class WholeRunTests(DesktopBase):
 
     def test_check_model_structures_and_writes_code_that_passes(self):
         self.assertEqual(desktop.check_model(self.args(check_model=MODEL)), 0)
+        rep = json.loads(sorted((self.tmp.path / "reports").glob("check_*.json"))[-1].read_text())
+        self.assertTrue(rep["passed"])
+        self.assertEqual((rep["read_tps"], rep["write_tps"]), (250.0, 20.0))  # llama-server's own timings
 
 
 class SelfTestTests(unittest.TestCase):

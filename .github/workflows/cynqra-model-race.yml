@@ -1,0 +1,65 @@
+# Which open model makes Cynqra fastest on a 16 GB laptop without a GPU, without losing quality?
+# GitHub's Linux machine (4 cores, 16 GB, no GPU) stands in for that laptop. Every contender runs the
+# desktop app's own --check-model: structure an objective (JSON schema), then write a store module
+# and its tests, fixed from the failures for up to three rounds. The timings are llama-server's own.
+# Runs when a commit message contains [race].
+name: cynqra-model-race
+
+on:
+  push:
+    branches: [cynqra]
+
+permissions:
+  contents: read
+
+jobs:
+  race:
+    if: contains(github.event.head_commit.message, '[race]')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {label: "Qwen3.5 9B, 4-bit (today's 16 GB pick)", model: qwen3.5-9b}
+          - {label: "Qwen3.6 35B-A3B, 3-bit", model: qwen3.6-35b-a3b-iq3}
+          - {label: "Qwen3.6 35B-A3B, 2-bit XL", model: qwen3.6-35b-a3b-q2}
+          - {label: "Qwen3.6 35B-A3B, 2-bit", model: qwen3.6-35b-a3b-iq2}
+          - {label: "gpt-oss 20B, MXFP4", model: gpt-oss-20b}
+          - {label: "Qwen3.6 35B-A3B, 2-bit XL, n-gram speculation", model: qwen3.6-35b-a3b-q2, llama_args: "--spec-type ngram-mod"}
+          - {label: "Qwen3.6 35B-A3B, 2-bit XL, 5 GB held by other apps", model: qwen3.6-35b-a3b-q2, hog_gb: 5}
+          - {label: "Qwen3.6 35B-A3B, 4-bit, paged on 16 GB", model: qwen3.6-35b-a3b}
+    name: ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      CYNQRA_LLAMA_ARGS: ${{ matrix.llama_args }}
+      CYNQRA_DATA_DIR: ${{ github.workspace }}/race-data
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build the app (Linux)
+        run: python3 desktop/build.py --target linux-x64 --stage-only
+      - name: Hold memory like other apps would
+        if: matrix.hog_gb
+        run: |
+          nohup python3 -c "
+          import time
+          b = bytearray(${{ matrix.hog_gb }} * 2**30)
+          while True:
+              for i in range(0, len(b), 4096): b[i] = (b[i] + 1) % 256
+              time.sleep(20)" > /dev/null 2>&1 &
+          sleep 20; free -g
+      - name: Race
+        run: |
+          free -g; nproc; lscpu | grep -E "Model name|Thread|Core" || true
+          dist/stage/linux-x64/Cynqra/python/bin/python3 -X utf8 dist/stage/linux-x64/Cynqra/app/desktop.py --check-model ${{ matrix.model }}
+      - name: Result
+        if: always()
+        run: |
+          cat race-data/reports/check_*.json 2>/dev/null || echo "no result file"
+          tail -40 race-data/runtime/llama-server.log 2>/dev/null | grep -Ei "error|warn|speculative|draft|accept|mtp|load|fit" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: race-${{ strategy.job-index }}
+          path: race-data/reports/

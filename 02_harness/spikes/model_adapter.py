@@ -285,8 +285,11 @@ def _local_openai(prompt: str, model: str, max_tokens: int, want_json: bool = Fa
     if want_json and schema:
         payload["response_format"] = {"type": "json_schema",
                                       "json_schema": {"name": "result", "strict": True, "schema": schema}}
-    if (os.environ.get("CYNQRA_THINK") or "").strip().lower() == "false":
+    think = (os.environ.get("CYNQRA_THINK") or "").strip().lower()
+    if think == "false":
         payload["chat_template_kwargs"] = {"enable_thinking": False}
+    elif think in ("low", "medium", "high"):  # gpt-oss: reasoning can be kept low, not switched off
+        payload["chat_template_kwargs"] = {"reasoning_effort": think}
     if temperature is not None or os.environ.get("CYNQRA_TEMPERATURE"):
         payload["temperature"] = temperature if temperature is not None else float(os.environ["CYNQRA_TEMPERATURE"])
     if os.environ.get("CYNQRA_SEED"):
@@ -309,8 +312,13 @@ def _local_openai(prompt: str, model: str, max_tokens: int, want_json: bool = Fa
     if choice.get("finish_reason") == "length":
         raise RuntimeError("reply truncated at max_tokens")
     usage = data.get("usage") or {}
-    return {"text": choice["message"].get("content") or "", "tokens_in": int(usage.get("prompt_tokens") or 0),
-            "tokens_out": int(usage.get("completion_tokens") or 0), "estimated": False}
+    out = {"text": choice["message"].get("content") or "", "tokens_in": int(usage.get("prompt_tokens") or 0),
+           "tokens_out": int(usage.get("completion_tokens") or 0), "estimated": False}
+    t = data.get("timings") or {}  # llama-server's own measurement of this call
+    if t.get("predicted_per_second"):
+        out["speed"] = {"read_tps": round(float(t.get("prompt_per_second") or 0), 1),
+                        "write_tps": round(float(t["predicted_per_second"]), 1)}
+    return out
 
 
 def _cmd(prompt: str) -> dict:

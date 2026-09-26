@@ -56,6 +56,7 @@ class App:
         self.runtime = runtime  # the desktop app's model on this machine; None for the plain web app
         self.quit = threading.Event()
         self.last_seen = time.time()  # the window's last poll: the desktop app notices a closed window
+        self.window_polls = 0  # polls from the app's own page (?window=1), not from scripts or tests
         self.engine = self._new_engine()
         self.auto = {"on": False, "delay": 0.9}
         self.last_step: dict = {}
@@ -101,14 +102,18 @@ class App:
                               else {"did": "approved", "decision": d["id"], "kind": d["kind"]})
         return d
 
-    def state(self) -> dict:
+    def window_poll(self) -> None:
         self.last_seen = time.time()
+        self.window_polls += 1
+
+    def state(self) -> dict:
         s = self.engine.snapshot()
         s["auto"] = dict(self.auto)
         s["last_step"] = self.last_step
         if self.runtime is not None:
             s["desktop"] = True
             s["runtime"] = self.runtime.snapshot()
+            s["window_polls"] = self.window_polls
         return s
 
     def runtime_call(self, what: str, body: dict) -> dict:
@@ -187,6 +192,8 @@ def make_server(app: App, port: int = 8750) -> ThreadingHTTPServer:
                 kind = mimetypes.guess_type(f.name)[0] or "application/octet-stream"
                 return self._send(200, f.read_bytes(), kind)
             if path == "/api/state":
+                if "window" in parse_qs(u.query):
+                    app.window_poll()
                 return self._guard(app.state)
             m = re.match(r"^/api/replay/(t_\w+)$", path)
             if m:

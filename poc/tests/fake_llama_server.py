@@ -100,7 +100,8 @@ def main() -> int:
             return self._send(200, {"choices": [{"index": 0, "finish_reason": "stop",
                                                  "message": {"role": "assistant", "content": text}}],
                                     "usage": {"prompt_tokens": max(1, len(prompt) // 4),
-                                              "completion_tokens": max(1, len(text) // 4)}})
+                                              "completion_tokens": max(1, len(text) // 4)},
+                                    "timings": {"prompt_per_second": 250.0, "predicted_per_second": 20.0}})
 
     srv = ThreadingHTTPServer((args.host, args.port), H)
     try:

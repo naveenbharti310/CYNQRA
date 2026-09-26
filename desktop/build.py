@@ -221,7 +221,9 @@ def add_app(stage: Path, py: Path) -> None:
             app.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, app / name)
     (app / "VERSION").write_text(VERSION + "\n", encoding="utf-8")
-    subprocess.run([str(py), "-m", "compileall", "-q", str(app), str(stage / "python" / "lib")], check=False)
+    # unchecked-hash: the compiled files stay valid when copying the app changes the sources' timestamps
+    subprocess.run([str(py), "-m", "compileall", "-q", "--invalidation-mode", "unchecked-hash", str(app),
+                    str(stage / "python" / "lib")], check=False)
 
 
 def stage_for(target: str, cache: Path) -> tuple[Path, Path]:

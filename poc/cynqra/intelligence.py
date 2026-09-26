@@ -50,7 +50,10 @@ def _parse_json(text: str):
     return None
 
 
-FILE_BLOCK = re.compile(r"^=== FILE: *(?P<name>[^\r\n=]+?) *===[ \t]*\r?\n(?P<body>.*?)\r?\n=== END FILE ===", re.S | re.M)
+FILE_HEAD = re.compile(r"^[ \t>*#`]*={2,}[ \t]*FILE[ \t]*:?[ \t]*`?(?P<name>[\w./ -]+?)`?[ \t]*={2,}[ \t*`]*$", re.M | re.I)
+FILE_END = re.compile(r"^[ \t>*#`]*={2,}[ \t]*END\b[^\n]*$", re.M | re.I)
+FENCED = re.compile(r"^```[\w+-]*[ \t]*\n(?P<body>.*?)\n```[ \t]*$", re.S | re.M)
+NAME = re.compile(r"(?<![\w/.-])(?P<name>[\w-]+(?:/[\w-]+)*\.(?:py|md|html|css|js|json|txt|toml|cfg|ini|yaml|yml))\b")
 FILES_LAYOUT = ("Return your answer in exactly this layout and nothing else. First one JSON object on its own:\n"
                 '{"result": "done", "summary": "...", "acceptance_check": "..."}\n'
                 "Then every file, each one exactly like this:\n"
@@ -105,9 +108,40 @@ def _closed(schema):
 SCHEMAS = {k: _closed(v) for k, v in SCHEMAS.items()}
 
 
+def _unfence(body: str) -> str:
+    """A file body a model wrapped in a Markdown code fence, unwrapped."""
+    lines = body.strip("\n").split("\n")
+    if len(lines) >= 2 and lines[0].lstrip().startswith("```") and lines[-1].strip() == "```":
+        lines = lines[1:-1]
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def _file_blocks(text: str) -> dict[str, str]:
-    """Files written as === FILE: name === blocks. Plain text survives far better than code escaped inside JSON."""
-    return {m.group("name").strip(): m.group("body") + "\n" for m in FILE_BLOCK.finditer(text or "")}
+    """Files in a reply. The layout asked for is === FILE: name === ... === END FILE ===; plain text survives far
+    better than code escaped inside JSON. Local models drift from it, so the common variants are read too: a
+    missing or longer END line, a Markdown fence inside a block, and Markdown alone (a file name, then a fenced
+    block, or a fenced block whose first line names the file)."""
+    text = text or ""
+    heads = list(FILE_HEAD.finditer(text))
+    files: dict[str, str] = {}
+    for i, h in enumerate(heads):
+        stop = heads[i + 1].start() if i + 1 < len(heads) else len(text)
+        end = FILE_END.search(text, h.end(), stop)
+        body = text[h.end():end.start() if end else stop]
+        name = h.group("name").strip()
+        if name and body.strip():
+            files[name] = _unfence(body)
+    if files:
+        return files
+    for m in FENCED.finditer(text):
+        body = m.group("body")
+        first = body.split("\n", 1)[0]
+        before = [ln for ln in text[:m.start()].split("\n")[-3:] if ln.strip() and not ln.strip().startswith("```")]
+        named = (NAME.search(first) if first.lstrip().startswith(("#", "//", "<!--")) else None) or \
+            (NAME.search(before[-1]) if before else None)
+        if named and body.strip():
+            files[named.group("name")] = body.rstrip() + "\n"
+    return files
 
 
 def _int(value, default: int) -> int:
@@ -261,6 +295,7 @@ class ModelSource:
                                     "otherwise a local model server (CYNQRA_LOCAL_BASE_URL or CYNQRA_OLLAMA_MODEL), "
                                     "or ANTHROPIC_API_KEY or OPENAI_API_KEY.")
         self.label = resolved["label"]
+        self.last_text = ""  # the last raw reply, kept to show what a model wrote when it could not be read
         self.prompt_v2 = (HERE / "objective_prompt.txt").read_text(encoding="utf-8")
 
     def _call(self, prompt: str, max_tokens: int = 4000, files: bool = False, schema: dict | None = None) -> tuple[dict, dict]:
@@ -278,22 +313,28 @@ class ModelSource:
         out = model_adapter.complete(prompt, max_tokens=max_tokens, want_json=not files, schema=schema)
         if out.get("error"):
             raise IntelligenceError(out["error"])
+        self.last_text = out["text"]
         data = parse(out["text"])
-        if not isinstance(data, dict):
-            again = ("\n\nYour reply did not follow the layout. " + FILES_LAYOUT) if files else \
+        no_files = files and isinstance(data, dict) and data.get("result") != "blocked" and not data.get("files")
+        if not isinstance(data, dict) or no_files:
+            again = ("\n\nYour reply had no files in the required layout. " + FILES_LAYOUT) if files else \
                 "\n\nReply with only one JSON object."
             out2 = model_adapter.complete(prompt + again, max_tokens=max_tokens, want_json=not files, schema=schema,
                                           temperature=0.4)
             if out2.get("error"):
                 raise IntelligenceError(out2["error"])
+            self.last_text = out2["text"]
             data = parse(out2["text"])
             out["tokens_in"] += out2["tokens_in"]
             out["tokens_out"] += out2["tokens_out"]
         if not isinstance(data, dict):
             raise IntelligenceError("model did not return a JSON object")
         units = max(1, -(-(out["tokens_in"] + out["tokens_out"]) // 1000))
-        return data, {"tokens_in": out["tokens_in"], "tokens_out": out["tokens_out"], "estimated": out["estimated"],
-                      "label": out.get("model", self.label), "latency_s": out.get("latency_s", 0), "units": units}
+        usage = {"tokens_in": out["tokens_in"], "tokens_out": out["tokens_out"], "estimated": out["estimated"],
+                 "label": out.get("model", self.label), "latency_s": out.get("latency_s", 0), "units": units}
+        if out.get("speed"):
+            usage.update(out["speed"])
+        return data, usage
 
     @staticmethod
     def _ctx(objective: dict, rules: list[str]) -> str:
@@ -342,7 +383,7 @@ class ModelSource:
     def work(self, task: dict, worker: str, objective: dict, rules: list[str], handoff: dict,
              inbox: dict[str, str], feedback: str = "", answers: list[dict] | None = None,
              previous: dict[str, str] | None = None, repo_files: list[str] | None = None, **_) -> tuple[dict, dict]:
-        files = "\n".join(f"--- {k} ---\n{v}" for k, v in inbox.items()) or "none"
+        files = "".join(f"=== FILE: {k} ===\n{v.rstrip()}\n=== END FILE ===\n" for k, v in inbox.items()) or "none"
         extra = ""
         if answers:
             extra += "\nAnswers to your Blockers:\n" + "\n".join(a.get("acceptance_check", "") for a in answers)
@@ -350,7 +391,7 @@ class ModelSource:
             extra += "\nYour last attempt failed a check. Fix it:\n" + feedback
             if previous:
                 extra += ("\nYour previous files, to fix rather than rewrite from nothing:\n"
-                          + "\n".join(f"--- {k} ---\n{v}" for k, v in previous.items()))
+                          + "".join(f"=== FILE: {k} ===\n{v.rstrip()}\n=== END FILE ===\n" for k, v in previous.items()))
         kind = task["kind"]
         if kind in ("spec", "code"):
             shape = None

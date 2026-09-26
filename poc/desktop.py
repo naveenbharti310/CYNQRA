@@ -138,11 +138,9 @@ def idle_for(desk: Desktop, seconds: float) -> bool:
 def open_window(desk: Desktop, loaded: threading.Event | None = None) -> None:
     """Show the app and return when its window is closed or Quit is chosen."""
     if loaded is not None:
-        t0 = desk.app.last_seen
-
         def watch_load():
             while not desk.app.quit.is_set():
-                if desk.app.last_seen > t0:
+                if desk.app.window_polls:
                     loaded.set()
                     desk.app.quit.set()
                 time.sleep(0.2)
@@ -303,7 +301,8 @@ def selftest(args) -> int:
         print(f"  [{'PASS' if r['ok'] else 'FAIL'}] {name}: {r['detail']}  ({r['s']} s)", flush=True)
 
     print(f"Cynqra {VERSION} self-test on {platform.platform()}")
-    tmp = Path(tempfile.mkdtemp(prefix="cynqra_selftest_"))
+    data_dir().mkdir(parents=True, exist_ok=True)
+    tmp = Path(tempfile.mkdtemp(prefix="selftest_", dir=data_dir()))  # inside the data folder, whatever its path
     check("Python", lambda: f"{platform.python_version()} at {sys.executable}")
     check("App files", lambda: _need([HERE / "ui" / "index.html", HERE / "ui" / "app.js", HERE / "ui" / "icon.png",
                                       HERE / "scenarios" / "candidate_tracker" / "scenario.json",
@@ -439,13 +438,18 @@ def check_model(args) -> int:
     from cynqra.verification import run_unittests
     desk = Desktop(Path(args.data) if args.data else data_dir())
     ok = False
+    result = {"model": args.check_model, "platform": platform.platform(), "ram_gb": desk.runtime.ram_gb, "passed": False}
+    t0 = time.time()
     try:
         prepare_model(desk, args.check_model, args.gpu)
+        result["accel"] = desk.runtime.status["accel"]
+        result["ready_s"] = round(time.time() - t0)
         src = ModelSource()
         data, u = src.structure_objective(CHECK_OBJECTIVE)
         complete = all(str(data.get(k) or "").strip() for k in OBJECTIVE_FIELDS)
         print(f"  objective: {'all 7 fields' if complete else 'fields missing'}, {u['tokens_in']} tokens in, "
-              f"{u['tokens_out']} out, {u['latency_s']:.0f} s", flush=True)
+              f"{u['tokens_out']} out, {u['latency_s']:.0f} s{speed(u)}", flush=True)
+        calls = [u]
         objective = {k: str(data.get(k) or "") for k in OBJECTIVE_FIELDS}
         work = Path(tempfile.mkdtemp(prefix="cynqra_check_"))
         feedback, previous, passed = "", {}, False
@@ -463,21 +467,40 @@ def check_model(args) -> int:
             for name, text in files.items():
                 (work / name).write_text(text, encoding="utf-8")
             rep = run_unittests(work)
+            calls.append(u)
+            if not files:  # show exactly what the model wrote, so a format problem is visible, not guessed at
+                raw = getattr(src, "last_text", "")
+                result.setdefault("unreadable_replies", []).append(raw[:6000])
+                print("  the reply had no readable files; it began:\n" + "\n".join("    | " + ln for ln in raw[:1500].splitlines()))
             print(f"  code round {rnd + 1}: {sorted(files)}; {rep['ran']} tests, {len(rep['failed'])} failed; "
-                  f"{u['tokens_out']} tokens out, {u['latency_s']:.0f} s", flush=True)
+                  f"{u['tokens_in']} tokens in, {u['tokens_out']} out, {u['latency_s']:.0f} s{speed(u)}", flush=True)
             if rep["passed"]:
                 passed = True
                 break
             previous = files
-            feedback = "Failing tests: " + (", ".join(rep["failed"]) or "none ran") + "\n" + rep["output"][-1500:]
+            feedback = ("Your reply contained no files. Every file must be in the === FILE: name === layout."
+                        if not files else "Failing tests: " + (", ".join(rep["failed"]) or "none ran") + "\n" + rep["output"][-1500:])
         shutil.rmtree(work, ignore_errors=True)
         ok = complete and passed
+        secs = sum(c["latency_s"] for c in calls)
+        result.update(passed=ok, objective_complete=complete, code_passed=passed, rounds=len(calls) - 1, seconds=round(secs),
+                      tokens_in=sum(c["tokens_in"] for c in calls), tokens_out=sum(c["tokens_out"] for c in calls),
+                      read_tps=max((c.get("read_tps") or 0) for c in calls), write_tps=max((c.get("write_tps") or 0) for c in calls))
     except (ModelRuntimeError, IntelligenceError) as exc:
         print(f"  error: {exc}")
+        result["error"] = str(exc)[:500]
     finally:
         desk.close()
-    print(("PASS" if ok else "FAIL") + f": {BY_ID[args.check_model]['name']} on {platform.platform()}")
+    out = Path(os.environ["CYNQRA_REPORTS_DIR"]) / f"check_{args.check_model}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(result, indent=1), encoding="utf-8")
+    print(("PASS" if ok else "FAIL") + f": {BY_ID[args.check_model]['name']} on {platform.platform()}. "
+          f"Reading {result.get('read_tps', 0)} tokens/s, writing {result.get('write_tps', 0)} tokens/s. {out}")
     return 0 if ok else 1
+
+
+def speed(u: dict) -> str:
+    return f"; reads {u['read_tps']} tokens/s, writes {u['write_tps']} tokens/s" if u.get("write_tps") else ""
 
 
 def e2e(args) -> int:
@@ -574,7 +597,7 @@ def e2e(args) -> int:
                 tokens_in=sum(c.get("tokens_in", 0) for c in calls), tokens_out=sum(c.get("tokens_out", 0) for c in calls),
                 metrics=m, live_url=e.live_url(),
                 calls=[{k: c.get(k) for k in ("id", "task_id", "worker", "purpose", "label", "tokens_in", "tokens_out",
-                                              "estimated", "latency_s")} for c in calls],
+                                              "estimated", "latency_s", "read_tps", "write_tps")} for c in calls],
                 plan=[{k: t.get(k) for k in ("id", "kind", "owner_worker_id", "title", "status", "attempts")}
                       for t in e.tasks()] if e.store.get("plan", "plan_1") else [],
                 verifications=[{k: v.get(k) for k in ("id", "task_id", "verdict", "tier")}

@@ -116,6 +116,47 @@ class FileBlockTests(unittest.TestCase):
         self.assertEqual(_parse_json(text), {"result": "done", "summary": "s"})
         self.assertEqual(_file_blocks(text), {"app.py": code, "docs/spec.md": "# Spec\n"})
 
+    def test_the_ways_local_models_drift_from_the_layout_are_still_read(self):
+        code, test = "def add(a, b):\n    return a + b\n", "import unittest\nfrom calc import add\n"
+        variants = {
+            "exact": f"=== FILE: calc.py ===\n{code}=== END FILE ===\n=== FILE: test_calc.py ===\n{test}=== END FILE ===\n",
+            "no end lines": f"=== FILE: calc.py ===\n{code}\n=== FILE: test_calc.py ===\n{test}",
+            "named end lines": f"=== FILE: calc.py ===\n{code}=== END FILE: calc.py ===\n=== FILE: test_calc.py ===\n{test}=== END FILE: test_calc.py ===\n",
+            "fences inside blocks": f"=== FILE: calc.py ===\n```python\n{code}```\n=== END FILE ===\n=== FILE: test_calc.py ===\n```python\n{test}```\n=== END FILE ===\n",
+            "markdown headings": f"### calc.py\n```python\n{code}```\n\n### `test_calc.py`\n```python\n{test}```\n",
+            "bold names and colons": f"**calc.py**:\n```python\n{code}```\nFile: test_calc.py\n```python\n{test}```\n",
+            "name in the first line": f"```python\n# calc.py\n{code}```\n```python\n# test_calc.py\n{test}```\n",
+            "more equals and spaces": f"==== FILE:  calc.py ====\n{code}==== END FILE ====\n==== FILE:  test_calc.py ====\n{test}==== END FILE ====\n",
+        }
+        for label, text in variants.items():
+            files = _file_blocks('{"result": "done", "summary": "s"}\n' + text)
+            self.assertEqual(sorted(files), ["calc.py", "test_calc.py"], label)
+            self.assertIn("return a + b", files["calc.py"], label)
+            self.assertNotIn("```", files["calc.py"], label)
+            self.assertNotIn("=== ", files["test_calc.py"], label)
+        self.assertEqual(_file_blocks('{"result": "blocked", "description": "which date format?"}'), {})
+
+    def test_a_reply_without_files_is_asked_for_once_more_with_the_layout(self):
+        from cynqra import intelligence
+        replies = ['{"result": "done", "summary": "I wrote the files"}\nHere they are, conceptually.',
+                   '{"result": "done"}\n=== FILE: a.py ===\nx = 1\n=== END FILE ===\n']
+        seen = []
+
+        def fake(prompt, **kw):
+            seen.append((prompt, kw.get("temperature")))
+            return {"text": replies[len(seen) - 1], "tokens_in": 10, "tokens_out": 5, "estimated": False, "error": None}
+        saved = intelligence.model_adapter.complete
+        intelligence.model_adapter.complete = fake
+        os.environ["CYNQRA_LOCAL_BASE_URL"] = "http://127.0.0.1:9/v1"
+        try:
+            data, usage = ModelSource()._call("write a.py", files=True)
+        finally:
+            intelligence.model_adapter.complete = saved
+        self.assertEqual(data["files"], {"a.py": "x = 1\n"})
+        self.assertIn("no files in the required layout", seen[1][0])
+        self.assertEqual(seen[1][1], 0.4)
+        self.assertEqual((usage["tokens_in"], usage["tokens_out"]), (20, 10))
+
     def test_json_before_code_with_braces_still_parses(self):
         self.assertEqual(_parse_json('Sure.\n{"a": 1}\n=== FILE: x.py ===\nd = {1: 2}\n=== END FILE ==='), {"a": 1})
 
@@ -127,7 +168,7 @@ class JourneyTests(Base):
         self.assertEqual(e.meta["phase"], "accepted")
         self.assertEqual([t["status"] for t in e.tasks()], ["VERIFIED"] * 6)
         chats = [r for r in self.o.requests if r["path"] == "/api/chat"]
-        work = [r["body"] for r in chats if "=== FILE:" in r["body"]["messages"][0]["content"]]
+        work = [r["body"] for r in chats if "Then every file, each one exactly like this" in r["body"]["messages"][0]["content"]]
         self.assertTrue(work and all("format" not in b for b in work), "file replies are not forced into JSON mode")
         others = [r["body"] for r in chats if r["body"] not in work]
         self.assertTrue(others and all(isinstance(b.get("format"), dict) and b["format"].get("required") for b in others),

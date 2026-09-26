@@ -45,7 +45,7 @@ async function act(fn) {
 
 async function refresh(force) {
   try {
-    const st = await api("/api/state");
+    const st = await api("/api/state?window=1");  // ?window=1: the desktop app knows its window is open
     S.st = st;
     toasts(st.events || []);
     if (S.view === "audit") await loadReplay();

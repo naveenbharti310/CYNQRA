@@ -51,6 +51,24 @@ CATALOG = [
      "files": [("unsloth/Qwen3.6-27B-GGUF", "Qwen3.6-27B-Q4_K_M.gguf")],
      "about": "Stronger than 35B-A3B on hard code but three to four times slower: every parameter works on "
               "every word. For a Mac with 32 GB or more, or a GPU with 24 GB."},
+    # Candidates for 16 to 24 GB laptops, measured against Qwen3.5 9B before any of them is offered
+    # (hidden: true keeps a model out of the app's list; desktop.py --check-model can still run it).
+    {"id": "qwen3.6-35b-a3b-iq3", "name": "Qwen3.6 35B-A3B (3-bit)", "size_gb": 12.3, "min_gb": 20, "hidden": True,
+     "ctx": 24576, "predict": 6144, "think": "false",
+     "files": [("unsloth/Qwen3.6-35B-A3B-GGUF", "Qwen3.6-35B-A3B-UD-IQ3_XXS.gguf")],
+     "about": "The best model, compressed to 3 bits a weight so it fits 24 GB."},
+    {"id": "qwen3.6-35b-a3b-q2", "name": "Qwen3.6 35B-A3B (2-bit)", "size_gb": 11.4, "min_gb": 16, "hidden": True,
+     "ctx": 24576, "predict": 6144, "think": "false",
+     "files": [("unsloth/Qwen3.6-35B-A3B-GGUF", "Qwen3.6-35B-A3B-UD-Q2_K_XL.gguf")],
+     "about": "The best model, compressed to about 2.7 bits a weight so it fits 16 GB."},
+    {"id": "qwen3.6-35b-a3b-iq2", "name": "Qwen3.6 35B-A3B (2-bit, smallest)", "size_gb": 10.7, "min_gb": 16, "hidden": True,
+     "ctx": 24576, "predict": 6144, "think": "false",
+     "files": [("unsloth/Qwen3.6-35B-A3B-GGUF", "Qwen3.6-35B-A3B-UD-IQ2_M.gguf")],
+     "about": "The best model at its smallest useful size."},
+    {"id": "gpt-oss-20b", "name": "gpt-oss 20B", "size_gb": 11.3, "min_gb": 16, "hidden": True,
+     "ctx": 32768, "predict": 8192, "think": "low",
+     "files": [("ggml-org/gpt-oss-20b-GGUF", "gpt-oss-20b-MXFP4.gguf")],
+     "about": "OpenAI's open model: 3.6B of 21B parameters work per token. Its reasoning can be kept low, not off."},
     {"id": "qwen3.5-4b", "name": "Qwen3.5 4B", "size_gb": 2.6, "min_gb": 6,
      "ctx": 24576, "predict": 6144, "think": "false",
      "files": [("unsloth/Qwen3.5-4B-GGUF", "Qwen3.5-4B-Q4_K_M.gguf")],
@@ -211,6 +229,8 @@ class Runtime:
         rec = recommended(self.ram_gb)
         out = []
         for m in CATALOG:
+            if m.get("hidden") and not self.installed(m["id"]):
+                continue
             part = self.model_path(m["id"]).with_suffix(".gguf.part")
             out.append({k: m[k] for k in ("id", "name", "size_gb", "min_gb", "about", "ctx")} | {
                 "installed": bool(self.installed(m["id"])), "recommended": m["id"] == rec,
@@ -354,7 +374,8 @@ class Runtime:
             self._set(state="starting", model=model_id, error="", accel=accel)
             port = _free_port()
             cmd = [*argv(self.servers[accel]), "-m", str(path), "--host", "127.0.0.1", "--port", str(port),
-                   "-c", str(model["ctx"]), "-np", "1", "--jinja", *gpu_args]
+                   "-c", str(model["ctx"]), "-np", "1", "--jinja", *gpu_args, *model.get("args", []),
+                   *os.environ.get("CYNQRA_LLAMA_ARGS", "").split()]
             with open(self.root / "llama-server.log", "wb") as log:
                 log.write(("$ " + " ".join(cmd) + "\n").encode())
                 log.flush()
