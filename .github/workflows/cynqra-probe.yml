@@ -1,0 +1,32 @@
+name: cynqra-probe
+on:
+  workflow_dispatch:
+  push:
+    branches: [cynqra]
+    paths: [".github/workflows/cynqra-probe.yml"]
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Runner facts
+        shell: bash
+        run: |
+          uname -a || true
+          python --version
+          python -c "import os, platform; print('cpus', os.cpu_count(), platform.machine())"
+          (free -g || vm_stat || systeminfo | grep -i memory) 2>/dev/null | head -8 || true
+          df -h . | tail -1
+          which iscc || ls "/c/Program Files (x86)/Inno Setup 6" 2>/dev/null || echo "no inno setup on PATH"
+          which hdiutil || true
+          curl -sS -o /dev/null -w "huggingface api %{http_code}\n" "https://huggingface.co/api/models?search=Qwen3.6-35B-A3B-GGUF&limit=5"
+          curl -sS "https://huggingface.co/api/models?search=Qwen3.6-35B-A3B-GGUF&sort=downloads&limit=8" | python -c "import json,sys; [print(m['id'], m.get('downloads')) for m in json.load(sys.stdin)]"
+          curl -sS "https://huggingface.co/api/models?search=Qwen3.5-9B-GGUF&sort=downloads&limit=8" | python -c "import json,sys; [print(m['id'], m.get('downloads')) for m in json.load(sys.stdin)]"
+          curl -sS "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest" -H "Authorization: Bearer ${{ github.token }}" | python -c "import json,sys; r=json.load(sys.stdin); print(r['tag_name']); [print(a['name'], a['size']//1048576, 'MB') for a in r['assets']]"
