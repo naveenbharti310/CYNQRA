@@ -54,7 +54,7 @@ class PlanValidationTests(unittest.TestCase):
         prompts = []
         answers = iter([bad, plan_copy()])
 
-        def call(prompt, max_tokens=0):
+        def call(prompt, max_tokens=0, **_):
             prompts.append(prompt)
             return next(answers), {"tokens_in": 1, "tokens_out": 1, "units": 1, "estimated": False, "label": "stub"}
 

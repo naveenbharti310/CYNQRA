@@ -1,10 +1,13 @@
 """One way for every spike to reach a model, and one way to count tokens.
 
 Order of resolution:
-  1. CYNQRA_S1_MODEL_CMD  a shell command, prompt on stdin, text on stdout
-  2. OPENAI_API_KEY
-  3. ANTHROPIC_API_KEY
-  4. nothing, and the spikes refuse to score
+  1. CYNQRA_S1_MODEL_CMD    a shell command, prompt on stdin, text on stdout
+  2. CYNQRA_OLLAMA_MODEL    an open model served by Ollama on this machine
+  3. CYNQRA_LOCAL_BASE_URL  any OpenAI compatible local server (LM Studio,
+                            llama.cpp llama-server), model in CYNQRA_MODEL
+  4. OPENAI_API_KEY
+  5. ANTHROPIC_API_KEY
+  6. nothing, and the spikes refuse to score
 
 Token counts from an API are real. Token counts from a shell command are
 estimated from characters and marked estimated. An estimated count may not
@@ -32,6 +35,32 @@ current Messages API reference:
     calls are retried twice with backoff; anything else fails at once.
   * CYNQRA_EFFORT (low, medium, high, xhigh, max) optionally sets
     output_config.effort on Anthropic calls. Unset means the model default.
+
+26 Sep 2026, third pass: local open models, so the POC runs on a laptop with
+no API key. Ollama is called on its native /api/chat, which reports real
+token counts (prompt_eval_count, eval_count) and takes the settings that
+matter locally:
+  * num_ctx (CYNQRA_NUM_CTX, default 32768). Ollama's own default is far
+    smaller and it truncates an overlong prompt silently, so the window is
+    always sent, and a prompt that clearly cannot fit is refused up front.
+  * format: the caller's JSON Schema when it has one, else "json". A schema
+    is enforced as a grammar, so the reply parses and has the right keys;
+    plain "json" only promises some object. Code is not sent this way: long
+    code inside JSON strings is where local models go wrong, so callers ask
+    for code as plain file blocks with no format at all.
+  * shift and truncate false: an overlong prompt becomes an HTTP 400 instead
+    of Ollama silently cutting out its middle (instructions included).
+  * seed (CYNQRA_SEED) and num_predict (CYNQRA_NUM_PREDICT, default the
+    larger of the caller's max_tokens and 8192) come from the local config.
+  * A retry may pass its own temperature, so a second attempt is not a
+    replay of the first.
+  * think (CYNQRA_THINK: true, false, low, medium, high); unset leaves the
+    model's own default. temperature (CYNQRA_TEMPERATURE); unset leaves the
+    model's recommended default from its Ollama template.
+  * done_reason "length" means the answer was cut off; that is an error.
+  * keep_alive keeps the model loaded between the calls of one run.
+Local generation on a CPU is slow, so CYNQRA_TIMEOUT (seconds, default 1800
+for local servers) replaces the 600 second limit there.
 """
 from __future__ import annotations
 
@@ -55,6 +84,11 @@ def resolve() -> dict | None:
     cmd = os.environ.get("CYNQRA_S1_MODEL_CMD")
     if cmd:
         return {"kind": "cmd", "label": "shell command", "tokens": "estimated"}
+    if os.environ.get("CYNQRA_OLLAMA_MODEL"):
+        return {"kind": "ollama", "label": os.environ["CYNQRA_OLLAMA_MODEL"], "tokens": "measured", "local": True}
+    if os.environ.get("CYNQRA_LOCAL_BASE_URL"):
+        return {"kind": "local", "label": os.environ.get("CYNQRA_MODEL", "local-model"), "tokens": "measured",
+                "local": True}
     if os.environ.get("OPENAI_API_KEY"):
         return {
             "kind": "openai",
@@ -76,10 +110,10 @@ class _Retryable(RuntimeError):
         self.wait = wait
 
 
-def _post_once(url: str, body: bytes, headers: dict) -> dict:
+def _post_once(url: str, body: bytes, headers: dict, timeout: float = TIMEOUT_S) -> dict:
     req = urllib.request.Request(url, data=body, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT_S) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = ""
@@ -100,11 +134,11 @@ def _post_once(url: str, body: bytes, headers: dict) -> dict:
         raise _Retryable(f"network error: {exc}") from exc
 
 
-def _post(url: str, payload: dict, headers: dict) -> dict:
+def _post(url: str, payload: dict, headers: dict, timeout: float = TIMEOUT_S) -> dict:
     body = json.dumps(payload).encode("utf-8")
     for wait in RETRY_WAITS_S + (None,):
         try:
-            return _post_once(url, body, headers)
+            return _post_once(url, body, headers, timeout)
         except _Retryable as exc:
             if wait is None:
                 raise RuntimeError(str(exc)) from exc
@@ -175,6 +209,89 @@ def _anthropic(prompt: str, model: str, max_tokens: int = 1500) -> dict:
     }
 
 
+def ollama_host() -> str:
+    host = (os.environ.get("OLLAMA_HOST") or "127.0.0.1:11434").strip().rstrip("/")
+    if not host.startswith(("http://", "https://")):
+        host = "http://" + host
+    return host.replace("://0.0.0.0", "://127.0.0.1")
+
+
+def _local_timeout() -> float:
+    try:
+        return float(os.environ.get("CYNQRA_TIMEOUT") or 1800)
+    except ValueError:
+        return 1800.0
+
+
+def _ollama(prompt: str, model: str, max_tokens: int, want_json: bool, schema: dict | None = None,
+            temperature: float | None = None) -> dict:
+    num_ctx = int(os.environ.get("CYNQRA_NUM_CTX") or 32768)
+    answer = int(os.environ.get("CYNQRA_NUM_PREDICT") or 0) or max(max_tokens, 8192)
+    if len(prompt) // 4 + answer > num_ctx:  # four characters a token is a floor, so this only refuses sure failures
+        raise ValueError(f"the prompt (about {len(prompt) // 4} tokens at least) plus {answer} for the answer does not "
+                         f"fit num_ctx={num_ctx}; raise CYNQRA_NUM_CTX")
+    options: dict = {"num_ctx": num_ctx, "num_predict": answer}
+    if temperature is not None:
+        options["temperature"] = temperature
+    elif os.environ.get("CYNQRA_TEMPERATURE"):
+        options["temperature"] = float(os.environ["CYNQRA_TEMPERATURE"])
+    if os.environ.get("CYNQRA_SEED"):
+        options["seed"] = int(os.environ["CYNQRA_SEED"])
+    payload: dict = {"model": model, "messages": [{"role": "user", "content": prompt}], "stream": False,
+                     "options": options, "keep_alive": os.environ.get("CYNQRA_KEEP_ALIVE", "30m"),
+                     "shift": False, "truncate": False}
+    if want_json:
+        payload["format"] = schema or "json"
+    think = (os.environ.get("CYNQRA_THINK") or "").strip().lower()
+    if think:
+        payload["think"] = {"true": True, "false": False}.get(think, think)
+    try:
+        data = _post(ollama_host() + "/api/chat", payload, {"Content-Type": "application/json"}, _local_timeout())
+    except RuntimeError as exc:
+        if "Connection refused" in str(exc) or "Errno 111" in str(exc) or "10061" in str(exc):
+            raise RuntimeError(f"Ollama is not running at {ollama_host()}. Start the Ollama app, or run: ollama serve") from exc
+        if "not found" in str(exc) and "HTTP 404" in str(exc):
+            raise RuntimeError(f"model {model} is not installed. Run: ollama pull {model}") from exc
+        if "HTTP 400" in str(exc) and "context length" in str(exc):
+            raise RuntimeError(f"the prompt is longer than num_ctx={num_ctx}; raise CYNQRA_NUM_CTX") from exc
+        raise
+    if data.get("done_reason") == "length":
+        raise RuntimeError(f"reply truncated at num_predict={answer} or num_ctx={num_ctx}")
+    msg = data.get("message") or {}
+    text = msg.get("content") or ""
+    if not text.strip():
+        raise RuntimeError("the model returned no answer" + (" (only thinking)" if msg.get("thinking") else ""))
+    return {"text": text, "tokens_in": int(data.get("prompt_eval_count") or 0),
+            "tokens_out": int(data.get("eval_count") or 0), "estimated": False}
+
+
+def _local_openai(prompt: str, model: str, max_tokens: int, want_json: bool = False, schema: dict | None = None,
+                  temperature: float | None = None) -> dict:
+    """LM Studio or llama-server. Their context size is set when the server loads the model (-c 32768)."""
+    base = os.environ["CYNQRA_LOCAL_BASE_URL"].rstrip("/")
+    headers = {"Content-Type": "application/json"}
+    if os.environ.get("CYNQRA_LOCAL_API_KEY"):
+        headers["Authorization"] = f"Bearer {os.environ['CYNQRA_LOCAL_API_KEY']}"
+    payload: dict = {"model": model, "messages": [{"role": "user", "content": prompt}],
+                     "max_tokens": int(os.environ.get("CYNQRA_NUM_PREDICT") or 0) or max(max_tokens, 8192), "stream": False}
+    if want_json and schema:
+        payload["response_format"] = {"type": "json_schema",
+                                      "json_schema": {"name": "result", "strict": True, "schema": schema}}
+    if (os.environ.get("CYNQRA_THINK") or "").strip().lower() == "false":
+        payload["chat_template_kwargs"] = {"enable_thinking": False}
+    if temperature is not None or os.environ.get("CYNQRA_TEMPERATURE"):
+        payload["temperature"] = temperature if temperature is not None else float(os.environ["CYNQRA_TEMPERATURE"])
+    if os.environ.get("CYNQRA_SEED"):
+        payload["seed"] = int(os.environ["CYNQRA_SEED"])
+    data = _post(base + "/chat/completions", payload, headers, _local_timeout())
+    choice = data["choices"][0]
+    if choice.get("finish_reason") == "length":
+        raise RuntimeError("reply truncated at max_tokens")
+    usage = data.get("usage") or {}
+    return {"text": choice["message"].get("content") or "", "tokens_in": int(usage.get("prompt_tokens") or 0),
+            "tokens_out": int(usage.get("completion_tokens") or 0), "estimated": False}
+
+
 def _cmd(prompt: str) -> dict:
     cmd = os.environ["CYNQRA_S1_MODEL_CMD"]
     proc = subprocess.run(
@@ -193,19 +310,27 @@ def _cmd(prompt: str) -> dict:
     }
 
 
-def complete(prompt: str, max_tokens: int = 1500) -> dict:
+def complete(prompt: str, max_tokens: int = 1500, want_json: bool = False, schema: dict | None = None,
+             temperature: float | None = None) -> dict:
     """Returns text, tokens_in, tokens_out, estimated, latency_s, error.
 
     max_tokens defaults to 1500, the S1 setting. S2 passes a larger value
     because workers return code and tests inside one protocol object.
+    want_json asks a local Ollama model for constrained JSON output, shaped by
+    schema when one is given.
     """
     model = resolve()
     if model is None:
-        raise RuntimeError("No model. Set CYNQRA_S1_MODEL_CMD, OPENAI_API_KEY, or ANTHROPIC_API_KEY.")
+        raise RuntimeError("No model. Set CYNQRA_OLLAMA_MODEL (a local Ollama model), CYNQRA_LOCAL_BASE_URL, "
+                           "CYNQRA_S1_MODEL_CMD, OPENAI_API_KEY or ANTHROPIC_API_KEY.")
     start = time.time()
     try:
         if model["kind"] == "cmd":
             out = _cmd(prompt)
+        elif model["kind"] == "ollama":
+            out = _ollama(prompt, model["label"], max_tokens, want_json, schema, temperature)
+        elif model["kind"] == "local":
+            out = _local_openai(prompt, model["label"], max_tokens, want_json, schema, temperature)
         elif model["kind"] == "openai":
             out = _openai(prompt, model["label"], max_tokens)
         else:

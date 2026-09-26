@@ -1,5 +1,8 @@
 # CYNQRA HANDOVER
 
+> To run Cynqra for real on your laptop, with an open-source model and no API key: read
+> LAPTOP_SETUP.md, then INSTALL.bat (Windows) or ./install.sh (macOS, Linux), then ./cynqra run.
+
 > To show someone how Cynqra works: open 03_pages/how-cynqra-works.html, or the link in
 > DEMO_SCRIPT.md, and press Start. DEMO_SCRIPT.md has the talk track and the answers to the
 > questions people ask.

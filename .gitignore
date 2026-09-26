@@ -9,3 +9,4 @@ poc/live_reports/run_*/
 exports/
 poc/demo/replay_build/
 poc/demo/out/
+poc/local_config.json

@@ -143,3 +143,29 @@ tests/e2e/live_walk.js drives live mode through the UI with any model.
 
 Results: 119 POC tests pass, 15 spike tests and 3 kit tests pass. Live UI run: PASS, see
 live_reports/README.md.
+
+## 26 September, fifth pass: laptops, open models, real agents
+
+The POC now runs on a laptop with an open-weight model through Ollama, chosen by the research
+in research/local_open_models_2026-09.md: qwen3.6:35b on 32 GB and more, qwen3.5:9b below.
+
+- model_adapter: an Ollama provider on the native /api/chat with num_ctx, num_predict, a JSON
+  schema per call, think, temperature 0 and seed, shift and truncate false, keep_alive; real
+  token counts; clear errors for a stopped server, a missing model, an overlong prompt and a
+  cut-off reply. An OpenAI-compatible path for LM Studio and llama-server with json_schema.
+- Engineers are agents: in live mode they run their own tests and start their app through the
+  gateway, read the failures and syntax errors, and fix them (up to two rounds) before
+  independent verification.
+- Code comes back as plain file blocks after a small JSON header, because long code escaped
+  inside JSON is where local models fail (Ollama #18094).
+- cynqra_cli.py: setup, doctor (with --full), run (founder decisions in the terminal, or --yes),
+  bench (a head-to-head on Cynqra's own tasks) and ui. install.sh, install.ps1, INSTALL.bat,
+  CYNQRA.bat and ./cynqra.
+
+Results: 140 POC tests pass (20 new, against a fake Ollama server that speaks the native API),
+15 spike and 3 kit tests pass. install.sh ran end to end here against that fake server with a
+stub ollama command; install.ps1 could not be run here (no PowerShell).
+
+Unrun: a real open model. This cloud environment's network policy blocks ollama.com,
+registry.ollama.ai and huggingface.co, so no model weights could be downloaded. The first real
+runs happen on the team's laptops; LAPTOP_SETUP.md says what to send back.

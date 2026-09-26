@@ -15,7 +15,9 @@ from cynqra.engine import Engine  # noqa: E402
 
 SCENARIO = json.loads((POC / "scenarios" / "candidate_tracker" / "scenario.json").read_text(encoding="utf-8"))
 FAKE_MODEL = POC / "tests" / "fake_model.py"
-MODEL_ENV = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CYNQRA_S1_MODEL_CMD", "CYNQRA_MODEL", "CYNQRA_EFFORT")
+MODEL_ENV = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CYNQRA_S1_MODEL_CMD", "CYNQRA_MODEL", "CYNQRA_EFFORT",
+             "CYNQRA_OLLAMA_MODEL", "OLLAMA_HOST", "CYNQRA_LOCAL_BASE_URL", "CYNQRA_NUM_CTX", "CYNQRA_THINK",
+             "CYNQRA_TEMPERATURE", "CYNQRA_TIMEOUT", "CYNQRA_SELF_CHECKS", "CYNQRA_REPORTS_DIR", "CYNQRA_DATA_DIR")
 
 
 class TempDir:

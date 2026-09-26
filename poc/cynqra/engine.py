@@ -7,6 +7,7 @@ execute, audit). Everything the founder does is a decision with a label (D-10).
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import threading
 import time
@@ -652,6 +653,11 @@ class Engine:
                         return self._escalate(t, f"{t['id']}: writes kept being refused ({g['policy']['reason']})")
                     return {"did": "write_refused", "task": t["id"]}
                 written.append(g["result"])
+            if kind == "code" and t.get("self_checks_used", 0) < self._self_checks():
+                check = self._self_check(t, out)
+                if not check["passed"]:
+                    return check["step"]
+            t["self_checks_used"] = 0
             done = self.send("Handoff", {"artifacts": [w["file"] for w in written], "context_ref": f"result of {t['id']}",
                                          "acceptance_check": result.get("acceptance_check") or result.get("summary") or "done"},
                              {"from_worker": owner, "to_worker": "verification", "task_id": t["id"]}, t["id"], owner)
@@ -664,6 +670,68 @@ class Engine:
             return {"did": "completed", "task": t["id"]}
         # proposals: decision, review_merge, deploy
         return self._propose(t, result)
+
+    def _self_checks(self) -> int:
+        """How many times an engineer may test and fix its own work before handing it over.
+
+        A real model works like an engineer: it runs its own tests, reads the failures and fixes
+        them. Verification is still independent and reruns everything afterwards. The scripted
+        demo keeps its story (verification catches the defect), so it defaults to none.
+        """
+        default = "2" if getattr(self.intel, "kind", "") == "model" else "0"
+        try:
+            return max(0, int(os.environ.get("CYNQRA_SELF_CHECKS", default)))
+        except ValueError:
+            return int(default)
+
+    def _candidate(self, t: dict, dest: Path) -> Path:
+        """The repository as it would be with this task's files merged in."""
+        if dest.exists():
+            shutil.rmtree(dest)
+        shutil.copytree(self.paths["integration"], dest)
+        out = self._ws(t["owner_worker_id"], t["id"]) / "out"
+        for p in out.rglob("*"):
+            if p.is_file():
+                target = dest / self._repo_path(p.relative_to(out))
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(p, target)
+        return dest
+
+    def _self_check(self, t: dict, out: Path) -> dict:
+        owner = t["owner_worker_id"]
+        folder = self._candidate(t, self._ws(owner, t["id"]) / "check")
+        g = self.gateway(owner, t["id"], "run_tests", target="own workspace", cwd=folder)
+        res = g.get("result") or {}
+        passed = g["status"] == "executed" and bool(res.get("passed"))
+        why = ""
+        syntax = []
+        for p in sorted(out.rglob("*.py")):
+            try:
+                compile(p.read_text(encoding="utf-8", errors="replace"), p.name, "exec")
+            except SyntaxError as exc:
+                syntax.append(f"{p.relative_to(out).as_posix()} line {exc.lineno}: {exc.msg}")
+        if syntax:
+            passed, why = False, "Python syntax errors: " + "; ".join(syntax)
+        elif g["status"] != "executed":
+            why = "the test run was refused: " + g["policy"]["reason"]
+        elif not passed:
+            report = run_unittests(folder)
+            why = ("failing tests: " + (", ".join(report["failed"]) or "no test_*.py at the repository root")
+                   + "\n" + report["output"][-1500:])
+        elif (out / "app.py").exists():
+            contract = deploy.contract_check(folder, self._smoke_checks(folder))
+            if not contract["ok"]:
+                passed, why = False, "the app breaks the delivery contract: " + contract["why"]
+        t["self_checks_used"] = t.get("self_checks_used", 0) + (0 if passed else 1)
+        self.event("worker.self_checked", "task", t["id"], {"task_id": t["id"], "passed": passed,
+                   "round": t.get("self_checks_used", 0), "tests_ran": res.get("ran", 0)},
+                   actor=owner, actor_type="worker", correlation_id=t["id"], test_ids=res.get("test_ids"))
+        shutil.rmtree(folder, ignore_errors=True)
+        if passed:
+            return {"passed": True}
+        t.update({"feedback": f"Your own check before handing over failed. {why}"})
+        self._save_task(t)
+        return {"passed": False, "step": {"did": "self_check_failed", "task": t["id"], "round": t["self_checks_used"]}}
 
     def _propose(self, t: dict, result: dict) -> dict:
         owner = t["owner_worker_id"]
@@ -774,16 +842,8 @@ class Engine:
 
     def _verify(self, t: dict) -> dict:
         owner = t["owner_worker_id"]
-        vdir = self.dir / "verify" / f"{t['id']}_{t['attempts'] + 1}"
-        if vdir.exists():
-            shutil.rmtree(vdir)
-        shutil.copytree(self.paths["integration"], vdir)
+        vdir = self._candidate(t, self.dir / "verify" / f"{t['id']}_{t['attempts'] + 1}")
         out = self._ws(owner, t["id"]) / "out"
-        for p in out.rglob("*"):
-            if p.is_file():
-                dest = vdir / self._repo_path(p.relative_to(out))
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(p, dest)
         n = self._count("verification") + 1
         vid = f"v_{n:03d}"
         if t["kind"] == "code":
@@ -1096,6 +1156,8 @@ class Engine:
             "defects_caught_before_verified": len(caught),
             "blockers_cleared_without_founder": len([b for b in self.store.all("blocker_cleared") if not b["founder_involved"]]),
             "actions_stopped_by_policy": len(denied),
+            "fixed_by_workers_own_checks": len([e for e in self.store.events() if e["event_type"] == "worker.self_checked"
+                                                 and not e["payload"].get("passed")]),
             "worker_protocol_objects": len(protos),
             "protocol_objects_per_verified_task": round(len(protos) / len(verified), 1) if verified else None,
             "escalations_today": len([d for d in self.store.all("decision") if d.get("source", "").startswith("w_")

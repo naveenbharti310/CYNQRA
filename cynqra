@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Cynqra on this machine:  ./cynqra doctor | run ["objective"] | bench [models] | ui
+exec python3 "$(dirname "$0")/poc/cynqra_cli.py" "$@"

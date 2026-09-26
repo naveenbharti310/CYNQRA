@@ -50,7 +50,7 @@ def answer(prompt: str) -> str:
         tid = _task_in(prompt, "Task ")
         items = S["work"][tid]
         if tid == "t_03":
-            out = items[1] if "Verification sent this back" in prompt else items[0]
+            out = items[1] if "failed a check" in prompt else items[0]
         elif tid == "t_04":
             out = items[1] if "Answers to your Blockers" in prompt else items[0]
         else:

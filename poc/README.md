@@ -8,6 +8,12 @@ replay. The spec, the decisions it enforces and the acceptance tests are in POC_
 
 This POC is not gate evidence. S1, S2 and S3 v2 still decide Milestone 2.
 
+## Run it on a laptop, for real
+
+`LAPTOP_SETUP.md` at the project root: one installer, an open model through Ollama, and
+`cynqra_cli.py` (doctor, run, bench, setup, ui). The founder answers decisions in the terminal;
+the engineers test and fix their own code before independent verification.
+
 ## Show it
 
 To explain Cynqra to someone, use the guided demo: `03_pages/how-cynqra-works.html` (double
@@ -94,6 +100,8 @@ TEST_REPORT.md holds the last full run and its coverage.
 | Path | What it is |
 | --- | --- |
 | run_poc.py | Starts the server and opens the browser |
+| cynqra_cli.py | The laptop entry point: setup, doctor, run, bench, ui |
+| research/ | Which open model and runtime to use, and why (September 2026) |
 | live_check.py | The real model test of the whole journey, with a spend cap and a written report |
 | live_reports/ | Reports of real model runs, with what each one proves |
 | cynqra/engine.py | The orchestrator: journey, gateway, decisions, verification, delivery, replay, export |

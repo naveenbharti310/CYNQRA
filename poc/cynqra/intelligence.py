@@ -27,20 +27,87 @@ class IntelligenceError(RuntimeError):
 
 
 def _parse_json(text: str):
+    """The first JSON object in the reply: fenced, bare, or followed by file blocks."""
     raw = (text or "").strip()
-    fenced = re.search(r"```(?:json)?\s*(\{.*\})\s*```", raw, re.S)
+    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.S)
     if fenced:
-        raw = fenced.group(1)
+        try:
+            return json.loads(fenced.group(1))
+        except json.JSONDecodeError:
+            pass
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
-        m = re.search(r"\{.*\}", raw, re.S)
-        if m:
-            try:
-                return json.loads(m.group(0))
-            except json.JSONDecodeError:
-                return None
+        pass
+    decoder = json.JSONDecoder()
+    for m in re.finditer(r"\{", raw):
+        try:
+            obj, _ = decoder.raw_decode(raw, m.start())
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            return obj
     return None
+
+
+FILE_BLOCK = re.compile(r"^=== FILE: *(?P<name>[^\r\n=]+?) *===[ \t]*\r?\n(?P<body>.*?)\r?\n=== END FILE ===", re.S | re.M)
+FILES_LAYOUT = ("Return your answer in exactly this layout and nothing else. First one JSON object on its own:\n"
+                '{"result": "done", "summary": "...", "acceptance_check": "..."}\n'
+                "Then every file, each one exactly like this:\n"
+                "=== FILE: name.ext ===\n"
+                "the complete file content, exactly as it should be saved\n"
+                "=== END FILE ===\n"
+                "Write file contents as plain text, not escaped and not inside code fences. "
+                'If a fact you need is missing, return only: {"result": "blocked", "category": "missing_input", '
+                '"description": "...", "needs_from": "w_pm"}')
+
+
+S = {"type": "string"}
+LIST = {"type": "array", "items": S}
+OBJECTIVE_KEYS = ["product", "target_customer", "primary_outcome", "business_outcome", "success_criteria",
+                  "constraints", "priorities"]
+SCHEMAS = {
+    "objective": {"type": "object", "properties": {**{k: S for k in OBJECTIVE_KEYS}, "inferred_fields": LIST,
+                                                   "missing_fields": LIST},
+                  "required": OBJECTIVE_KEYS + ["inferred_fields", "missing_fields"]},
+    "plan": {"type": "object", "required": ["workstreams", "tasks"], "properties": {
+        "workstreams": {"type": "array", "items": {"type": "object", "properties": {"id": S, "name": S},
+                                                   "required": ["id", "name"]}},
+        "tasks": {"type": "array", "items": {"type": "object", "properties": {
+            "id": S, "workstream_id": S, "kind": {"type": "string", "enum": list(KIND_TIER)},
+            "owner_worker_id": {"type": "string", "enum": ["w_cto", "w_pm", "w_eng_a", "w_eng_b"]}, "title": S,
+            "inputs": S, "expected_output": S, "dependencies": LIST, "tools": LIST, "budget": {"type": "integer"},
+            "deadline_day": {"type": "integer"}, "verification_method": S},
+            "required": ["id", "workstream_id", "kind", "owner_worker_id", "title", "inputs", "expected_output",
+                         "dependencies", "tools", "budget", "deadline_day", "verification_method"]}}}},
+    "handoff": {"type": "object", "properties": {"artifacts": LIST, "context_ref": S, "acceptance_check": S},
+                "required": ["artifacts", "context_ref", "acceptance_check"]},
+    "proposal": {"type": "object", "properties": {
+        "result": {"type": "string", "enum": ["proposal"]}, "problem": S, "recommendation": S, "evidence_refs": LIST,
+        "cost": S, "confidence": {"type": "string", "enum": ["low", "medium", "high"]}, "what_would_change_this": S},
+        "required": ["result", "problem", "recommendation", "evidence_refs", "cost", "confidence",
+                     "what_would_change_this"]},
+}
+
+
+def _closed(schema):
+    """additionalProperties false on every object: Ollama assumes it, llama-server needs it said."""
+    if isinstance(schema, dict):
+        out = {k: _closed(v) for k, v in schema.items()}
+        if out.get("type") == "object":
+            out["additionalProperties"] = False
+        return out
+    if isinstance(schema, list):
+        return [_closed(v) for v in schema]
+    return schema
+
+
+SCHEMAS = {k: _closed(v) for k, v in SCHEMAS.items()}
+
+
+def _file_blocks(text: str) -> dict[str, str]:
+    """Files written as === FILE: name === blocks. Plain text survives far better than code escaped inside JSON."""
+    return {m.group("name").strip(): m.group("body") + "\n" for m in FILE_BLOCK.finditer(text or "")}
 
 
 def _int(value, default: int) -> int:
@@ -190,20 +257,35 @@ class ModelSource:
     def __init__(self):
         resolved = model_adapter.resolve()
         if resolved is None:
-            raise IntelligenceError("Live mode needs ANTHROPIC_API_KEY or OPENAI_API_KEY in the environment.")
+            raise IntelligenceError("Live mode needs a model: a local Ollama model (python poc/cynqra_cli.py doctor "
+                                    "explains how), or ANTHROPIC_API_KEY or OPENAI_API_KEY.")
         self.label = resolved["label"]
         self.prompt_v2 = (HERE / "objective_prompt.txt").read_text(encoding="utf-8")
 
-    def _call(self, prompt: str, max_tokens: int = 4000) -> tuple[dict, dict]:
-        out = model_adapter.complete(prompt, max_tokens=max_tokens)
+    def _call(self, prompt: str, max_tokens: int = 4000, files: bool = False, schema: dict | None = None) -> tuple[dict, dict]:
+        """One model call. files=True: a JSON header followed by file blocks, so no constrained JSON mode."""
+
+        def parse(text: str):
+            data = _parse_json(text)
+            if files:
+                blocks = _file_blocks(text)
+                if blocks and not (isinstance(data, dict) and isinstance(data.get("files"), dict) and data["files"]):
+                    data = dict(data) if isinstance(data, dict) else {"result": "done"}
+                    data["files"] = blocks
+            return data
+
+        out = model_adapter.complete(prompt, max_tokens=max_tokens, want_json=not files, schema=schema)
         if out.get("error"):
             raise IntelligenceError(out["error"])
-        data = _parse_json(out["text"])
+        data = parse(out["text"])
         if not isinstance(data, dict):
-            out2 = model_adapter.complete(prompt + "\n\nReply with only one JSON object.", max_tokens=max_tokens)
+            again = ("\n\nYour reply did not follow the layout. " + FILES_LAYOUT) if files else \
+                "\n\nReply with only one JSON object."
+            out2 = model_adapter.complete(prompt + again, max_tokens=max_tokens, want_json=not files, schema=schema,
+                                          temperature=0.4)
             if out2.get("error"):
                 raise IntelligenceError(out2["error"])
-            data = _parse_json(out2["text"])
+            data = parse(out2["text"])
             out["tokens_in"] += out2["tokens_in"]
             out["tokens_out"] += out2["tokens_out"]
         if not isinstance(data, dict):
@@ -220,7 +302,7 @@ class ModelSource:
         return f"Confirmed objective:\n{json.dumps(fields, indent=1)}\nDecided rules:\n{r}\n"
 
     def structure_objective(self, messy: str) -> tuple[dict, dict]:
-        data, usage = self._call(self.prompt_v2 + messy + "\n", max_tokens=1500)
+        data, usage = self._call(self.prompt_v2 + messy + "\n", max_tokens=1500, schema=SCHEMAS["objective"])
         return data, usage
 
     def plan(self, objective: dict, note: str = "") -> tuple[dict, dict]:
@@ -237,12 +319,12 @@ class ModelSource:
                   'Return JSON: {"workstreams": [{"id", "name"}], "tasks": [{"id", "workstream_id", "kind", '
                   '"owner_worker_id", "title", "inputs", "expected_output", "dependencies", "tools", "budget", '
                   '"deadline_day", "verification_method"}]}')
-        data, usage = self._call(prompt, max_tokens=3000)
+        data, usage = self._call(prompt, max_tokens=3000, schema=SCHEMAS["plan"])
         try:
             return validate_plan(data), usage
         except IntelligenceError as exc:
             data2, usage2 = self._call(prompt + f"\n\nYour previous plan was refused: {exc}. Return a corrected plan.",
-                                       max_tokens=3000)
+                                       max_tokens=3000, schema=SCHEMAS["plan"])
             for k in ("tokens_in", "tokens_out", "units"):
                 usage[k] += usage2[k]
             return validate_plan(data2), usage
@@ -254,7 +336,7 @@ class ModelSource:
                   "List only the artifacts the engineer needs. Put every closed list or rule they must not invent "
                   "into acceptance_check.\n"
                   'Return JSON: {"artifacts": [ids], "context_ref": "...", "acceptance_check": "..."}')
-        return self._call(prompt, max_tokens=1500)
+        return self._call(prompt, max_tokens=1500, schema=SCHEMAS["handoff"])
 
     def work(self, task: dict, worker: str, objective: dict, rules: list[str], handoff: dict,
              inbox: dict[str, str], feedback: str = "", answers: list[dict] | None = None,
@@ -264,15 +346,13 @@ class ModelSource:
         if answers:
             extra += "\nAnswers to your Blockers:\n" + "\n".join(a.get("acceptance_check", "") for a in answers)
         if feedback:
-            extra += "\nVerification sent this back. Fix it:\n" + feedback
+            extra += "\nYour last attempt failed a check. Fix it:\n" + feedback
             if previous:
                 extra += ("\nYour previous files, to fix rather than rewrite from nothing:\n"
                           + "\n".join(f"--- {k} ---\n{v}" for k, v in previous.items()))
         kind = task["kind"]
         if kind in ("spec", "code"):
-            shape = ('{"result": "done", "summary": "...", "files": {"name.ext": "full file content"}, '
-                     '"acceptance_check": "..."} or {"result": "blocked", "category": "missing_input", '
-                     '"description": "...", "needs_from": "w_pm"}')
+            shape = None
         else:
             shape = ('{"result": "proposal", "problem": "...", "recommendation": "...", "evidence_refs": [], '
                      '"cost": "...", "confidence": "low, medium or high", "what_would_change_this": "..."}')
@@ -282,8 +362,9 @@ class ModelSource:
                   f"Handoff: {json.dumps({k: handoff.get(k) for k in ('acceptance_check', 'context_ref', 'artifacts')})}\n"
                   f"{repo}Files handed to you:\n{files}\n{extra}\n"
                   "If a fact you need is missing and you would have to guess it, raise a Blocker instead.\n"
-                  f"Return one JSON object: {shape}")
-        return self._call(prompt, max_tokens=8000 if kind == "code" else 3000)
+                  + (FILES_LAYOUT if shape is None else f"Return one JSON object: {shape}"))
+        return self._call(prompt, max_tokens=8000 if kind == "code" else 3000, files=shape is None,
+                          schema=None if shape is None else SCHEMAS["proposal"])
 
     def answer_blocker(self, task: dict, worker: str, objective: dict, rules: list[str], blocker: dict,
                        artifact_index: list[str], **_) -> tuple[dict, dict]:
@@ -293,7 +374,7 @@ class ModelSource:
                   "Clear it using only the objective, the decided rules and the artifacts. If it needs a new product "
                   "decision, say so plainly and give the safest reading for now.\n"
                   'Return JSON: {"artifacts": [ids], "context_ref": "...", "acceptance_check": "the missing facts"}')
-        return self._call(prompt, max_tokens=1500)
+        return self._call(prompt, max_tokens=1500, schema=SCHEMAS["handoff"])
 
 
 def make(mode: str, scenario_id: str = "candidate_tracker"):

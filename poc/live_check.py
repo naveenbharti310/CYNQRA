@@ -41,7 +41,7 @@ sys.path.insert(0, str(HERE))
 from cynqra import model_adapter  # noqa: E402
 from cynqra.engine import Engine  # noqa: E402
 
-REPORTS = HERE / "live_reports"
+REPORTS = Path(os.environ.get("CYNQRA_REPORTS_DIR") or HERE / "live_reports")
 SCENARIO = json.loads((HERE / "scenarios" / "candidate_tracker" / "scenario.json").read_text(encoding="utf-8"))
 
 # USD per million tokens, input and output. First party list prices, checked 26 Sep 2026.
@@ -105,6 +105,7 @@ def health(url: str | None) -> dict:
 def run(objective: str, max_usd: float, cap_units: int, data_dir: Path, log=print, allow_cmd: bool = False) -> dict:
     resolved = model_adapter.resolve()
     measured = bool(resolved) and resolved["kind"] != "cmd"
+    local = bool(resolved and resolved.get("local"))  # a model on this machine: real token counts, no API spend
     report = {"started_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "objective": objective,
               "max_usd": max_usd, "model": resolved, "effort": os.environ.get("CYNQRA_EFFORT") or "model default",
               "counts_as_measured_result": measured}
@@ -117,7 +118,7 @@ def run(objective: str, max_usd: float, cap_units: int, data_dir: Path, log=prin
     decisions, steps = [], []
 
     def cost() -> float:
-        return spend(e.store.all("call")) if measured else 0.0
+        return spend(e.store.all("call")) if measured and not local else 0.0
 
     def finish(outcome: str, reason: str) -> dict:
         calls = e.store.all("call")
@@ -141,7 +142,8 @@ def run(objective: str, max_usd: float, cap_units: int, data_dir: Path, log=prin
     try:
         e.create_company("Live check", "live")
         log(f"model: {resolved['label']} ({resolved['kind']}), "
-            + (f"spend cap ${max_usd:.2f}" if measured else "command model: tokens estimated, no dollar cap"))
+            + ("local model: real token counts, no API spend" if local else
+               f"spend cap ${max_usd:.2f}" if measured else "command model: tokens estimated, no dollar cap"))
         obj = e.draft_objective(objective)
         log(f"objective structured: {len(obj['structured'])} fields, inferred {obj['inferred_fields']}, "
             f"missing {obj['missing_fields']}  ${cost():.3f}")
@@ -153,7 +155,7 @@ def run(objective: str, max_usd: float, cap_units: int, data_dir: Path, log=prin
         if e.meta["phase"] == "stopped_error":
             raise RuntimeError(e.meta.get("notice", "planning failed"))
         for _ in range(400):
-            if measured and cost() > max_usd:
+            if measured and not local and cost() > max_usd:
                 e.kill_switch(True)
                 return finish("UNRUN", f"spend cap reached: ${cost():.3f} > ${max_usd:.2f}. Run stopped by the kill switch.")
             phase = e.meta["phase"]
@@ -206,7 +208,9 @@ def write(report: dict) -> Path:
     j.write_text(json.dumps(report, indent=1), encoding="utf-8")
     lines = [f"# Live check {ts}", "", f"**Outcome: {report['outcome']}**. {report.get('reason', '')}", "",
              f"Model: {(report.get('model') or {}).get('label')}, effort {report.get('effort')}. "
-             + (f"Spend ${report.get('usd', 0):.3f} of ${report['max_usd']:.2f} cap. " if report["counts_as_measured_result"]
+             + ("Local model on this machine: token counts are real, there is no API spend. "
+                if (report.get("model") or {}).get("local") else
+                f"Spend ${report.get('usd', 0):.3f} of ${report['max_usd']:.2f} cap. " if report["counts_as_measured_result"]
                 else "Command model: tokens are estimated, spend is not measured, not a cost result. ") +
              f"Tokens {report.get('tokens_in', 0)} in, {report.get('tokens_out', 0)} out. "
              f"{report.get('seconds', 0)} s.", "", f"Objective: {report['objective']}", ""]
