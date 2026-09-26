@@ -243,6 +243,53 @@ class OutageTests(unittest.TestCase):
         e.close()
 
 
+class SlowModelTests(unittest.TestCase):
+    """A real model takes seconds to minutes per call; the founder's screen and kill switch must not wait for it."""
+
+    def setUp(self):
+        self.saved = no_model_env()
+        self.tmp = TempDir()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+        restore_env(self.saved)
+
+    def test_state_and_kill_switch_work_during_a_model_call(self):
+        started, release = threading.Event(), threading.Event()
+
+        class Slow(ScriptedSource):
+            def work(self, task, **kw):
+                if task["id"] == "t_01":
+                    started.set()
+                    release.wait(10)
+                return super().work(task, **kw)
+
+        e = start(self.tmp.path, Slow())
+        e.step()  # assign t_01
+        worker = threading.Thread(target=e.step)
+        worker.start()
+        self.assertTrue(started.wait(5))
+        snap = {}
+        reader = threading.Thread(target=lambda: snap.update(e.snapshot()))
+        reader.start()
+        reader.join(2)
+        self.assertFalse(reader.is_alive(), "state must be readable while the model is answering")
+        self.assertEqual(snap["meta"]["phase"], "running")
+        killer = threading.Thread(target=lambda: e.kill_switch(True))
+        killer.start()
+        killer.join(2)
+        self.assertFalse(killer.is_alive(), "the kill switch must not wait for the model")
+        release.set()
+        worker.join(10)
+        t = e.task("t_01")
+        self.assertEqual((t["status"], t["attempts"]), ("ASSIGNED", 0), "the late answer is dropped without penalty")
+        self.assertFalse(e.pending_decisions())
+        e.kill_switch(False)
+        e.run_until_idle()
+        self.assertEqual(e.task("t_01")["status"], "VERIFIED")
+        e.close()
+
+
 class ServerTests(unittest.TestCase):
     def setUp(self):
         self.saved = no_model_env()

@@ -578,6 +578,8 @@ class Engine:
             content, usage = self.intel.assign(t, objective=self.objective()["structured"], rules=self.rules(),
                                                artifact_index=self._artifact_index())
             self._record_call(t["id"], "w_pm", "assign", usage)
+            if self.meta["frozen"]:
+                return self._frozen_during_call(t)
             known = set(self._artifact_index())
             content["artifacts"] = [a for a in (content.get("artifacts") or []) if a in known]
         handoff = self.send("Handoff", content, {"from_worker": assigner, "to_worker": owner, "task_id": t["id"]},
@@ -614,6 +616,8 @@ class Engine:
         t["work_calls"] += 1
         self._save_task(t)
         self._record_call(t["id"], owner, "work", usage)
+        if self.meta["frozen"]:
+            return self._frozen_during_call(t)
         kind = t["kind"]
         if result.get("result") == "blocked":
             needs = result.get("needs_from") if result.get("needs_from") in ("w_pm", "w_cto") else "w_pm"
@@ -719,6 +723,12 @@ class Engine:
         self._save_task(t)
         return {"did": "proposed", "task": t["id"], "decision": d["id"]}
 
+    def _frozen_during_call(self, t: dict) -> dict:
+        """The kill switch went on while the model was answering: the answer is dropped, the task stays where it was."""
+        self.event("action.denied", "task", t["id"], {"task_id": t["id"], "reason": "kill switch on when the model answered; "
+                   "the answer was discarded"}, actor="policy", correlation_id=t["id"], policy_decision="DENY")
+        return {"did": "paused", "task": t["id"], "why": "kill switch"}
+
     def _escalate(self, t: dict, why: str) -> dict:
         owner = t["owner_worker_id"]
         esc = self.send("Escalation", {"issue": why, "required_action": "Founder decides: retry the task or stop the run.",
@@ -743,6 +753,8 @@ class Engine:
         content, usage = self.intel.answer_blocker(t, worker=who, objective=self.objective()["structured"],
                                                    rules=self.rules(), blocker=blocker, artifact_index=self._artifact_index())
         self._record_call(t["id"], who, "answer_blocker", usage)
+        if self.meta["frozen"]:
+            return self._frozen_during_call(t)
         known = set(self._artifact_index())
         content["artifacts"] = [a for a in (content.get("artifacts") or []) if a in known]
         answer = self.send("Handoff", content, {"from_worker": who, "to_worker": t["owner_worker_id"], "task_id": t["id"]},
@@ -1021,12 +1033,14 @@ class Engine:
 
     # --- founder controls ------------------------------------------------------
     def kill_switch(self, on: bool) -> dict:
-        with self.lock:
-            self._set_meta(frozen=bool(on))
-            self._intervention("kill_switch", "on" if on else "off")
-            self.event("state.changed", "company", self.cid, {"frozen": bool(on), "control": "kill_switch"},
-                       actor="founder", actor_type="human", authority="founder", policy_decision="DENY" if on else "ALLOW")
-            return self.meta
+        # Not behind self.lock: a step can hold it for a whole model call, and the kill switch
+        # must work during one. The store serializes the writes; the step checks frozen when
+        # its call returns and discards the result.
+        self._set_meta(frozen=bool(on))
+        self._intervention("kill_switch", "on" if on else "off")
+        self.event("state.changed", "company", self.cid, {"frozen": bool(on), "control": "kill_switch"},
+                   actor="founder", actor_type="human", authority="founder", policy_decision="DENY" if on else "ALLOW")
+        return self.meta
 
     def resume(self) -> dict:
         """After a model or network error: try the same step again. Nothing was written by the failed call."""
@@ -1175,36 +1189,36 @@ class Engine:
             return str(path)
 
     def snapshot(self) -> dict:
-        with self.lock:
-            m = self.meta
-            decisions = self.store.all("decision")
-            protocols = self.store.all("protocol")
-            return {
-                "meta": m,
-                "demo_messy": self.demo_messy,
-                "policy": {"version": policy.POLICY_VERSION, "matrix": policy.MATRIX, "risk": policy.RISK},
-                "intelligence": self._intel.label if self._intel else None,
-                "company": self.store.get("company", self.cid),
-                "objective": self.objective(),
-                "organization": self.store.get("organization", "org_1"),
-                "workers": self.store.all("worker"),
-                "plan": self.store.get("plan", "plan_1"),
-                "tasks": self.tasks() if self.store.get("plan", "plan_1") else [],
-                "decisions": {"pending": [d for d in decisions if d["status"] == "pending"],
-                              "answered": [d for d in decisions if d["status"] != "pending"]},
-                "protocols": protocols[-40:],
-                "denied": [a for a in self.store.all("action") if a["status"] == "denied"],
-                "verifications": self.store.all("verification"),
-                "deployments": self.store.all("deployment"),
-                "transition": self.store.get("transition", "tr_1"),
-                "budget": self.budget(),
-                "metrics": self.metrics() if self.store.get("company", self.cid) else {},
-                "evolution": self.evolution() if self.store.all("worker") else None,
-                "rules": self.rules(),
-                "live_url": self.live_url(),
-                "events": self.store.events()[-60:],
-                "exports": sorted(p.name for p in self.paths["exports"].glob("*.zip")),
-            }
+        # Read without self.lock so the UI stays live while a step waits on a model call.
+        m = self.meta
+        decisions = self.store.all("decision")
+        protocols = self.store.all("protocol")
+        return {
+            "meta": m,
+            "demo_messy": self.demo_messy,
+            "policy": {"version": policy.POLICY_VERSION, "matrix": policy.MATRIX, "risk": policy.RISK},
+            "intelligence": self._intel.label if self._intel else None,
+            "company": self.store.get("company", self.cid),
+            "objective": self.objective(),
+            "organization": self.store.get("organization", "org_1"),
+            "workers": self.store.all("worker"),
+            "plan": self.store.get("plan", "plan_1"),
+            "tasks": self.tasks() if self.store.get("plan", "plan_1") else [],
+            "decisions": {"pending": [d for d in decisions if d["status"] == "pending"],
+                          "answered": [d for d in decisions if d["status"] != "pending"]},
+            "protocols": protocols[-40:],
+            "denied": [a for a in self.store.all("action") if a["status"] == "denied"],
+            "verifications": self.store.all("verification"),
+            "deployments": self.store.all("deployment"),
+            "transition": self.store.get("transition", "tr_1"),
+            "budget": self.budget(),
+            "metrics": self.metrics() if self.store.get("company", self.cid) else {},
+            "evolution": self.evolution() if self.store.all("worker") else None,
+            "rules": self.rules(),
+            "live_url": self.live_url(),
+            "events": self.store.events()[-60:],
+            "exports": sorted(p.name for p in self.paths["exports"].glob("*.zip")),
+        }
 
     def close(self) -> None:
         deploy.stop(self.live_proc)

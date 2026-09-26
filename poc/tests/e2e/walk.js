@@ -30,8 +30,15 @@ function loadPlaywright() {
     const inferred = await page.$$eval(".field.inf", (els) => els.length);
     if (inferred !== 2) errors.push(`expected 2 inferred fields, saw ${inferred}`);
     await shot("01_objective");
+    await page.fill("#f_priorities", "Seeing who is stuck first, then adding candidates");
+    await page.fill("#cap", "150");
     await page.click("#confirm");
     await page.waitForSelector("#approve-plan");
+    const st = await page.evaluate(async () => (await (await fetch("/api/state")).json()));
+    if (st.budget.cap !== 150) errors.push(`budget cap edit was lost: ${st.budget.cap}`);
+    if (st.objective.structured.priorities !== "Seeing who is stuck first, then adding candidates") errors.push("objective edit was lost");
+    if (st.meta.mode !== "demo") errors.push(`mode is ${st.meta.mode}, expected demo`);
+    steps.push("founder edits to a field and the budget cap were kept");
     steps.push("plan proposed");
     await shot("02_plan");
     await page.click("#approve-plan");

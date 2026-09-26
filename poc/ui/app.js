@@ -4,7 +4,7 @@
 
 const S = {
   st: null, view: "company", worker: "w_eng_b", replayTask: null, replay: null, replayKey: "",
-  seen: -1, sig: "", err: "", busy: false, graph: null,
+  seen: -1, sig: "", err: "", busy: false, graph: null, mode: "demo",
 };
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -32,6 +32,7 @@ async function api(path, body) {
   return data;
 }
 
+/* act() repaints before fn runs, so handlers read every input they need first, then call act(). */
 async function act(fn) {
   if (S.busy) return;
   S.busy = true; S.err = ""; paint(true);
@@ -106,8 +107,8 @@ function wizard() {
       <label class="lbl" for="coname">Company name</label>
       <input type="text" id="coname" value="Harbor Recruiting">
       <div class="modes" role="radiogroup" aria-label="Intelligence">
-        <label class="mode on" id="m-demo"><input type="radio" name="mode" value="demo" checked>Demo: scripted workers</label>
-        <label class="mode" id="m-live"><input type="radio" name="mode" value="live">Live: a real model</label>
+        <label class="mode ${S.mode === "demo" ? "on" : ""}" id="m-demo"><input type="radio" name="mode" value="demo" ${S.mode === "demo" ? "checked" : ""}>Demo: scripted workers</label>
+        <label class="mode ${S.mode === "live" ? "on" : ""}" id="m-live"><input type="radio" name="mode" value="live" ${S.mode === "live" ? "checked" : ""}>Live: a real model</label>
       </div>` : "";
   const right = obj ? objectiveCard(obj) : `<div class="card" style="flex:1;display:flex;align-items:center;justify-content:center"><p class="muted">Your structured objective appears here.</p></div>`;
   return `<div class="wiz">${top}<div class="wiz-body">
@@ -445,21 +446,25 @@ function vDelivery() {
 /* ---------- events ---------- */
 function bind() {
   $$("[data-view]").forEach((b) => b.onclick = () => { S.view = b.dataset.view; S.err = ""; if (S.view === "audit") loadReplay().then(() => paint(true)); paint(true); });
-  $$(".mode input").forEach((r) => r.onchange = () => { $$(".mode").forEach((m) => m.classList.toggle("on", m.contains(r) && r.checked)); });
+  $$(".mode input").forEach((r) => r.onchange = () => { if (r.checked) S.mode = r.value; $$(".mode").forEach((m) => m.classList.toggle("on", m.contains(r) && r.checked)); });
   const on = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
-  on("structure", () => act(async () => {
-    if (S.st.meta.phase === "new") {
-      const mode = ($("input[name=mode]:checked") || {}).value || "demo";
-      await api("/api/company", { name: $("#coname").value, mode });
-    }
-    await api("/api/objective/draft", { messy: $("#messy").value });
-  }));
-  on("confirm", () => act(async () => {
+  on("structure", () => {
+    const isNew = S.st.meta.phase === "new", name = isNew ? $("#coname").value : "", messy = $("#messy").value;
+    const mode = (($("input[name=mode]:checked") || {}).value) || S.mode;
+    act(async () => {
+      if (isNew) await api("/api/company", { name, mode });
+      await api("/api/objective/draft", { messy });
+    });
+  });
+  on("confirm", () => {
     const fields = {}; $$("[data-field]").forEach((i) => fields[i.dataset.field] = i.value);
-    await api("/api/objective/fields", { fields });
-    await api("/api/objective/guardrails", { budget_cap: Number($("#cap").value) });
-    await api("/api/objective/confirm", {});
-  }));
+    const cap = Number($("#cap").value);
+    act(async () => {
+      await api("/api/objective/fields", { fields });
+      await api("/api/objective/guardrails", { budget_cap: cap });
+      await api("/api/objective/confirm", {});
+    });
+  });
   on("approve-plan", (ev) => act(async () => {
     await api(`/api/decisions/${ev.currentTarget.dataset.id}`, { action: "approve" });
     await api("/api/run/auto", { on: true });
@@ -470,22 +475,25 @@ function bind() {
   on("resume", () => act(() => api("/api/run/resume", {})));
   on("auto", () => act(() => api("/api/run/auto", { on: !S.st.auto.on })));
   on("kill", () => act(() => api("/api/killswitch", { on: !S.st.meta.frozen })));
-  on("reset", () => { if (window.confirm("Archive this run and start a new one? Nothing is deleted.")) act(async () => { await api("/api/reset", {}); S.view = "company"; S.seen = -1; }); });
-  on("ask", () => act(async () => {
-    try { S.graph = await api(`/api/graph?q=${encodeURIComponent($("#gq").value)}&subject=${encodeURIComponent($("#gs").value.trim())}`); }
-    catch (e) { S.graph = { error: e.message }; }
-  }));
+  on("reset", () => { if (window.confirm("Archive this run and start a new one? Nothing is deleted.")) act(async () => { await api("/api/reset", {}); S.view = "company"; S.seen = -1; S.mode = "demo"; }); });
+  on("ask", () => {
+    const q = $("#gq").value, subject = $("#gs").value.trim();
+    act(async () => {
+      try { S.graph = await api(`/api/graph?q=${encodeURIComponent(q)}&subject=${encodeURIComponent(subject)}`); }
+      catch (e) { S.graph = { error: e.message }; }
+    });
+  });
   $$("[data-worker]").forEach((b) => b.onclick = () => { S.worker = b.dataset.worker; paint(true); });
   const rt = $("#replay-task");
   if (rt) rt.onchange = () => { S.replayTask = rt.value; S.replayKey = ""; loadReplay().then(() => paint(true)); };
-  $$("[data-decide]").forEach((b) => b.onclick = () => act(async () => {
+  $$("[data-decide]").forEach((b) => b.onclick = () => {
     const id = b.dataset.id, action = b.dataset.decide, d = (S.st.decisions.pending || []).find((x) => x.id === id) || {};
     const noteEl = document.getElementById(`note_${id}`), editEl = document.getElementById(`edit_${id}`), capEl = document.getElementById(`cap_${id}`);
-    const edited = {};
+    const edited = {}, note = noteEl ? noteEl.value : "";
     if (editEl && editEl.value.trim() && editEl.value.trim() !== (d.recommendation || "").trim()) edited.recommendation = editEl.value.trim();
     if (capEl) edited.cap = Number(capEl.value);
-    await api(`/api/decisions/${id}`, { action, note: noteEl ? noteEl.value : "", edited });
-  }));
+    act(() => api(`/api/decisions/${id}`, { action, note, edited }));
+  });
 }
 
 refresh(true);
