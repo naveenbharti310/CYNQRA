@@ -1,0 +1,33 @@
+# Which open models exist on Hugging Face today, in which sizes: the input for choosing faster models
+# for 16 to 24 GB laptops. Read-only; runs when this file changes.
+name: cynqra-model-scan
+on:
+  push:
+    branches: [cynqra]
+    paths: [".github/workflows/cynqra-model-scan.yml"]
+permissions:
+  contents: read
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: GGUF files of the candidate models
+        run: |
+          for repo in unsloth/Qwen3.6-35B-A3B-GGUF bartowski/Qwen_Qwen3.6-35B-A3B-GGUF unsloth/gpt-oss-20b-GGUF ggml-org/gpt-oss-20b-GGUF; do
+            echo "== $repo"
+            curl -sS "https://huggingface.co/api/models/$repo/tree/main?recursive=true" | python3 -c "
+          import json,sys
+          for f in json.load(sys.stdin):
+              p=f.get('path','')
+              if p.endswith('.gguf') and 'mmproj' not in p.lower(): print('   %8.2f GiB  %s' % (f.get('size',0)/2**30, p))"
+          done
+      - name: Newest popular GGUF models (last 90 days), by downloads
+        run: |
+          for q in A3B-GGUF A4B-GGUF A1B-GGUF Qwen3.8 Qwen3.7 GLM-4.7-Flash gemma-4 Nemotron-3 granite-4 LFM2 gpt-oss Devstral; do
+            echo "== search: $q"
+            curl -sS "https://huggingface.co/api/models?search=$q&sort=downloads&direction=-1&limit=12&full=false" | python3 -c "
+          import json,sys
+          for m in json.load(sys.stdin):
+              print('   %-70s %9s dl  created %s' % (m['id'], m.get('downloads',0), (m.get('createdAt') or '')[:10]))"
+          done
