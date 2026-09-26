@@ -1,0 +1,9 @@
+{
+  "id": "gold_001",
+  "source": "decision_001",
+  "type": "decision_labeling",
+  "messy": "A candidate in applied with no stage change for 8 days is stuck.",
+  "gold": "Flagged only. Stuck requires a named reason from the closed list. If the stage already moved, both marks clear.",
+  "label": "approved_edited",
+  "what_would_change_this": "Evidence that recruiters need the clock itself to mean stuck."
+}

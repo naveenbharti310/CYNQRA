@@ -1,0 +1,132 @@
+[
+  {
+    "id": "T01",
+    "messy": "I need a simple tool for my cafe so waiters take orders on a tablet and the kitchen sees them. Stop losing paper tickets. Keep it cheap.",
+    "gold": {
+      "product": "tablet order board for a cafe",
+      "target_customer": "cafe owner and wait staff",
+      "primary_outcome": "kitchen receives every order without paper tickets",
+      "business_outcome": "stop lost tickets and remakes",
+      "success_criteria": "orders appear in the kitchen when entered on a tablet",
+      "constraints": "cheap, simple",
+      "priorities": "reliability of order delivery"
+    }
+  },
+  {
+    "id": "T02",
+    "messy": "Build me an internal tracker so my two recruiters can log candidates, set a stage, and I can see who is stuck. No public careers site.",
+    "gold": {
+      "product": "internal candidate tracker",
+      "target_customer": "founder and two recruiters",
+      "primary_outcome": "every candidate has a visible stage",
+      "business_outcome": "founder can see who is stuck",
+      "success_criteria": "candidates can be created, staged, and listed",
+      "constraints": "no public careers site",
+      "priorities": "visibility of stuck candidates"
+    }
+  },
+  {
+    "id": "T03",
+    "messy": "We run a small clinic. Reception keeps a shared spreadsheet of appointments and it breaks every week. I want staff to book, move, and cancel slots. Patients should not see the admin screen.",
+    "gold": {
+      "product": "staff appointment book",
+      "target_customer": "clinic reception staff",
+      "primary_outcome": "staff can book, move, and cancel slots",
+      "business_outcome": "stop the weekly spreadsheet breakage",
+      "success_criteria": "slots can be created, moved, and cancelled by staff",
+      "constraints": "patients must not see the admin screen",
+      "priorities": "staff booking reliability"
+    }
+  },
+  {
+    "id": "T04",
+    "messy": "Inventory for a tiny warehouse. Scan boxes in, scan boxes out, show what is low. Do not connect to accounting yet.",
+    "gold": {
+      "product": "warehouse inventory ledger",
+      "target_customer": "small warehouse operator",
+      "primary_outcome": "scan stock in and out and see low items",
+      "business_outcome": "know what is low before a stockout",
+      "success_criteria": "in, out, and low stock list work",
+      "constraints": "no accounting connection",
+      "priorities": "low stock visibility"
+    }
+  },
+  {
+    "id": "T05",
+    "messy": "A donor CRM for our nonprofit. Store name and gift date only. I need a list and a way to add a gift. No email blasts.",
+    "gold": {
+      "product": "donor gift list",
+      "target_customer": "nonprofit operator",
+      "primary_outcome": "add a gift and see the list",
+      "business_outcome": "keep a usable donor record",
+      "success_criteria": "gift records can be created and listed",
+      "constraints": "name and gift date only, no email blasts",
+      "priorities": "simple gift recording"
+    }
+  },
+  {
+    "id": "T06",
+    "messy": "Help desk for my 8 person SaaS. Customers open a ticket, we set status, they see status. No chat. Email is enough later.",
+    "gold": {
+      "product": "customer ticket desk",
+      "target_customer": "8 person SaaS support team",
+      "primary_outcome": "customers open tickets and see status",
+      "business_outcome": "support can track open work",
+      "success_criteria": "ticket create, status change, and customer status view work",
+      "constraints": "no chat, email later",
+      "priorities": "status visibility"
+    }
+  },
+  {
+    "id": "T07",
+    "messy": "Course waitlist. People join a list, I approve them into a cohort, they get a seat. Payments stay off this system.",
+    "gold": {
+      "product": "course waitlist and cohort seat list",
+      "target_customer": "course operator",
+      "primary_outcome": "people join a waitlist and can be approved into a cohort",
+      "business_outcome": "fill cohorts from a list",
+      "success_criteria": "join list, approve, assign seat",
+      "constraints": "payments stay off this system",
+      "priorities": "waitlist to seat flow"
+    }
+  },
+  {
+    "id": "T08",
+    "messy": "I manage 12 rental units. I need tenants, leases, and a repair ticket per unit. Tenants should not edit leases.",
+    "gold": {
+      "product": "rental unit, lease, and repair tracker",
+      "target_customer": "small landlord",
+      "primary_outcome": "track tenants, leases, and repair tickets per unit",
+      "business_outcome": "see repairs against each unit",
+      "success_criteria": "units, leases, and repair tickets can be created and listed",
+      "constraints": "tenants must not edit leases",
+      "priorities": "repair tickets tied to units"
+    }
+  },
+  {
+    "id": "T09",
+    "messy": "Make a board for my hardware shop jobs. Job comes in, parts reserved, job done. One shop, one owner, no multi location.",
+    "gold": {
+      "product": "shop job board",
+      "target_customer": "single hardware shop owner",
+      "primary_outcome": "jobs move from in, parts reserved, to done",
+      "business_outcome": "know which jobs are waiting on parts",
+      "success_criteria": "jobs can be created and moved through those states",
+      "constraints": "one shop, one owner, no multi location",
+      "priorities": "parts reservation visibility"
+    }
+  },
+  {
+    "id": "T10",
+    "messy": "We need a CRUD app for grant applications. Applicant submits, reviewer scores, I decide. Keep files in our drive, do not store passports.",
+    "gold": {
+      "product": "grant application review app",
+      "target_customer": "grant administrator and reviewers",
+      "primary_outcome": "applications can be submitted, scored, and decided",
+      "business_outcome": "decide grants from one list",
+      "success_criteria": "submit, score, and decision states work",
+      "constraints": "files stay in existing drive, do not store passports",
+      "priorities": "decision flow without holding identity documents"
+    }
+  }
+]

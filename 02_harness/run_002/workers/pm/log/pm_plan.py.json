@@ -1,0 +1,8 @@
+{
+  "worker": "pm",
+  "script": "pm_plan.py",
+  "returncode": 0,
+  "stdout": "pm wrote tasks and handoff_t001\n",
+  "stderr": "",
+  "seconds": 0.024
+}

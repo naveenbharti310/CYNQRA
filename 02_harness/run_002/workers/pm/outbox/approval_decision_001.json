@@ -1,0 +1,24 @@
+{
+  "protocol": "Approval",
+  "decision_id": "decision_001",
+  "task_id": "t_003",
+  "recommendation": "A 7 day clock only flags a card in applied or screen. Stuck requires a named reason from: waiting_on_recruiter, waiting_on_candidate, waiting_on_founder, missing_document, no_owner. If the stage already moved, both marks clear.",
+  "evidence_refs": [
+    "objective.json success_criteria",
+    "founder int_002"
+  ],
+  "cost": "none. local product rule only",
+  "risk": "MEDIUM",
+  "confidence": "high",
+  "options": [
+    "approve",
+    "reject",
+    "request_evidence"
+  ],
+  "what_would_change_this": "Evidence that recruiters need the clock itself to mean stuck, or a new allowed reason that is not in the closed list.",
+  "outcome_label": "approved_edited",
+  "labeled_by": "founder",
+  "labeled_at": "2026-08-24T16:58:00+05:30",
+  "status": "decided",
+  "note": "First draft rejected. Founder required cause, not only elapsed days."
+}

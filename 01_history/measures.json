@@ -1,0 +1,82 @@
+{
+  "run_id": "run_002",
+  "started_at": "2026-08-25T20:05:37+05:30",
+  "worker_turns": [
+    {
+      "worker": "cto",
+      "script": "cto_org.py",
+      "seconds": 0.029,
+      "ok": true
+    },
+    {
+      "worker": "pm",
+      "script": "pm_plan.py",
+      "seconds": 0.024,
+      "ok": true
+    },
+    {
+      "worker": "eng_a",
+      "script": "eng_a_t001.py",
+      "seconds": 0.023,
+      "ok": true
+    },
+    {
+      "worker": "pm",
+      "script": "pm_stuck_draft.py",
+      "seconds": 0.023,
+      "ok": true
+    },
+    {
+      "worker": "eng_a",
+      "script": "eng_a_handoff_t002.py",
+      "seconds": 0.022,
+      "ok": true
+    },
+    {
+      "worker": "eng_b",
+      "script": "eng_b_t002.py",
+      "seconds": 0.025,
+      "ok": true
+    },
+    {
+      "worker": "pm",
+      "script": "pm_stages.py",
+      "seconds": 0.023,
+      "ok": true
+    },
+    {
+      "worker": "eng_b",
+      "script": "eng_b_t002.py",
+      "seconds": 0.024,
+      "ok": true
+    }
+  ],
+  "protocol_objects_sent": 8,
+  "founder_interventions": 2,
+  "orchestrator_steps_in": 4,
+  "tasks_verified": 2,
+  "tasks_blocked": 0,
+  "verification_catch_rate": 0.4,
+  "coordination_cost_objects_per_verified_task": 3.0,
+  "note": "Audited. M2 NO-GO stands. Interventions 2. Cost 3.0. Catch 0.4 mechanical.",
+  "verification_caught": [
+    "def_002",
+    "def_003"
+  ],
+  "verification_missed": [
+    "def_001",
+    "def_004",
+    "def_005"
+  ],
+  "budget_status": "PAUSED",
+  "budget_spent": 100,
+  "budget_cap": 100,
+  "verdict": "NO-GO",
+  "m2": "does_not_start",
+  "closed_at": "2026-08-25T20:33:22+05:30",
+  "founder_interventions_note": "int_001 and int_002 count. int_003 does not. Operator drill, not founder.",
+  "worker_protocol_objects": 6,
+  "coordination_cost_note": "6 worker objects / 2 verified tasks. Excludes 2 orchestrator copies of objective.json.",
+  "verification_catch_note": "Mechanical, n=5, held t_002 tests. Not S3.",
+  "audit": "days_1_10_audited"
+}

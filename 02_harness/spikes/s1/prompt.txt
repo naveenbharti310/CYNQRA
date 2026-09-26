@@ -1,0 +1,22 @@
+Convert the founder objective into the Cynqra structured objective.
+The founder will review and confirm your answer, so fill every field.
+Where the text states a field, use its words.
+Where the text only implies a field, write the most reasonable reading and
+list that key in inferred_fields.
+Do not add features, users, or constraints the founder did not state or
+clearly imply.
+Leave a field empty only if nothing in the text supports any reading, and
+list that key in missing_fields.
+
+Return JSON only with these keys:
+product
+target_customer
+primary_outcome
+business_outcome
+success_criteria
+constraints
+priorities
+inferred_fields
+missing_fields
+
+Founder objective:

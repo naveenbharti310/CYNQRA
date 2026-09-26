@@ -1,0 +1,25 @@
+{
+  "seeded": 5,
+  "caught": [
+    "def_002",
+    "def_003"
+  ],
+  "missed": [
+    "def_001",
+    "def_004",
+    "def_005"
+  ],
+  "catch_rate": 0.4,
+  "bar": 0.8,
+  "met_bar": false,
+  "method": "held t_002 automated tests only",
+  "note": "Not a second model. Mechanical verifier. Seeds were sealed from the verifier process.",
+  "failed_tests": [
+    "test_create_starts_applied",
+    "test_unknown_stage"
+  ],
+  "failed_as": {
+    "test_create_starts_applied": "ERROR",
+    "test_unknown_stage": "FAIL"
+  }
+}

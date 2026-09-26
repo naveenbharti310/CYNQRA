@@ -1,0 +1,8 @@
+{
+  "worker": "eng_a",
+  "script": "eng_a_handoff_t002.py",
+  "returncode": 0,
+  "stdout": "eng_a wrote handoff_t002 (stage list not included)\n",
+  "stderr": "",
+  "seconds": 0.022
+}

@@ -1,0 +1,15 @@
+{
+  "sealed_by": "name of the person who wrote the seeds",
+  "sealed_at": "2026-09-27T10:00:00+05:30",
+  "has_read_checks": false,
+  "statement": "I have not read kit/contract_checks.py, kit/verify.py or kit/model_review.py. I wrote every seed and control below before any v2 scoring.",
+  "seeds": [
+    {"id": "v2_01", "kind": "code", "file": "fixtures/v2_01_store.py", "what": "one sentence, in plain words"},
+    {"id": "v2_07", "kind": "non_code", "file": "fixtures/v2_07_spec.md", "what": "one sentence, in plain words"}
+  ],
+  "controls": [
+    {"id": "c_01", "kind": "code", "file": "fixtures/base_store.py"},
+    {"id": "c_02", "kind": "non_code", "file": "fixtures/c_02_spec.md"},
+    {"id": "c_03", "kind": "non_code", "file": "fixtures/c_03_spec.md"}
+  ]
+}

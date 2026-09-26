@@ -1,0 +1,68 @@
+{
+  "workstreams": [
+    {
+      "id": "ws_core",
+      "name": "Candidate record core",
+      "status": "open"
+    },
+    {
+      "id": "ws_stuck",
+      "name": "Stuck visibility",
+      "status": "open"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "t_001",
+      "workstream_id": "ws_core",
+      "owner_worker_id": "w_eng_a",
+      "inputs": "PM Handoff handoff_t001.json",
+      "expected_output": "in memory candidate store with create and list",
+      "dependencies": [],
+      "tools": [
+        "python",
+        "test runner"
+      ],
+      "budget": "local only",
+      "deadline": "2026-08-26",
+      "verification_method": "automated tests",
+      "risk_tier": "LOW",
+      "status": "VERIFIED"
+    },
+    {
+      "id": "t_002",
+      "workstream_id": "ws_core",
+      "owner_worker_id": "w_eng_b",
+      "inputs": "Engineer A Handoff plus listed artifacts",
+      "expected_output": "stage field with the closed list of stages",
+      "dependencies": [
+        "t_001"
+      ],
+      "tools": [
+        "python",
+        "test runner"
+      ],
+      "budget": "local only",
+      "deadline": "2026-08-27",
+      "verification_method": "automated tests",
+      "risk_tier": "LOW",
+      "status": "VERIFIED"
+    },
+    {
+      "id": "t_003",
+      "workstream_id": "ws_stuck",
+      "owner_worker_id": "w_pm",
+      "inputs": "objective success criteria",
+      "expected_output": "named meaning of stuck, as an Approval",
+      "dependencies": [],
+      "tools": [
+        "editor"
+      ],
+      "budget": "none",
+      "deadline": "2026-08-26",
+      "verification_method": "founder review",
+      "risk_tier": "MEDIUM",
+      "status": "PAUSED"
+    }
+  ]
+}

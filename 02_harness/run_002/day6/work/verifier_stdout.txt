@@ -1,0 +1,24 @@
+
+.E.F
+======================================================================
+ERROR: test_create_starts_applied (__main__.TestStages.test_create_starts_applied)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/vercel/sandbox/data/cynqra_m1/run_002/day6/work/test_store.py", line 9, in test_create_starts_applied
+    self.assertEqual(a["stage"], "applied")
+                     ~^^^^^^^^^
+KeyError: 'stage'
+
+======================================================================
+FAIL: test_unknown_stage (__main__.TestStages.test_unknown_stage)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/vercel/sandbox/data/cynqra_m1/run_002/day6/work/test_store.py", line 20, in test_unknown_stage
+    with self.assertRaises(CandidateError):
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^
+AssertionError: CandidateError not raised
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.001s
+
+FAILED (failures=1, errors=1)

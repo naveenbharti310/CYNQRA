@@ -1,0 +1,9 @@
+{
+  "protocol": "Handoff",
+  "from_worker": "w_eng_a",
+  "to_worker": "w_eng_b",
+  "task_id": "t_002",
+  "artifacts": ["woz/app/candidates.py", "woz/app/test_candidates.py"],
+  "context_ref": "woz/objective.json",
+  "acceptance_check": "set_stage accepts only applied, screen, interview, offer, hired, rejected; unknown stages raise CandidateError"
+}

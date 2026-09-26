@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Audit and replay</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&amp;display=swap">
+<style>
+body{margin:0;font-family:"IBM Plex Sans",system-ui,sans-serif;color:#1B1D1F;background:#F6F4EF}
+a{color:#1B1D1F;text-decoration:none}a:hover{color:#0F6B5C}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; box-sizing: border-box; display: flex; background: #F6F4EF;">
+  <nav aria-label="Main" style="width: 232px; box-sizing: border-box; padding: 20px 14px; background: #EFECE5; border-right: 1px solid #E2DED4; display: flex; flex-direction: column; gap: 4px;">
+    <div style="padding: 0 10px 14px; display: flex; flex-direction: column; gap: 2px;">
+      <span style="font-family: 'Source Serif 4', Georgia, serif; font-size: 24px; font-weight: 600;">Cynqra</span>
+      <span style="font-size: 13px; color: #5B5E5C;">Harbor Recruiting</span>
+    </div>
+    <a href="Company.dc.html" style="padding: 10px 12px; border-radius: 8px; font-size: 15px;">Company</a>
+    <a href="Organization.dc.html" style="padding: 10px 12px; border-radius: 8px; font-size: 15px;">Organization</a>
+    <a href="Work.dc.html" style="padding: 10px 12px; border-radius: 8px; font-size: 15px;">Work</a>
+    <a href="Decisions.dc.html" style="padding: 10px 12px; border-radius: 8px; font-size: 15px;">Decisions</a>
+    <a href="Evolution.dc.html" style="padding: 10px 12px; border-radius: 8px; font-size: 15px;">Evolution</a>
+    <a href="Audit.dc.html" style="padding: 10px 12px; border-radius: 8px; background: #FFFFFF; font-weight: 600; font-size: 15px;">Audit</a>
+    <a href="Delivery.dc.html" style="padding: 10px 12px; border-radius: 8px; font-size: 15px;">Delivery</a>
+    <div style="margin-top: auto; display: flex; flex-direction: column; gap: 10px; padding: 0 6px;">
+      <span style="padding: 6px 10px; border-radius: 8px; background: #FBEBD7; color: #7A3E00; font-size: 12px; font-weight: 500;">Demo mode: scripted workers</span>
+      <button type="button" style="height: 44px; border-radius: 8px; border: 1px solid #A82820; background: #FFFFFF; color: #A82820; font: 600 14px 'IBM Plex Sans', sans-serif;">Kill switch</button>
+    </div>
+  </nav>
+  <div style="flex-grow: 1; display: flex; flex-direction: column;">
+    <header style="height: 64px; box-sizing: border-box; padding: 0 32px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #E2DED4;">
+      <h1 style="margin: 0; font-size: 20px; font-weight: 600;">Audit</h1>
+      <span style="font-size: 13px; color: #5B5E5C;">Events are append only. A correction is a new event.</span>
+    </header>
+    <div style="flex-grow: 1; padding: 24px 32px; box-sizing: border-box; display: flex; gap: 20px;">
+      <div style="flex-grow: 1; background: #FFFFFF; border: 1px solid #E2DED4; border-radius: 14px; padding: 18px 20px; display: flex; flex-direction: column; gap: 0;">
+        <div style="display: grid; grid-template-columns: 52px 160px 1fr 110px 130px; gap: 12px; padding: 8px 6px; font-size: 12px; color: #5B5E5C; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid #E2DED4;"><span>Seq</span><span>Event</span><span>Aggregate</span><span>Actor</span><span>Policy</span></div>
+        <div style="display: grid; grid-template-columns: 52px 160px 1fr 110px 130px; gap: 12px; padding: 10px 6px; font-family: 'IBM Plex Mono', monospace; font-size: 13px; border-bottom: 1px solid #EFECE5;"><span>41</span><span>action.executed</span><span>t_03 write_file store.py</span><span>w_eng_a</span><span style="color: #1E6F3B;">ALLOW</span></div>
+        <div style="display: grid; grid-template-columns: 52px 160px 1fr 110px 130px; gap: 12px; padding: 10px 6px; font-family: 'IBM Plex Mono', monospace; font-size: 13px; border-bottom: 1px solid #EFECE5;"><span>42</span><span>verification</span><span>t_03 REQUIRES_REWORK</span><span>verifier</span><span style="color: #1E6F3B;">ALLOW</span></div>
+        <div style="display: grid; grid-template-columns: 52px 160px 1fr 110px 130px; gap: 12px; padding: 10px 6px; font-family: 'IBM Plex Mono', monospace; font-size: 13px; border-bottom: 1px solid #EFECE5;"><span>47</span><span>task.verified</span><span>t_03 attempt 2</span><span>verifier</span><span style="color: #1E6F3B;">ALLOW</span></div>
+        <div style="display: grid; grid-template-columns: 52px 160px 1fr 110px 130px; gap: 12px; padding: 10px 6px; font-family: 'IBM Plex Mono', monospace; font-size: 13px; border-bottom: 1px solid #EFECE5;"><span>55</span><span>protocol.sent</span><span>t_04 Blocker</span><span>w_eng_b</span><span style="color: #1E6F3B;">ALLOW</span></div>
+        <div style="display: grid; grid-template-columns: 52px 160px 1fr 110px 130px; gap: 12px; padding: 10px 6px; font-family: 'IBM Plex Mono', monospace; font-size: 13px; border-bottom: 1px solid #EFECE5; background: #E1EEEA;"><span>71</span><span>action.proposed</span><span>t_05 merge_to_main</span><span>w_cto</span><span style="color: #7A3E00;">REQUIRE_APPROVAL</span></div>
+        <div style="display: grid; grid-template-columns: 52px 160px 1fr 110px 130px; gap: 12px; padding: 10px 6px; font-family: 'IBM Plex Mono', monospace; font-size: 13px; border-bottom: 1px solid #EFECE5;"><span>74</span><span>action.denied</span><span>t_06 external_message</span><span>w_cto</span><span style="color: #A82820;">DENY</span></div>
+        <div style="display: grid; grid-template-columns: 52px 160px 1fr 110px 130px; gap: 12px; padding: 10px 6px; font-family: 'IBM Plex Mono', monospace; font-size: 13px;"><span>76</span><span>decision.created</span><span>dec_t_06 deploy</span><span>w_cto</span><span style="color: #7A3E00;">REQUIRE_APPROVAL</span></div>
+      </div>
+      <div style="width: 460px; background: #FFFFFF; border: 1px solid #E2DED4; border-radius: 14px; padding: 20px 22px; display: flex; flex-direction: column; gap: 10px; box-sizing: border-box;">
+        <h2 style="margin: 0; font-size: 17px; font-weight: 600;">Replay: merge_to_main on t_05</h2>
+        <span style="font-size: 13px; color: #5B5E5C;">Rebuilt from events and stored objects only.</span>
+        <div style="display: flex; justify-content: space-between; font-size: 14px; padding: 8px 0; border-bottom: 1px solid #EFECE5;"><span style="color: #5B5E5C;">Who acted</span><span>w_cto, role CTO</span></div>
+        <div style="display: flex; justify-content: space-between; font-size: 14px; padding: 8px 0; border-bottom: 1px solid #EFECE5;"><span style="color: #5B5E5C;">Authority</span><span>merge_to_main: proposes</span></div>
+        <div style="display: flex; justify-content: space-between; font-size: 14px; padding: 8px 0; border-bottom: 1px solid #EFECE5;"><span style="color: #5B5E5C;">Policy decision</span><span>REQUIRE_APPROVAL, then approved by founder</span></div>
+        <div style="display: flex; justify-content: space-between; font-size: 14px; padding: 8px 0; border-bottom: 1px solid #EFECE5;"><span style="color: #5B5E5C;">Context</span><span>Handoff 3f2a9c, artifacts t_03, t_04</span></div>
+        <div style="display: flex; justify-content: space-between; font-size: 14px; padding: 8px 0; border-bottom: 1px solid #EFECE5;"><span style="color: #5B5E5C;">Intelligence</span><span>scripted, demo</span></div>
+        <div style="display: flex; justify-content: space-between; font-size: 14px; padding: 8px 0; border-bottom: 1px solid #EFECE5;"><span style="color: #5B5E5C;">Tool</span><span>gateway merge_to_main</span></div>
+        <div style="display: flex; justify-content: space-between; font-size: 14px; padding: 8px 0; border-bottom: 1px solid #EFECE5;"><span style="color: #5B5E5C;">Result</span><span style="font-family: 'IBM Plex Mono', monospace;">6 files, tree 9be14d</span></div>
+        <div style="display: flex; justify-content: space-between; font-size: 14px; padding: 8px 0;"><span style="color: #5B5E5C;">Verification</span><span>10 tests by id, VERIFIED</span></div>
+        <div style="margin-top: auto; padding: 12px 14px; border-radius: 10px; background: #E1F0E5; color: #1E6F3B; font-weight: 600; font-size: 14px;">Replay complete: 8 of 8 facts present</div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

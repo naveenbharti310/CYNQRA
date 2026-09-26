@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+poc/data/
+poc/tests/_tmp/
+node_modules/
+poc/demo/out/
+poc/demo/*.mp4

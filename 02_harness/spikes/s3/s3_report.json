@@ -1,0 +1,138 @@
+{
+  "spike": "S3",
+  "method": "objective contract checks plus spec lint. Not a second model.",
+  "seeded": 10,
+  "caught": [
+    "s3_01",
+    "s3_02",
+    "s3_03",
+    "s3_04",
+    "s3_05",
+    "s3_07",
+    "s3_08",
+    "s3_09",
+    "s3_10"
+  ],
+  "missed": [
+    "s3_06"
+  ],
+  "catch_rate": 0.9,
+  "bar": 0.8,
+  "met_bar": true,
+  "detail": [
+    {
+      "id": "s3_01",
+      "caught": true,
+      "how": "create accepted blank name",
+      "kind": "code"
+    },
+    {
+      "id": "s3_02",
+      "caught": true,
+      "how": "ghost stage accepted",
+      "kind": "code"
+    },
+    {
+      "id": "s3_03",
+      "caught": true,
+      "how": "create stage=None",
+      "kind": "code"
+    },
+    {
+      "id": "s3_04",
+      "caught": true,
+      "how": "list returned 1 of 2",
+      "kind": "code"
+    },
+    {
+      "id": "s3_05",
+      "caught": true,
+      "how": "unknown id accepted",
+      "kind": "code"
+    },
+    {
+      "id": "s3_06",
+      "caught": false,
+      "how": "valid set_stage returned",
+      "kind": "code"
+    },
+    {
+      "id": "s3_07",
+      "caught": true,
+      "how": "spec lint",
+      "kind": "non_code"
+    },
+    {
+      "id": "s3_08",
+      "caught": true,
+      "how": "spec lint",
+      "kind": "non_code"
+    },
+    {
+      "id": "s3_09",
+      "caught": true,
+      "how": "spec lint",
+      "kind": "non_code"
+    },
+    {
+      "id": "s3_10",
+      "caught": true,
+      "how": "spec lint",
+      "kind": "non_code"
+    }
+  ],
+  "store_findings": [
+    {
+      "id": "empty_name",
+      "caught": true,
+      "how": "create accepted blank name"
+    },
+    {
+      "id": "list_all",
+      "caught": true,
+      "how": "list returned 1 of 2"
+    },
+    {
+      "id": "starts_applied",
+      "caught": true,
+      "how": "create stage=None"
+    },
+    {
+      "id": "unknown_stage",
+      "caught": true,
+      "how": "ghost stage accepted"
+    },
+    {
+      "id": "unknown_id",
+      "caught": true,
+      "how": "unknown id accepted"
+    },
+    {
+      "id": "write_surfaces",
+      "caught": false,
+      "how": "valid set_stage returned"
+    }
+  ],
+  "spec_hits": [
+    {
+      "file": "spec_stuck.md",
+      "id": "stuck_clock",
+      "what": "stuck defined as a clock"
+    },
+    {
+      "file": "spec_site.md",
+      "id": "public_site",
+      "what": "public careers site"
+    },
+    {
+      "file": "spec_success.md",
+      "id": "dashboard_success",
+      "what": "dashboard as success"
+    },
+    {
+      "file": "spec_login.md",
+      "id": "applicant_login",
+      "what": "applicant login"
+    }
+  ]
+}

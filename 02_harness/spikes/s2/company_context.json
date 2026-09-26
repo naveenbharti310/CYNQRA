@@ -1,0 +1,18 @@
+{
+  "note": "Company and team context layer for S2 workers, per Book 0 section 19. Written 26 September 2026 before any S2 run. Sources: spikes/s2/tasks.json objective, M1 build kit decision_001 (approved_edited, 24 August), run_002 organization.json authorities.",
+  "company_id": "company_s2_001",
+  "objective": "Internal candidate tracker for a founder and two recruiters. No public careers site. No applicant login.",
+  "decided_rules": [
+    "Stages are a closed list: applied, screen, interview, offer, hired, rejected. Nothing else is a stage.",
+    "Flagged means stage is applied or screen and there has been no movement for seven days. Flagged is an alarm only.",
+    "Stuck means flagged plus a named reason from the closed list: waiting_on_recruiter, waiting_on_candidate, waiting_on_founder, missing_document, no_owner.",
+    "If the stage already moved, the card leaves both lists at once.",
+    "No public careers site. No applicant login. One company."
+  ],
+  "workers": {
+    "w_cto": {"role": "CTO", "authority": "LOW and MEDIUM work, proposes HIGH to the founder", "does": "reviews, decides technical approach, checks work against the objective"},
+    "w_pm": {"role": "PM", "authority": "LOW protocols and MEDIUM priorities", "does": "writes specs and acceptance checks, assigns engineering work, answers blockers"},
+    "w_eng_a": {"role": "Engineer A", "authority": "LOW sandbox work, MEDIUM merge and preview", "does": "writes Python and tests"},
+    "w_eng_b": {"role": "Engineer B", "authority": "LOW sandbox work, MEDIUM merge and preview", "does": "writes Python and tests"}
+  }
+}

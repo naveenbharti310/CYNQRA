@@ -1,0 +1,269 @@
+{
+  "id": "candidate_tracker",
+  "note": "Prepared script for demo mode. Every word a worker says in demo mode comes from this file, and the product shows that. Code in files/ is real and is tested and deployed for real.",
+  "messy": "Build me an internal tracker so my two recruiters can log candidates, set a stage, and I can see who is stuck. No public careers site.",
+  "objective": {
+    "product": "Internal candidate tracker",
+    "target_customer": "Founder and two recruiters",
+    "primary_outcome": "Every candidate has a visible stage and stuck candidates are obvious",
+    "business_outcome": "Founder sees who is stuck without asking",
+    "success_criteria": "A recruiter can create a candidate, set a stage, list all candidates, and filter stuck ones",
+    "constraints": "No public careers site",
+    "priorities": "Stage visibility first, then the stuck filter",
+    "inferred_fields": [
+      "business_outcome",
+      "priorities"
+    ],
+    "missing_fields": []
+  },
+  "plan": {
+    "workstreams": [
+      {
+        "id": "ws_spec",
+        "name": "Specification"
+      },
+      {
+        "id": "ws_build",
+        "name": "Build"
+      },
+      {
+        "id": "ws_release",
+        "name": "Release"
+      }
+    ],
+    "tasks": [
+      {
+        "id": "t_01",
+        "workstream_id": "ws_spec",
+        "kind": "spec",
+        "owner_worker_id": "w_pm",
+        "title": "Product spec and acceptance checks",
+        "inputs": "Confirmed objective",
+        "expected_output": "spec.md and acceptance.md",
+        "dependencies": [],
+        "tools": [
+          "write_file"
+        ],
+        "budget": 10,
+        "deadline_day": 1,
+        "verification_method": "Coverage lint against the confirmed objective",
+        "risk_tier": "LOW"
+      },
+      {
+        "id": "t_02",
+        "workstream_id": "ws_spec",
+        "kind": "decision",
+        "owner_worker_id": "w_pm",
+        "title": "What stuck means",
+        "inputs": "spec.md, objective success criteria",
+        "expected_output": "A product rule for flagged and stuck, as an Approval",
+        "dependencies": [
+          "t_01"
+        ],
+        "tools": [],
+        "budget": 5,
+        "deadline_day": 1,
+        "verification_method": "Founder review (D-17)",
+        "risk_tier": "MEDIUM"
+      },
+      {
+        "id": "t_03",
+        "workstream_id": "ws_build",
+        "kind": "code",
+        "owner_worker_id": "w_eng_a",
+        "title": "Candidate store",
+        "inputs": "acceptance.md, the stuck rule",
+        "expected_output": "store.py and test_store.py",
+        "dependencies": [
+          "t_01",
+          "t_02"
+        ],
+        "tools": [
+          "write_file",
+          "run_tests"
+        ],
+        "budget": 20,
+        "deadline_day": 2,
+        "verification_method": "Automated tests, prior tests rerun",
+        "risk_tier": "LOW"
+      },
+      {
+        "id": "t_04",
+        "workstream_id": "ws_build",
+        "kind": "code",
+        "owner_worker_id": "w_eng_b",
+        "title": "Web app and screen",
+        "inputs": "store.py, test_store.py, acceptance.md",
+        "expected_output": "app.py, index.html, test_app.py",
+        "dependencies": [
+          "t_03"
+        ],
+        "tools": [
+          "write_file",
+          "run_tests"
+        ],
+        "budget": 20,
+        "deadline_day": 3,
+        "verification_method": "Automated tests, prior tests rerun",
+        "risk_tier": "LOW"
+      },
+      {
+        "id": "t_05",
+        "workstream_id": "ws_release",
+        "kind": "review_merge",
+        "owner_worker_id": "w_cto",
+        "title": "Review and merge release 1",
+        "inputs": "Integration branch",
+        "expected_output": "Release 1 on main",
+        "dependencies": [
+          "t_03",
+          "t_04"
+        ],
+        "tools": [
+          "run_tests",
+          "merge_to_main"
+        ],
+        "budget": 10,
+        "deadline_day": 4,
+        "verification_method": "Full test run on main after the founder approves the merge",
+        "risk_tier": "MEDIUM"
+      },
+      {
+        "id": "t_06",
+        "workstream_id": "ws_release",
+        "kind": "deploy",
+        "owner_worker_id": "w_cto",
+        "title": "Deploy release 1 to production",
+        "inputs": "Main",
+        "expected_output": "Live tracker at a URL",
+        "dependencies": [
+          "t_05"
+        ],
+        "tools": [
+          "deploy_production"
+        ],
+        "budget": 10,
+        "deadline_day": 4,
+        "verification_method": "Health check and smoke test on the live URL",
+        "risk_tier": "HIGH"
+      }
+    ]
+  },
+  "assign": {
+    "t_03": {
+      "artifacts": [
+        "t_01/acceptance.md",
+        "t_01/spec.md"
+      ],
+      "context_ref": "objective v1, decided rule on stuck",
+      "acceptance_check": "Implement CandidateStore in store.py so acceptance checks 1 to 7 pass, and write test_store.py. Closed list of stages: applied, screen, interview, offer, hired, rejected. Stuck follows the decided rule: flagged after seven days in applied or screen, stuck only with a named reason."
+    },
+    "t_04": {
+      "artifacts": [
+        "t_03/store.py",
+        "t_03/test_store.py",
+        "t_01/acceptance.md"
+      ],
+      "context_ref": "objective v1, acceptance checks 8 and 9",
+      "acceptance_check": "Build app.py (JSON API and /health, PORT from the environment) and index.html on the handed store, and write test_app.py. Acceptance checks 8 and 9 must pass. Do not change store.py."
+    }
+  },
+  "work": {
+    "t_01": [
+      {
+        "result": "done",
+        "summary": "Spec and nine acceptance checks written from the objective.",
+        "files": {
+          "spec.md": "@files/t_01/spec.md",
+          "acceptance.md": "@files/t_01/acceptance.md"
+        },
+        "acceptance_check": "Every success criterion and constraint of the objective is covered."
+      }
+    ],
+    "t_02": [
+      {
+        "result": "proposal",
+        "problem": "The objective asks to see who is stuck, and nothing says what stuck means.",
+        "recommendation": "Flagged: a card in applied or screen with no move for seven days, an alarm only. Stuck: flagged plus a named reason from waiting_on_recruiter, waiting_on_candidate, waiting_on_founder, missing_document, no_owner. Moving the stage clears both.",
+        "evidence_refs": [
+          "objective v1 success criteria",
+          "t_01/spec.md"
+        ],
+        "cost": "none, a product rule",
+        "confidence": "medium",
+        "what_would_change_this": "Evidence that recruiters already treat the seven day clock itself as stuck."
+      }
+    ],
+    "t_03": [
+      {
+        "result": "done",
+        "summary": "Store and ten tests written.",
+        "files": {
+          "store.py": "@files/t_03/attempt1/store.py",
+          "test_store.py": "@files/t_03/test_store.py"
+        },
+        "acceptance_check": "python -m unittest test_store"
+      },
+      {
+        "result": "done",
+        "summary": "Fixed list(): it returned only the newest record.",
+        "files": {
+          "store.py": "@files/t_03/store.py",
+          "test_store.py": "@files/t_03/test_store.py"
+        },
+        "acceptance_check": "python -m unittest test_store"
+      }
+    ],
+    "t_04": [
+      {
+        "result": "blocked",
+        "category": "missing_input",
+        "description": "Acceptance check 9 rules out applicant accounts, but nothing says whether recruiters sign in. I will not invent a login.",
+        "needs_from": "w_pm"
+      },
+      {
+        "result": "done",
+        "summary": "API, screen and six tests written on the handed store.",
+        "files": {
+          "app.py": "@files/t_04/app.py",
+          "index.html": "@files/t_04/index.html",
+          "test_app.py": "@files/t_04/test_app.py",
+          "smoke.json": "@files/t_04/smoke.json"
+        },
+        "acceptance_check": "python -m unittest test_app test_store"
+      }
+    ],
+    "t_05": [
+      {
+        "result": "proposal",
+        "problem": "Release 1 is verified on the integration branch and not yet on main.",
+        "recommendation": "Approve the merge to main. The full suite passes on the release candidate, including the store tests rerun from t_03.",
+        "cost": "2 work units",
+        "confidence": "high",
+        "what_would_change_this": "Any failing test, or a change to store.py after t_03 was verified."
+      }
+    ],
+    "t_06": [
+      {
+        "result": "proposal",
+        "problem": "Release 1 is merged and verified. It is not live, so recruiters cannot use it yet.",
+        "recommendation": "Approve. Deploy release 1, then run the health check and the smoke test.",
+        "cost": "4 work units, local host",
+        "confidence": "high",
+        "what_would_change_this": "A failing smoke test, or any review comment still open.",
+        "side_action": {
+          "action_type": "external_message",
+          "target": "recruiters",
+          "summary": "Email the two recruiters that the tracker is live."
+        }
+      }
+    ]
+  },
+  "answer_blocker": {
+    "t_04": {
+      "artifacts": [],
+      "context_ref": "objective v1: internal, one company",
+      "acceptance_check": "No sign in for this release. The objective is an internal tool for one company, so it runs on the company's own host only. Build no login and no applicant facing routes. A recruiter login is a later product decision, not yours or mine."
+    }
+  }
+}

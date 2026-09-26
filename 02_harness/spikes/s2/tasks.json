@@ -1,0 +1,38 @@
+{
+  "objective": "Internal candidate tracker for a founder and two recruiters. No public careers site. No applicant login.",
+  "category": "CRUD",
+  "template": ["w_cto", "w_pm", "w_eng_a", "w_eng_b"],
+  "note": "12 tasks, 3 workstreams. Risk tiers follow the D-27 rubric. Written before any scored run.",
+  "workstreams": [
+    {
+      "id": "ws_spec",
+      "name": "Specification",
+      "tasks": [
+        {"id": "t2_01", "owner": "w_pm", "risk": "LOW", "ask": "Write the record fields for a candidate. Name required. Stage from the closed list applied, screen, interview, offer, hired, rejected."},
+        {"id": "t2_02", "owner": "w_pm", "risk": "LOW", "ask": "Define stuck using a named reason, not a clock. Reasons: waiting_on_recruiter, waiting_on_candidate, waiting_on_founder, missing_document, no_owner."},
+        {"id": "t2_03", "owner": "w_pm", "risk": "LOW", "ask": "List the acceptance checks for create, set stage, and list. One line each."},
+        {"id": "t2_04", "owner": "w_cto", "risk": "MEDIUM", "ask": "Review the spec against the objective constraints and reject anything that adds a public site or applicant login."}
+      ]
+    },
+    {
+      "id": "ws_build",
+      "name": "Build",
+      "tasks": [
+        {"id": "t2_05", "owner": "w_eng_a", "risk": "LOW", "ask": "Implement create(name). Reject blank or whitespace names. New records start at applied."},
+        {"id": "t2_06", "owner": "w_eng_a", "risk": "LOW", "ask": "Implement list(). Return every record."},
+        {"id": "t2_07", "owner": "w_eng_b", "risk": "LOW", "ask": "Implement set_stage(id, stage). Error on unknown id. Error on a stage outside the closed list."},
+        {"id": "t2_08", "owner": "w_eng_b", "risk": "LOW", "ask": "Implement set_reason(id, reason) from the named reason list. Error on an unknown reason."},
+        {"id": "t2_09", "owner": "w_eng_a", "risk": "MEDIUM", "ask": "Write the tests for create, list, set_stage, and set_reason, including the error paths."}
+      ]
+    },
+    {
+      "id": "ws_verify",
+      "name": "Verify and hand off",
+      "tasks": [
+        {"id": "t2_10", "owner": "w_cto", "risk": "MEDIUM", "ask": "Run the acceptance checks against the spec and report each as pass or fail with the reason."},
+        {"id": "t2_11", "owner": "w_pm", "risk": "LOW", "ask": "Write the recruiter facing note on how to record a stuck reason. Plain language."},
+        {"id": "t2_12", "owner": "w_cto", "risk": "MEDIUM", "ask": "Write the handoff summary: what works, what does not, what a founder must decide."}
+      ]
+    }
+  ]
+}

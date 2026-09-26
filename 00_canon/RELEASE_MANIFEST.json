@@ -1,0 +1,33 @@
+{
+  "edition": "Cynqra Production Build Edition v1.0",
+  "status": "finalization_candidate",
+  "doctrine": "Book 0 v1.0 unchanged",
+  "books": {
+    "Book 1": "v0.4 binding production addendum appended to source v0.3",
+    "Book 2": "v0.4 binding production addendum appended to source v0.3",
+    "Book 3": "v0.4 binding production addendum appended to source v0.3",
+    "Book 4": "v0.4 binding production addendum appended to source v0.3",
+    "Company Canon": "v0.2 governance addendum appended to source v0.1"
+  },
+  "open_founder_or_counsel_decisions": [
+    "D-17",
+    "D-22"
+  ],
+  "proposed_decisions": [
+    "D-18",
+    "D-19",
+    "D-20",
+    "D-21",
+    "D-23",
+    "D-24",
+    "D-25",
+    "D-26"
+  ],
+  "existing_deferred_or_proposed": [
+    "D-6",
+    "D-8",
+    "D-9"
+  ],
+  "mvp_boundary": "fixed organization producing a deployed working web application; no dynamic org synthesis; no human workers; no autonomous high-risk actions; no broad external integrations; no mobile.",
+  "finalization_rule": "Fold only ratified addendum decisions into the canonical five books; do not create a sixth canonical book."
+}

@@ -1,0 +1,43 @@
+{
+  "task_id": "t_002",
+  "method": "event_log only",
+  "events_touching_task": 5,
+  "reconstructed_skeleton": [
+    {
+      "event_id": "evt_009",
+      "event_type": "task.created",
+      "actor_id": "w_pm",
+      "payload": "{\"risk_tier\":\"LOW\",\"owner_worker_id\":\"w_eng_b\"}"
+    },
+    {
+      "event_id": "evt_020",
+      "event_type": "task.started",
+      "actor_id": "w_eng_b",
+      "payload": "{\"risk_tier\":\"LOW\",\"copied_artifacts\":[\"store.py\",\"test_store.py\"]}"
+    },
+    {
+      "event_id": "evt_023",
+      "event_type": "action.executed",
+      "actor_id": "w_eng_b",
+      "payload": "{\"action_type\":\"write_files\",\"task_id\":\"t_002\"}"
+    },
+    {
+      "event_id": "evt_024",
+      "event_type": "verification.completed",
+      "actor_id": "verification",
+      "payload": "{\"verdict\":\"VERIFIED\",\"method\":\"automated_tests\",\"task_id\":\"t_002\"}"
+    },
+    {
+      "event_id": "evt_025",
+      "event_type": "task.verified",
+      "actor_id": "verification",
+      "payload": "{\"status\":\"VERIFIED\"}"
+    }
+  ],
+  "could_not_reconstruct": [
+    "Closed list of stages. protocol.sent payloads name the file, not allowed_stages.",
+    "Blocker description. Only the filename blocker.json is in the event payload.",
+    "Test names and pass counts. verification.completed has a verdict, not the suite.",
+    "store.py source. The log records write_files, not the bytes."
+  ]
+}

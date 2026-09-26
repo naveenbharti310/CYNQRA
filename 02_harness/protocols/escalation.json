@@ -1,0 +1,12 @@
+{
+  "protocol": "Escalation",
+  "protocol_version": 1,
+  "created_at": "",
+  "correlation_id": "",
+  "raised_by": "",
+  "issue": "",
+  "severity": "SEV-2",
+  "owner": "",
+  "required_action": "",
+  "status": "open"
+}

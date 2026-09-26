@@ -1,0 +1,8 @@
+{
+  "worker": "eng_a",
+  "script": "eng_a_t001.py",
+  "returncode": 0,
+  "stdout": "eng_a wrote store and tests\n",
+  "stderr": "",
+  "seconds": 0.023
+}

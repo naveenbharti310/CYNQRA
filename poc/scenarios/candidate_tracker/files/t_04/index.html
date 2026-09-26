@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Candidate tracker</title>
+<style>
+:root{--ink:#1d2327;--muted:#5a6570;--line:#dde3e8;--ground:#f5f7f9;--accent:#2457a6;--warn:#8a4b00;--warnbg:#fdf0dc;--bad:#a02a22;--badbg:#fbe4e1}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);background:var(--ground)}
+header{padding:20px 28px;background:#fff;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
+h1{margin:0;font-size:20px}
+main{padding:24px 28px;display:grid;gap:18px;max-width:1100px}
+form{display:flex;gap:10px;flex-wrap:wrap;align-items:end;background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px}
+label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
+input,select{font:inherit;padding:8px 10px;border:1px solid #c5ced6;border-radius:7px;background:#fff;color:var(--ink);min-height:40px}
+button{font:inherit;font-weight:600;padding:8px 16px;border-radius:7px;border:1px solid var(--accent);background:var(--accent);color:#fff;min-height:40px;cursor:pointer}
+.filters button{background:#fff;color:var(--ink);border-color:#c5ced6;font-weight:500}
+.filters button[aria-pressed="true"]{background:var(--ink);color:#fff;border-color:var(--ink)}
+table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--line)}
+th{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.tag{display:inline-block;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600}
+.flagged{background:var(--warnbg);color:var(--warn)}
+.stuck{background:var(--badbg);color:var(--bad)}
+.err{color:var(--bad);min-height:1.5em}
+</style>
+</head>
+<body>
+<header>
+  <h1>Candidate tracker</h1>
+  <div class="filters" role="group" aria-label="Filter">
+    <button type="button" data-filter="all" aria-pressed="true">All</button>
+    <button type="button" data-filter="flagged" aria-pressed="false">Flagged</button>
+    <button type="button" data-filter="stuck" aria-pressed="false">Stuck</button>
+  </div>
+</header>
+<main>
+  <form id="add">
+    <label>Name<input name="name" id="name" required autocomplete="off"></label>
+    <label>Applied on<input name="applied" id="applied" type="date"></label>
+    <button type="submit">Add candidate</button>
+  </form>
+  <div class="err" id="err" role="status"></div>
+  <table>
+    <thead><tr><th>Name</th><th>Stage</th><th>Stuck reason</th><th>State</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</main>
+<script>
+let META = {stages: [], reasons: []}, FILTER = "all";
+const $ = (s) => document.querySelector(s);
+async function api(path, body) {
+  const r = await fetch(path, body ? {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)} : {});
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || "request failed");
+  return data;
+}
+function option(value, label, selected) {
+  const o = document.createElement("option");
+  o.value = value; o.textContent = label; o.selected = selected; return o;
+}
+async function load() {
+  const rows = await api("/api/candidates");
+  const body = $("#rows"); body.replaceChildren();
+  rows.filter((r) => FILTER === "all" || r[FILTER]).forEach((r) => {
+    const tr = document.createElement("tr");
+    const name = document.createElement("td"); name.textContent = r.name;
+    const stage = document.createElement("td"); const ss = document.createElement("select");
+    ss.setAttribute("aria-label", "Stage for " + r.name);
+    META.stages.forEach((s) => ss.append(option(s, s, s === r.stage)));
+    ss.onchange = () => api(`/api/candidates/${r.id}/stage`, {stage: ss.value}).then(load).catch(show);
+    stage.append(ss);
+    const reason = document.createElement("td"); const rs = document.createElement("select");
+    rs.setAttribute("aria-label", "Stuck reason for " + r.name);
+    rs.append(option("", "none", !r.reason));
+    META.reasons.forEach((s) => rs.append(option(s, s.replaceAll("_", " "), s === r.reason)));
+    rs.disabled = !["applied", "screen"].includes(r.stage);
+    rs.onchange = () => api(`/api/candidates/${r.id}/reason`, {reason: rs.value}).then(load).catch(show);
+    reason.append(rs);
+    const state = document.createElement("td");
+    if (r.stuck) state.innerHTML = '<span class="tag stuck">Stuck</span>';
+    else if (r.flagged) state.innerHTML = '<span class="tag flagged">Flagged</span>';
+    tr.append(name, stage, reason, state); body.append(tr);
+  });
+}
+function show(e) { $("#err").textContent = e.message; }
+$("#add").onsubmit = async (ev) => {
+  ev.preventDefault(); $("#err").textContent = "";
+  const applied = $("#applied").value;
+  try {
+    await api("/api/candidates", {name: $("#name").value, applied_at: applied ? applied + "T09:00:00+00:00" : null});
+    $("#name").value = ""; await load();
+  } catch (e) { show(e); }
+};
+document.querySelectorAll("[data-filter]").forEach((b) => b.onclick = () => {
+  FILTER = b.dataset.filter;
+  document.querySelectorAll("[data-filter]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  load();
+});
+api("/api/meta").then((m) => { META = m; return load(); }).catch(show);
+</script>
+</body>
+</html>

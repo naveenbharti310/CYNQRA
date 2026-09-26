@@ -1,0 +1,19 @@
+{
+  "protocol": "Approval",
+  "protocol_version": 1,
+  "created_at": "",
+  "correlation_id": "",
+  "decision_id": "",
+  "from_worker": "",
+  "to_worker": "founder",
+  "recommendation": "",
+  "evidence_refs": [],
+  "cost": "",
+  "risk": "MEDIUM",
+  "confidence": "",
+  "options": ["approve", "reject", "request_evidence"],
+  "what_would_change_this": "",
+  "outcome_label": "",
+  "labeled_by": "",
+  "labeled_at": ""
+}

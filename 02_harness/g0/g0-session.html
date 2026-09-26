@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cynqra G0 session</title>
+<style>
+  :root { --ink:#2C2C2B; --muted:#7D7A75; --border:#E6E5E3; --soft:#F9F8F7; --orange:#D5803B; --green:#46A171; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; background:var(--soft); color:var(--ink); font:16px/1.45 "Liberation Sans","Segoe UI",sans-serif; }
+  .wrap { max-width: 840px; margin: 0 auto; padding: 28px 22px 80px; }
+  .kicker { color:var(--muted); font-size:13px; text-transform:uppercase; letter-spacing:0.08em; }
+  h1 { font-size:22px; font-weight:650; margin:6px 0 12px; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:0.08em; color:var(--muted); margin:28px 0 10px; }
+  p { max-width: 44em; }
+  .call { background:#fff; border-left:3px solid var(--orange); padding:14px 16px; margin:16px 0; }
+  .card { background:#fff; border:1px solid var(--border); padding:16px 18px; margin:12px 0; }
+  .card .id { font-weight:650; font-size:14px; }
+  .card .st { color:var(--muted); font-size:13px; margin:4px 0 8px; }
+  .card .q { font-weight:650; margin:0 0 8px; }
+  .rec { font-size:14px; }
+  .tiny { color:var(--muted); font-size:13px; }
+  .choices { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+  .choices span { border:1px solid var(--border); padding:4px 8px; font-size:12px; color:var(--muted); }
+  table { width:100%; border-collapse:collapse; background:#fff; font-size:14px; }
+  th, td { text-align:left; vertical-align:top; padding:8px 10px; border-bottom:1px solid var(--border); }
+  th { color:var(--muted); font-size:12px; text-transform:uppercase; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="kicker">Cynqra · G0 · 60 to 90 minutes</div>
+  <h1>Ratification session</h1>
+  <div class="call">
+    Nothing on this screen is decided by being printed. A result is binding only when Book 4 records it.
+    No votes are cast here. Mark one result per item: ratified, amended, rejected, kept open, or deferred.
+    Write amended wording during the session.
+  </div>
+  <p class="tiny">Safe defaults until Book 4 changes: MEDIUM risk comes to the founder. Event payloads carry no personal data. CRUD is a first-run category, not a permanent product decision. M2 does not start from this page.</p>
+
+  <h2>Vote</h2>
+
+  <div class="card">
+    <div class="id">D-6. First product category</div>
+    <div class="st">Proposed · Owner: CPO (CEO acting)</div>
+    <p class="q">Do we ratify CRUD style web applications as the category for the first runs?</p>
+    <p class="rec">Recommendation: ratify. Richest automated verification. Widening later is one new decision.</p>
+    <div class="choices"><span>ratified</span><span>amended</span><span>rejected</span><span>kept open</span><span>deferred</span></div>
+  </div>
+
+  <div class="card">
+    <div class="id">D-17. MEDIUM risk review rule</div>
+    <div class="st">Open · Owner: CEO</div>
+    <p class="q">In the MVP, who reviews a MEDIUM risk action when the fixed organization has no human manager?</p>
+    <p class="rec">Option A: founder reviews every MEDIUM action. Option B: a reviewer worker that played no part in the work. Recommendation: option A for the MVP. Revisit at L2.</p>
+    <div class="choices"><span>ratified</span><span>amended</span><span>rejected</span><span>kept open</span><span>deferred</span></div>
+  </div>
+
+  <div class="card">
+    <div class="id">D-18. Event envelope and catalog</div>
+    <div class="st">Proposed · Owner: CTO</div>
+    <p class="q">Adopt Book 2, section 6, as the binding event contract?</p>
+    <p class="rec">Recommendation: ratify as written. Action events required. No personal data in payloads.</p>
+    <div class="choices"><span>ratified</span><span>amended</span><span>rejected</span><span>kept open</span><span>deferred</span></div>
+  </div>
+
+  <div class="card">
+    <div class="id">D-19. MVP entity contract</div>
+    <div class="st">Proposed · Owner: CTO</div>
+    <p class="q">Adopt Book 2, section 5, including Workstream and Run?</p>
+    <p class="rec">Recommendation: ratify with Workstream and Run. Rejecting either addition needs a named replacement before G0 can pass.</p>
+    <div class="choices"><span>ratified</span><span>amended</span><span>rejected</span><span>kept open</span><span>deferred</span></div>
+  </div>
+
+  <div class="card">
+    <div class="id">D-20. Action and Verification records</div>
+    <div class="st">Proposed · Owner: CTO</div>
+    <p class="q">Make Action and Verification first class MVP records?</p>
+    <p class="rec">Recommendation: ratify. Audit trail and verification evidence cannot be built without them.</p>
+    <div class="choices"><span>ratified</span><span>amended</span><span>rejected</span><span>kept open</span><span>deferred</span></div>
+  </div>
+
+  <div class="card">
+    <div class="id">D-21. Production deploys require the founder</div>
+    <div class="st">Proposed · Owner: CEO and CTO</div>
+    <p class="q">Every production deployment needs founder approval in the MVP, at every autonomy level?</p>
+    <p class="rec">Recommendation: ratify. Makes the existing safety posture testable.</p>
+    <div class="choices"><span>ratified</span><span>amended</span><span>rejected</span><span>kept open</span><span>deferred</span></div>
+  </div>
+
+  <div class="card">
+    <div class="id">D-23. Autonomy promotion rules</div>
+    <div class="st">Proposed · Owner: CEO and CTO</div>
+    <p class="q">Adopt Book 2, section 9, promotion and safety demotion rules?</p>
+    <p class="rec">Recommendation: ratify with an empty L2 delegation list. No MEDIUM class is delegated at launch.</p>
+    <div class="choices"><span>ratified</span><span>amended</span><span>rejected</span><span>kept open</span><span>deferred</span></div>
+  </div>
+
+  <div class="card">
+    <div class="id">D-24. Deployment lifecycle</div>
+    <div class="st">Proposed · Owner: CTO</div>
+    <p class="q">Adopt the deployment lifecycle and deployment record in Book 2, section 8?</p>
+    <p class="rec">Recommendation: ratify. Pairs with D-21.</p>
+    <div class="choices"><span>ratified</span><span>amended</span><span>rejected</span><span>kept open</span><span>deferred</span></div>
+  </div>
+
+  <div class="card">
+    <div class="id">D-25. Export manifest contract</div>
+    <div class="st">Proposed · Owner: CTO and COO</div>
+    <p class="q">Adopt the export manifest and portability status contract in Book 3, section 9?</p>
+    <p class="rec">Recommendation: ratify. Makes the 48 hour export promise testable.</p>
+    <div class="choices"><span>ratified</span><span>amended</span><span>rejected</span><span>kept open</span><span>deferred</span></div>
+  </div>
+
+  <div class="card">
+    <div class="id">D-26. Canon CI</div>
+    <div class="st">Proposed · Owner: CEO</div>
+    <p class="q">Adopt the weekly consistency review in Book 4, section 9, as a standing control?</p>
+    <p class="rec">Recommendation: ratify.</p>
+    <div class="choices"><span>ratified</span><span>amended</span><span>rejected</span><span>kept open</span><span>deferred</span></div>
+  </div>
+
+  <div class="card">
+    <div class="id">D-27. Risk tier rubric</div>
+    <div class="st">Proposed · Owner: CEO and CTO</div>
+    <p class="q">Adopt the LOW, MEDIUM, HIGH, and Prohibited rubric in Book 4, section 7?</p>
+    <p class="rec">Recommendation: ratify as written. Classify by worst plausible outcome. Go one tier higher when unsure.</p>
+    <div class="choices"><span>ratified</span><span>amended</span><span>rejected</span><span>kept open</span><span>deferred</span></div>
+  </div>
+
+  <div class="card">
+    <div class="id">D-28. Authority matrix for the fixed template</div>
+    <div class="st">Proposed · Owner: CEO and CTO</div>
+    <p class="q">Adopt the Engineer, PM, and CTO authority matrix in Book 4, section 7?</p>
+    <p class="rec">Recommendation: ratify as written. Execute, propose, or no. Propose still comes to the founder.</p>
+    <div class="choices"><span>ratified</span><span>amended</span><span>rejected</span><span>kept open</span><span>deferred</span></div>
+  </div>
+
+  <div class="card">
+    <div class="id">D-29. Escalation budget default</div>
+    <div class="st">Proposed · Owner: CPO (CEO acting)</div>
+    <p class="q">Start at five escalations per company per day, overflow in the daily digest, SEV-1 always interrupts?</p>
+    <p class="rec">Recommendation: ratify five as the starting value. Tune from later runs, not from run 002 token-less drills.</p>
+    <div class="choices"><span>ratified</span><span>amended</span><span>rejected</span><span>kept open</span><span>deferred</span></div>
+  </div>
+
+  <div class="card">
+    <div class="id">D-30. Objective change during a run</div>
+    <div class="st">Proposed · Owner: CPO (CEO acting)</div>
+    <p class="q">When the founder changes an objective during an MVP run, pause for a short impact summary, then reconfirm or end?</p>
+    <p class="rec">Recommendation: ratify pause, summarize, reconfirm or end. Keep the fuller Book 0 flow for Phase 2.</p>
+    <div class="choices"><span>ratified</span><span>amended</span><span>rejected</span><span>kept open</span><span>deferred</span></div>
+  </div>
+
+  <h2>Send to counsel. Do not vote</h2>
+  <div class="card">
+    <div class="id">D-22. Immutable history versus deletion</div>
+    <div class="st">Open · Owner: CEO, COO, and counsel</div>
+    <p class="q">When a customer asks for deletion, what happens to the immutable event history?</p>
+    <p>Confirm the design rule: event payloads carry no personal data, and each company's data sits under its own keys. Then send three options to counsel:</p>
+    <table>
+      <thead><tr><th>Option</th><th>How it works</th></tr></thead>
+      <tbody>
+        <tr><td>1. Key destruction</td><td>Events remain. Company keys are destroyed. History becomes unreadable.</td></tr>
+        <tr><td>2. Personal data outside events</td><td>Events carry references only. Personal data lives in erasable stores.</td></tr>
+        <tr><td>3. Hybrid</td><td>Both. Recommended to counsel. Fall back to 1 if cost dominates.</td></tr>
+      </tbody>
+    </table>
+    <p class="tiny">G0 only records that the referral was sent. It does not pick an option.</p>
+  </div>
+
+  <h2>Leave alone</h2>
+  <p>D-7 stays open. No learning across tenants without explicit founder opt in.<br />
+  D-8 stays deferred until real run data exists.<br />
+  D-9 waits for brand work.</p>
+
+  <h2>After the session</h2>
+  <p>Copy every result into Book 4 with the session date and owner. Apply only ratified text to Books 1 to 4. Archive the packet. Do not start M2 because a row was marked ratified on paper.</p>
+  <p class="tiny">Packet: G0_Ratification_Packet_v1.2.pdf. This screen is the working sheet, not a second canon.</p>
+</div>
+</body>
+</html>

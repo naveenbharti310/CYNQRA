@@ -1,0 +1,9 @@
+{
+  "protocol": "Blocker",
+  "raised_by": "w_eng_b",
+  "task_id": "t_002",
+  "category": "underspecified",
+  "severity": "SEV-2",
+  "description": "Closed list of stages is not in the inbox. Engineer B will not invent applied/screen/interview/offer/hired/rejected.",
+  "needs_from": "w_pm"
+}

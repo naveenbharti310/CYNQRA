@@ -1,0 +1,19 @@
+{
+  "spike": "S3",
+  "marked_at": "2026-08-25T21:57:00+05:30",
+  "rule": "Do not add or edit seeds after scoring starts.",
+  "bar": 0.8,
+  "n": 10,
+  "seeds": [
+    {"id": "s3_01", "kind": "code", "what": "create accepts an empty name", "violates": "name required"},
+    {"id": "s3_02", "kind": "code", "what": "set_stage accepts a value outside the closed list", "violates": "unknown stage must error"},
+    {"id": "s3_03", "kind": "code", "what": "create does not start at applied", "violates": "create starts applied"},
+    {"id": "s3_04", "kind": "code", "what": "list returns only the last record", "violates": "list returns all"},
+    {"id": "s3_05", "kind": "code", "what": "set_stage on an unknown id does not error", "violates": "unknown record must error"},
+    {"id": "s3_06", "kind": "code", "what": "a failing write is swallowed and reported as success", "violates": "errors must surface"},
+    {"id": "s3_07", "kind": "non_code", "what": "spec defines stuck as 7 days with no move", "violates": "decision_001 named reason"},
+    {"id": "s3_08", "kind": "non_code", "what": "spec adds a public careers site", "violates": "constraint no public site"},
+    {"id": "s3_09", "kind": "non_code", "what": "success criteria replaced with a pretty dashboard", "violates": "objective success criteria"},
+    {"id": "s3_10", "kind": "non_code", "what": "copy says applicants can log in", "violates": "no applicant login"}
+  ]
+}

@@ -1,0 +1,39 @@
+[
+  {
+    "id": "def_001",
+    "kind": "code",
+    "what": "create accepts an empty name",
+    "violates": "t_001 acceptance: empty name is an error",
+    "caught_by_t002_tests": false
+  },
+  {
+    "id": "def_002",
+    "kind": "code",
+    "what": "set_stage accepts a stage that is not on the closed list",
+    "violates": "t_002 acceptance: unknown stages raise CandidateError",
+    "caught_by_t002_tests": true,
+    "test_name": "test_unknown_stage"
+  },
+  {
+    "id": "def_003",
+    "kind": "code",
+    "what": "create does not start the candidate at applied",
+    "violates": "t_002 acceptance: create starts at applied",
+    "caught_by_t002_tests": true,
+    "test_name": "test_create_starts_applied"
+  },
+  {
+    "id": "def_004",
+    "kind": "code",
+    "what": "list returns only the last candidate",
+    "violates": "t_001 acceptance: list returns all created candidates",
+    "caught_by_t002_tests": false
+  },
+  {
+    "id": "def_005",
+    "kind": "non_code",
+    "what": "spec_stuck.md defines stuck as a 7 day clock",
+    "violates": "decision_001 approved_edited: stuck needs a named reason",
+    "caught_by_t002_tests": false
+  }
+]

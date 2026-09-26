@@ -1,0 +1,22 @@
+{
+  "protocol": "Approval",
+  "decision_id": "decision_001",
+  "task_id": "t_003",
+  "recommendation": "A candidate with no stage change for 7 days is stuck.",
+  "evidence_refs": [
+    "objective.json success_criteria"
+  ],
+  "cost": "none. local product rule only",
+  "risk": "MEDIUM",
+  "confidence": "medium",
+  "options": [
+    "approve",
+    "reject",
+    "request_evidence"
+  ],
+  "what_would_change_this": "Evidence that recruiters already treat age as stuck.",
+  "outcome_label": "",
+  "labeled_by": "",
+  "labeled_at": "",
+  "status": "pending_founder"
+}

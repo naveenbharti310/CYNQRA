@@ -1,0 +1,8 @@
+{
+  "worker": "cto",
+  "script": "cto_org.py",
+  "returncode": 0,
+  "stdout": "cto wrote organization.json\n",
+  "stderr": "",
+  "seconds": 0.029
+}

@@ -1,0 +1,18 @@
+{
+  "note": "D-19 and D-20 floor. Kit contract, not M2 runtime.",
+  "ratified": "2026-08-25",
+  "entities": {
+    "Workstream": {
+      "fields": ["id", "company_id", "objective_id", "name", "status", "created_at"]
+    },
+    "Run": {
+      "fields": ["id", "company_id", "organization_version", "started_at", "ended_at", "status", "cost_total", "founder_intervention_count"]
+    },
+    "Action": {
+      "fields": ["id", "company_id", "task_id", "worker_id", "risk_tier", "status", "created_at"]
+    },
+    "Verification": {
+      "fields": ["id", "company_id", "action_id", "method", "verdict", "test_ids", "created_at"]
+    }
+  }
+}

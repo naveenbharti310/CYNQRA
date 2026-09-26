@@ -1,0 +1,11 @@
+{
+  "protocol": "Handoff",
+  "from_worker": "w_pm",
+  "to_worker": "w_eng_a",
+  "task_id": "t_001",
+  "artifacts": [],
+  "context_ref": "objective.json structured fields",
+  "acceptance_check": "create(name) stores a candidate and returns it with an id; list() returns all created candidates; empty name is an error; do not add stages; do not add stuck.",
+  "constraints": "no public careers site, one company, no applicant login",
+  "product": "internal candidate tracker"
+}

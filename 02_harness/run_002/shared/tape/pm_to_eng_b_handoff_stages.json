@@ -1,0 +1,17 @@
+{
+  "protocol": "Handoff",
+  "from_worker": "w_pm",
+  "to_worker": "w_eng_b",
+  "task_id": "t_002",
+  "artifacts": [],
+  "context_ref": "tasks.json t_002",
+  "acceptance_check": "set_stage accepts only the closed list in allowed_stages. create starts at applied. unknown stages raise CandidateError.",
+  "allowed_stages": [
+    "applied",
+    "screen",
+    "interview",
+    "offer",
+    "hired",
+    "rejected"
+  ]
+}

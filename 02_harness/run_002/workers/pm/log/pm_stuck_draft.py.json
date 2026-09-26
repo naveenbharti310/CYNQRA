@@ -1,0 +1,8 @@
+{
+  "worker": "pm",
+  "script": "pm_stuck_draft.py",
+  "returncode": 0,
+  "stdout": "pm wrote stuck draft and amended approval\n",
+  "stderr": "",
+  "seconds": 0.023
+}

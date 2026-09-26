@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Internal candidate tracker</title>
+<style>
+  :root {
+    --ink: #2c2c2b;
+    --muted: #7d7a75;
+    --line: #e6e5e3;
+    --soft: #f9f8f7;
+    --surface: #f0efed;
+    --blue: #2783de;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 15px/1.45 Arial, sans-serif;
+    color: var(--ink);
+    background: #fff;
+  }
+  header {
+    padding: 24px 28px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  h1 { margin: 0; font-size: 22px; }
+  header p { margin: 6px 0 0; color: var(--muted); }
+  main { padding: 20px 28px 40px; max-width: 1100px; }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+  form, .panel {
+    background: var(--soft);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px;
+    flex: 1;
+    min-width: 240px;
+  }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 8px 0 4px; }
+  input, select, button {
+    font: inherit;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    width: 100%;
+    background: #fff;
+  }
+  button {
+    background: var(--blue);
+    color: #fff;
+    border: 0;
+    cursor: pointer;
+    width: auto;
+    margin-top: 12px;
+  }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { color: var(--muted); font-size: 12px; }
+  .pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    background: var(--surface);
+  }
+  .flag { background: #fbebde; color: #8a4b16; }
+  .stuck { background: #fde8e8; color: #9b2c2c; }
+  .ok { background: #e7f6ee; color: #216b43; }
+  .note { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
+  .err { color: #9b2c2c; font-size: 13px; min-height: 18px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Internal candidate tracker</h1>
+  <p>Working prototype. Flagged is an alarm. Stuck needs a named reason.</p>
+</header>
+<main>
+  <div class="row">
+    <form id="add">
+      <strong>Add candidate</strong>
+      <label for="name">Name</label>
+      <input id="name" required />
+      <label for="role">Role</label>
+      <input id="role" required />
+      <label for="source">Source</label>
+      <input id="source" />
+      <button type="submit">Create</button>
+      <p class="err" id="err"></p>
+    </form>
+    <div class="panel">
+      <strong>What you are looking at</strong>
+      <p class="note">Create a person. Change their stage. A card older than 7 days in applied or screen is flagged. It becomes stuck only after you name a reason. Move them to interview and both marks must disappear.</p>
+      <p class="note" id="counts"></p>
+    </div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Role</th>
+        <th>Stage</th>
+        <th>State</th>
+        <th>Reason</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+</main>
+<script>
+const STAGES = ["applied", "screen", "interview", "offer", "hired", "rejected"];
+const REASONS = ["waiting_on_recruiter", "waiting_on_candidate", "waiting_on_founder", "missing_document", "no_owner"];
+const EARLY = new Set(["applied", "screen"]);
+const FLAG_DAYS = 7;
+
+const memory = { candidates: [], nextId: 1 };
+let useApi = false;
+
+function daysAgo(n) {
+  return new Date(Date.now() - n * 86400000).toISOString();
+}
+function nowIso() { return new Date().toISOString(); }
+
+function seed() {
+  memory.candidates = [
+    { id: "c_001", name: "Priya Shah", role: "Engineer", source: "referral", stage: "applied", stuck_reason: "", created_at: nowIso(), last_moved_at: nowIso() },
+    { id: "c_002", name: "Jordan Lee", role: "PM", source: "inbound", stage: "applied", stuck_reason: "", created_at: daysAgo(8), last_moved_at: daysAgo(8) },
+    { id: "c_003", name: "Sam Okoye", role: "Designer", source: "agency", stage: "screen", stuck_reason: "waiting_on_recruiter", created_at: daysAgo(8), last_moved_at: daysAgo(8) }
+  ];
+  memory.nextId = 4;
+}
+
+function isFlagged(c) {
+  if (!EARLY.has(c.stage)) return false;
+  return (Date.now() - new Date(c.last_moved_at).getTime()) >= FLAG_DAYS * 86400000;
+}
+function isStuck(c) { return Boolean(c.stuck_reason) && isFlagged(c); }
+
+async function tryApi(path, opts) {
+  const res = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts || {}));
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || res.statusText);
+  }
+  return res.json();
+}
+
+async function load() {
+  if (useApi) {
+    const [all, flagged, stuck] = await Promise.all([
+      tryApi("/candidates"), tryApi("/candidates/flagged"), tryApi("/candidates/stuck")
+    ]);
+    return { all, flagged, stuck };
+  }
+  const all = memory.candidates.map(c => Object.assign({}, c));
+  return { all, flagged: all.filter(isFlagged), stuck: all.filter(isStuck) };
+}
+
+function drawTable(data) {
+  const flaggedIds = new Set(data.flagged.map(c => c.id));
+  const stuckIds = new Set(data.stuck.map(c => c.id));
+  document.getElementById("counts").textContent =
+    data.all.length + " candidates. " + data.flagged.length + " flagged. " + data.stuck.length + " stuck.";
+  document.getElementById("rows").innerHTML = data.all.map(c => {
+    let label = "current", cls = "ok";
+    if (stuckIds.has(c.id)) { label = "stuck"; cls = "stuck"; }
+    else if (flaggedIds.has(c.id)) { label = "flagged"; cls = "flag"; }
+    const stageOpts = STAGES.map(s => `<option value="${s}" ${c.stage === s ? "selected" : ""}>${s}</option>`).join("");
+    const reasonOpts = [""].concat(REASONS).map(r => `<option value="${r}" ${c.stuck_reason === r ? "selected" : ""}>${r || "no reason"}</option>`).join("");
+    return `<tr>
+      <td>${c.name}</td><td>${c.role}</td>
+      <td><select data-stage="${c.id}">${stageOpts}</select></td>
+      <td><span class="pill ${cls}">${label}</span></td>
+      <td><select data-reason="${c.id}" ${EARLY.has(c.stage) ? "" : "disabled"}>${reasonOpts}</select></td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="5" class="note">No candidates yet.</td></tr>`;
+}
+
+async function draw() {
+  try {
+    drawTable(await load());
+    document.getElementById("err").textContent = "";
+  } catch (e) {
+    document.getElementById("err").textContent = e.message;
+  }
+}
+
+async function createCandidate(body) {
+  if (useApi) return tryApi("/candidates", { method: "POST", body: JSON.stringify(body) });
+  if (!body.name || !body.role) throw new Error("name and role are required");
+  const item = {
+    id: "c_" + String(memory.nextId++).padStart(3, "0"),
+    name: body.name, role: body.role, source: body.source || "",
+    stage: "applied", stuck_reason: "", created_at: nowIso(), last_moved_at: nowIso()
+  };
+  memory.candidates.push(item);
+  return item;
+}
+
+async function changeStage(id, stage) {
+  if (useApi) return tryApi("/candidates/" + id + "/stage", { method: "POST", body: JSON.stringify({ stage }) });
+  const item = memory.candidates.find(c => c.id === id);
+  if (!item) throw new Error("candidate not found");
+  if (!STAGES.includes(stage)) throw new Error("unknown stage");
+  item.stage = stage;
+  item.last_moved_at = nowIso();
+  if (!EARLY.has(stage)) item.stuck_reason = "";
+  return item;
+}
+
+async function changeReason(id, reason) {
+  if (useApi) return tryApi("/candidates/" + id + "/reason", { method: "POST", body: JSON.stringify({ reason }) });
+  const item = memory.candidates.find(c => c.id === id);
+  if (!item) throw new Error("candidate not found");
+  if (!REASONS.includes(reason)) throw new Error("unknown stuck reason");
+  if (!EARLY.has(item.stage)) throw new Error("cannot mark stuck after the early stages");
+  item.stuck_reason = reason;
+  return item;
+}
+
+document.getElementById("add").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    await createCandidate({
+      name: document.getElementById("name").value.trim(),
+      role: document.getElementById("role").value.trim(),
+      source: document.getElementById("source").value.trim()
+    });
+    e.target.reset();
+    await draw();
+  } catch (err) {
+    document.getElementById("err").textContent = err.message;
+  }
+});
+
+document.getElementById("rows").addEventListener("change", async (e) => {
+  try {
+    if (e.target.dataset.stage) await changeStage(e.target.dataset.stage, e.target.value);
+    if (e.target.dataset.reason && e.target.value) await changeReason(e.target.dataset.reason, e.target.value);
+    await draw();
+  } catch (err) {
+    document.getElementById("err").textContent = err.message;
+  }
+});
+
+(async function start() {
+  try {
+    await tryApi("/candidates");
+    useApi = true;
+  } catch (e) {
+    useApi = false;
+    seed();
+  }
+  await draw();
+  setInterval(draw, 2000);
+})();
+</script>
+</body>
+</html>

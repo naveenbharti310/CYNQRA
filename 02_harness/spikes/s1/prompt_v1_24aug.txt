@@ -1,0 +1,15 @@
+Convert the founder objective into the Cynqra structured objective.
+Ask nothing extra. Invent no fields. If a field is not in the text, leave it
+empty and set missing_fields to the list of empty field names.
+
+Return JSON only with these keys:
+product
+target_customer
+primary_outcome
+business_outcome
+success_criteria
+constraints
+priorities
+missing_fields
+
+Founder objective:

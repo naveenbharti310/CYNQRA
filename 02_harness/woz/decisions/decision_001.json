@@ -1,0 +1,21 @@
+{
+  "protocol": "Approval",
+  "decision_id": "decision_001",
+  "task_id": "t_003",
+  "recommendation": "A 7 day clock only flags a card. Stuck requires a named reason. If the stage has already moved, the card cannot stay flagged or stuck.",
+  "evidence_refs": [
+    "woz/acceptance_stuck.md",
+    "woz/objective.json",
+    "woz/app/test_candidates.py"
+  ],
+  "cost": "none. local product rule only",
+  "risk": "MEDIUM",
+  "confidence": "high",
+  "options": ["approve", "reject", "request_evidence"],
+  "what_would_change_this": "Evidence that recruiters need the clock itself to mean stuck, or a new allowed reason that is not in the closed list.",
+  "outcome_label": "approved_edited",
+  "labeled_by": "founder",
+  "labeled_at": "2026-08-24T16:58:00+05:30",
+  "status": "decided",
+  "note": "First draft rejected. Founder required cause, not only elapsed days. Amended rule adopted."
+}

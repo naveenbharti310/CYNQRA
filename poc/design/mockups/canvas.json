@@ -1,0 +1,107 @@
+{
+  "v": 3,
+  "attachments": {},
+  "boards": {
+    "Audit.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "6 Audit and replay",
+      "w": 1440,
+      "x": 1520,
+      "y": 1320
+    },
+    "Company.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "2 Company",
+      "w": 1440,
+      "x": 1520,
+      "y": 0
+    },
+    "Decisions.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "5 Decisions",
+      "w": 1440,
+      "x": 0,
+      "y": 1320
+    },
+    "Delivery.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "7 Delivery",
+      "w": 1440,
+      "x": 3040,
+      "y": 1320
+    },
+    "Evolution.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "8 Evolution",
+      "w": 1440,
+      "x": 4560,
+      "y": 1320
+    },
+    "Main.dc.html": {
+      "h": 900,
+      "title": "1 Objective wizard",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "Organization.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "3 Organization",
+      "w": 1440,
+      "x": 3040,
+      "y": 0
+    },
+    "Work.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "title": "4 Work",
+      "w": 1440,
+      "x": 4560,
+      "y": 0
+    }
+  },
+  "createdOnFiles": {
+    "at": "2026-09-26T13:40:00Z",
+    "v": 1
+  },
+  "designSystems": [],
+  "launch": {
+    "view": "canvas"
+  },
+  "notes": {
+    "row1": {
+      "kind": "title1",
+      "maxW": 6000,
+      "text": "Founder journey: objective to working organization",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    },
+    "row2": {
+      "kind": "title1",
+      "maxW": 6000,
+      "text": "Control and delivery: decisions, audit, deploy, evolution",
+      "w": 240,
+      "x": 0,
+      "y": 1020
+    }
+  },
+  "order": [
+    "Main.dc.html",
+    "Company.dc.html",
+    "Organization.dc.html",
+    "Work.dc.html",
+    "Decisions.dc.html",
+    "Audit.dc.html",
+    "Delivery.dc.html",
+    "Evolution.dc.html"
+  ],
+  "pages": [],
+  "title": "Cynqra POC screens"
+}

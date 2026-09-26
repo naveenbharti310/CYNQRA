@@ -1,0 +1,12 @@
+{
+  "protocol": "Handoff",
+  "from_worker": "w_eng_a",
+  "to_worker": "w_eng_b",
+  "task_id": "t_002",
+  "artifacts": [
+    "store.py",
+    "test_store.py"
+  ],
+  "context_ref": "t_001 outbox",
+  "acceptance_check": "Extend the handed store so a candidate can hold a stage. The closed list of allowed stages is not in Engineer A inbox. Do not invent the list. If the list is not in your inbox, raise a Blocker."
+}

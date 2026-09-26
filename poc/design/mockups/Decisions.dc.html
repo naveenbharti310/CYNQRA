@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Decisions</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&amp;display=swap">
+<style>
+body{margin:0;font-family:"IBM Plex Sans",system-ui,sans-serif;color:#1B1D1F;background:#F6F4EF}
+a{color:#1B1D1F;text-decoration:none}a:hover{color:#0F6B5C}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; box-sizing: border-box; display: flex; background: #F6F4EF;">
+  <nav aria-label="Main" style="width: 232px; box-sizing: border-box; padding: 20px 14px; background: #EFECE5; border-right: 1px solid #E2DED4; display: flex; flex-direction: column; gap: 4px;">
+    <div style="padding: 0 10px 14px; display: flex; flex-direction: column; gap: 2px;">
+      <span style="font-family: 'Source Serif 4', Georgia, serif; font-size: 24px; font-weight: 600;">Cynqra</span>
+      <span style="font-size: 13px; color: #5B5E5C;">Harbor Recruiting</span>
+    </div>
+    <a href="Company.dc.html" style="padding: 10px 12px; border-radius: 8px; font-size: 15px;">Company</a>
+    <a href="Organization.dc.html" style="padding: 10px 12px; border-radius: 8px; font-size: 15px;">Organization</a>
+    <a href="Work.dc.html" style="padding: 10px 12px; border-radius: 8px; font-size: 15px;">Work</a>
+    <a href="Decisions.dc.html" style="padding: 10px 12px; border-radius: 8px; background: #FFFFFF; font-weight: 600; font-size: 15px; display: flex; justify-content: space-between;"><span>Decisions</span><span style="min-width: 22px; text-align: center; border-radius: 999px; background: #9A4F00; color: #FFFFFF; font-size: 12px; line-height: 22px;">1</span></a>
+    <a href="Evolution.dc.html" style="padding: 10px 12px; border-radius: 8px; font-size: 15px;">Evolution</a>
+    <a href="Audit.dc.html" style="padding: 10px 12px; border-radius: 8px; font-size: 15px;">Audit</a>
+    <a href="Delivery.dc.html" style="padding: 10px 12px; border-radius: 8px; font-size: 15px;">Delivery</a>
+    <div style="margin-top: auto; display: flex; flex-direction: column; gap: 10px; padding: 0 6px;">
+      <span style="padding: 6px 10px; border-radius: 8px; background: #FBEBD7; color: #7A3E00; font-size: 12px; font-weight: 500;">Demo mode: scripted workers</span>
+      <button type="button" style="height: 44px; border-radius: 8px; border: 1px solid #A82820; background: #FFFFFF; color: #A82820; font: 600 14px 'IBM Plex Sans', sans-serif;">Kill switch</button>
+    </div>
+  </nav>
+  <div style="flex-grow: 1; display: flex; flex-direction: column;">
+    <header style="height: 64px; box-sizing: border-box; padding: 0 32px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #E2DED4;">
+      <h1 style="margin: 0; font-size: 20px; font-weight: 600;">Decisions</h1>
+      <span style="font-size: 13px; color: #5B5E5C;">Escalations today: 3 of 5 (D-29). Every answer is kept as a label.</span>
+    </header>
+    <div style="flex-grow: 1; padding: 24px 32px; box-sizing: border-box; display: flex; gap: 20px;">
+      <div style="flex-grow: 1; background: #FFFFFF; border: 1px solid #F0C99B; border-radius: 14px; padding: 24px 28px; display: flex; flex-direction: column; gap: 16px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #5B5E5C;">dec_t_06 · proposed by w_cto</span>
+          <span style="padding: 4px 12px; border-radius: 999px; background: #F8E1DE; color: #A82820; font-size: 13px; font-weight: 600;">HIGH risk</span>
+        </div>
+        <h2 style="margin: 0; font-family: 'Source Serif 4', Georgia, serif; font-size: 30px; font-weight: 600;">Deploy release 1 to production</h2>
+        <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px;">
+          <div style="display: flex; flex-direction: column; gap: 4px;"><span style="font-size: 12px; color: #5B5E5C; text-transform: uppercase; letter-spacing: 0.06em;">Problem</span><span style="font-size: 15px; line-height: 1.5;">The release is merged and verified. It is not live, so recruiters cannot use it yet.</span></div>
+          <div style="display: flex; flex-direction: column; gap: 4px;"><span style="font-size: 12px; color: #5B5E5C; text-transform: uppercase; letter-spacing: 0.06em;">Recommendation</span><span style="font-size: 15px; line-height: 1.5;">Approve. Deploy, then run the health check and the smoke test.</span></div>
+          <div style="display: flex; flex-direction: column; gap: 4px;"><span style="font-size: 12px; color: #5B5E5C; text-transform: uppercase; letter-spacing: 0.06em;">Evidence</span><span style="font-size: 15px; line-height: 1.5;">16 tests passed on main. CTO review approved. Merge approved by you.</span></div>
+          <div style="display: flex; flex-direction: column; gap: 4px;"><span style="font-size: 12px; color: #5B5E5C; text-transform: uppercase; letter-spacing: 0.06em;">What would change this</span><span style="font-size: 15px; line-height: 1.5;">A failing smoke test, or any review comment still open.</span></div>
+        </div>
+        <div style="display: flex; gap: 28px; font-size: 14px; padding: 12px 0; border-top: 1px solid #EFECE5; border-bottom: 1px solid #EFECE5;">
+          <span><span style="color: #5B5E5C;">Cost</span> 4 work units</span>
+          <span><span style="color: #5B5E5C;">Risk</span> HIGH, D-21</span>
+          <span><span style="color: #5B5E5C;">Confidence</span> high</span>
+          <span><span style="color: #5B5E5C;">Rollback</span> stop the process, previous release stays</span>
+        </div>
+        <div style="margin-top: auto; display: flex; gap: 10px;">
+          <button type="button" style="height: 48px; padding: 0 22px; border-radius: 10px; border: 0; background: #0F6B5C; color: #FFFFFF; font: 600 15px 'IBM Plex Sans', sans-serif;">Approve</button>
+          <button type="button" style="height: 48px; padding: 0 20px; border-radius: 10px; border: 1px solid #C9C4B8; background: #FFFFFF; color: #1B1D1F; font: 500 15px 'IBM Plex Sans', sans-serif;">Reject</button>
+          <button type="button" style="height: 48px; padding: 0 20px; border-radius: 10px; border: 1px solid #C9C4B8; background: #FFFFFF; color: #1B1D1F; font: 500 15px 'IBM Plex Sans', sans-serif;">Request more evidence</button>
+        </div>
+      </div>
+      <div style="width: 400px; display: flex; flex-direction: column; gap: 16px;">
+        <div style="background: #FFFFFF; border: 1px solid #E2DED4; border-radius: 14px; padding: 18px 20px; display: flex; flex-direction: column; gap: 10px;">
+          <h3 style="margin: 0; font-size: 15px; font-weight: 600;">Answered</h3>
+          <div style="display: flex; justify-content: space-between; font-size: 14px;"><span>Confirm objective</span><span style="color: #1E6F3B;">approved</span></div>
+          <div style="display: flex; justify-content: space-between; font-size: 14px;"><span>Organization and plan</span><span style="color: #1E6F3B;">approved</span></div>
+          <div style="display: flex; justify-content: space-between; font-size: 14px;"><span>What stuck means</span><span style="color: #1E6F3B;">approved</span></div>
+          <div style="display: flex; justify-content: space-between; font-size: 14px;"><span>Merge release 1</span><span style="color: #1E6F3B;">approved</span></div>
+        </div>
+        <div style="background: #FFFFFF; border: 1px solid #E2DED4; border-radius: 14px; padding: 18px 20px; display: flex; flex-direction: column; gap: 10px;">
+          <h3 style="margin: 0; font-size: 15px; font-weight: 600;">Stopped by policy, nothing for you to do</h3>
+          <div style="padding: 12px; border-radius: 10px; background: #F8E1DE; display: flex; flex-direction: column; gap: 4px;"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #A82820;">DENY · external_message · w_cto</span><span style="font-size: 14px;">Email the recruiters that the tracker is live. Prohibited for every worker (D-27). You can send it yourself.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

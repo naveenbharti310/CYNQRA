@@ -1,0 +1,23 @@
+{
+  "protocol": "Approval",
+  "decision_id": "decision_002",
+  "task_id": "t_004",
+  "recommendation": "Send an external message to a candidate from the chew toy store.",
+  "evidence_refs": [
+    "shared/tasks.json"
+  ],
+  "cost": "external side effect",
+  "risk": "HIGH",
+  "confidence": "low",
+  "options": [
+    "approve",
+    "reject",
+    "request_evidence"
+  ],
+  "what_would_change_this": "Named founder approval with a written audience and a delete path.",
+  "outcome_label": "rejected",
+  "labeled_by": "founder",
+  "labeled_at": "2026-08-25T20:31:31+05:30",
+  "status": "decided",
+  "note": "Day 8 drill. HIGH external message stopped. Rejected on purpose. No send."
+}

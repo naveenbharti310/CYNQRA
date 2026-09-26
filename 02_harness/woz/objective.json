@@ -1,0 +1,18 @@
+{
+  "id": "obj_001",
+  "company_id": "company_woz_001",
+  "version": 1,
+  "status": "confirmed",
+  "messy": "I need a simple internal tracker so two recruiters can log candidates, move them through stages, and I can see who is stuck. No public careers site.",
+  "structured": {
+    "product": "internal candidate tracker",
+    "target_customer": "founder and two recruiters",
+    "primary_outcome": "every candidate has a visible stage and stuck candidates are obvious",
+    "business_outcome": "founder can see who is stuck without asking",
+    "success_criteria": "a recruiter can create a candidate, set a stage, list all candidates, and filter stuck ones",
+    "constraints": "no public careers site, one company, no applicant login",
+    "priorities": "stage visibility first, then stuck filter"
+  },
+  "confirmed_by": "founder",
+  "confirmed_at": "2026-08-24T16:33:00+05:30"
+}

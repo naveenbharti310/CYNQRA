@@ -1,0 +1,8 @@
+{
+  "worker": "pm",
+  "script": "pm_stages.py",
+  "returncode": 0,
+  "stdout": "pm wrote closed stage list for t_002\n",
+  "stderr": "",
+  "seconds": 0.023
+}

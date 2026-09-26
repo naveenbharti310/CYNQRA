@@ -1,0 +1,10 @@
+{
+  "note": "Smoke checks for the deploy step. Preview runs all of them; live runs only the GET checks, so production data is never touched.",
+  "checks": [
+    {"method": "GET", "path": "/health", "expect": 200},
+    {"method": "GET", "path": "/api/meta", "expect": 200},
+    {"method": "GET", "path": "/api/candidates", "expect": 200},
+    {"method": "POST", "path": "/api/candidates", "body": {"name": "Smoke check"}, "expect": 201},
+    {"method": "GET", "path": "/careers", "expect": 404}
+  ]
+}

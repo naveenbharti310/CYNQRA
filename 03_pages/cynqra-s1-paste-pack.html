@@ -1,0 +1,522 @@
+<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Cynqra S1 paste pack</title><style>
+*{box-sizing:border-box}
+:root{--ink:#2C2C2B;--muted:#6F6C67;--line:#E6E5E3;--soft:#F9F8F7;--panel:#fff;--tint:#F0EFED;--accent:#D5803B;--ok:#2F8A5B}
+@media (prefers-color-scheme:dark){:root{--ink:#ECEAE6;--muted:#A8A49D;--line:#3A3936;--soft:#1C1B1A;--panel:#252422;--tint:#2E2D2A;--accent:#E0945A;--ok:#5CC08A}}
+body{margin:0;padding:40px 16px 96px;background:var(--soft);color:var(--ink);font:16px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif}
+.wrap{max-width:860px;margin:0 auto}
+h1{font-size:28px;line-height:1.2;margin:0 0 6px}
+.sub{color:var(--muted);margin:0 0 28px}
+h2{font-size:19px;margin:36px 0 10px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 16px}
+.rule{background:var(--tint);border-left:3px solid var(--accent);border-radius:6px;padding:12px 16px;margin:0 0 10px}
+.rule b{display:block}
+.item{border:1px solid var(--line);border-radius:10px;background:var(--panel);margin:0 0 22px;overflow:hidden}
+.head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px;background:var(--tint);border-bottom:1px solid var(--line)}
+.tag{font-weight:650}
+.state{font-size:13px;color:var(--muted)}
+.state.ok{color:var(--ok)}
+pre{margin:0;padding:16px;white-space:pre-wrap;word-wrap:break-word;font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.body{padding:12px 16px 16px;border-top:1px solid var(--line)}
+label{display:block;font-size:13px;color:var(--muted);margin:0 0 6px}
+textarea,input[type=text]{width:100%;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;padding:10px;border:1px solid var(--line);border-radius:7px;background:var(--soft);color:var(--ink)}
+textarea{min-height:120px;resize:vertical}
+details{border-top:1px solid var(--line)}
+summary{cursor:pointer;padding:10px 16px;color:var(--muted);font-size:14px}
+button{font:600 13px/1 inherit;padding:9px 14px;border-radius:7px;border:1px solid var(--line);background:var(--panel);color:var(--ink);cursor:pointer}
+button:hover{background:var(--tint)}
+button.primary{background:var(--ink);color:var(--soft);border-color:var(--ink)}
+button.copied{border-color:var(--ok);color:var(--ok)}
+.bar{position:sticky;bottom:0;background:var(--soft);border-top:1px solid var(--line);padding:12px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.foot{color:var(--muted);font-size:14px;margin-top:36px;border-top:1px solid var(--line);padding-top:16px}
+code{background:var(--tint);padding:1px 5px;border-radius:4px;font-size:13px}
+</style></head><body><div class='wrap'><h1>S1 by hand</h1><p class='sub'>Prompt v2_26sep2026. Ten fresh chats, about an hour, no key and no install. This produces one of the two spike scores the M2 gate is waiting on. The bar is 8 of 10 and it does not move.</p><div class='card'><b>Why this page replaced the 25 August one.</b> The old prompt told the model to leave unstated fields empty, and the scorer fails any empty field, so a model that obeyed would have scored zero. The ten objectives, the expected answers, the scorer and the bar are unchanged. No S1 answers existed yet, so no result is affected.</div><h2>Rules that decide whether the score means anything</h2><div class='rule'><b>A new chat every time.</b>Ten items, ten chats. A reused chat lets item four learn from item three.</div><div class='rule'><b>Temporary or incognito chat, or memory off.</b>A model that remembers Cynqra or the candidate tracker is not a clean test.</div><div class='rule'><b>Paste exactly, add nothing.</b>No hints, no context, no telling it what you hope to see.</div><div class='rule'><b>Never tidy the reply.</b>Not a bracket, not a blank field, not a typo. Prose instead of JSON is a real failure and counts as one.</div><div class='rule'><b>Retry only when the scorer says so.</b>Each item gets one retry, in a new chat, with the retry block under the item.</div><h2>Which app and model</h2><div class='card'><label for='model'>For example: Claude app, Sonnet 5, temporary chat</label><input type='text' id='model' data-k='model'></div><h2>The ten items</h2><div class='item'><div class='head'><span class='tag'>T01</span><span class='state' id='st_T01'>No reply yet</span><button onclick="copyBlock('p_T01',this)">Copy</button></div><pre id='p_T01'>Convert the founder objective into the Cynqra structured objective.
+The founder will review and confirm your answer, so fill every field.
+Where the text states a field, use its words.
+Where the text only implies a field, write the most reasonable reading and
+list that key in inferred_fields.
+Do not add features, users, or constraints the founder did not state or
+clearly imply.
+Leave a field empty only if nothing in the text supports any reading, and
+list that key in missing_fields.
+
+Return JSON only with these keys:
+product
+target_customer
+primary_outcome
+business_outcome
+success_criteria
+constraints
+priorities
+inferred_fields
+missing_fields
+
+Founder objective:
+I need a simple tool for my cafe so waiters take orders on a tablet and the kitchen sees them. Stop losing paper tickets. Keep it cheap.
+</pre><div class='body'><label for='r_T01'>Paste the whole reply for T01 here, untouched</label><textarea id='r_T01' data-k='T01' data-main='1'></textarea></div><details><summary>Retry block for T01, only if the scorer says it failed</summary><div class='head'><span class='tag'>T01 retry</span><button onclick="copyBlock('q_T01',this)">Copy</button></div><pre id='q_T01'>
+Retry. Fill every field the text states or clearly implies, and list the keys you inferred in inferred_fields. Do not add facts the founder did not state or imply.
+Convert the founder objective into the Cynqra structured objective.
+The founder will review and confirm your answer, so fill every field.
+Where the text states a field, use its words.
+Where the text only implies a field, write the most reasonable reading and
+list that key in inferred_fields.
+Do not add features, users, or constraints the founder did not state or
+clearly imply.
+Leave a field empty only if nothing in the text supports any reading, and
+list that key in missing_fields.
+
+Return JSON only with these keys:
+product
+target_customer
+primary_outcome
+business_outcome
+success_criteria
+constraints
+priorities
+inferred_fields
+missing_fields
+
+Founder objective:
+I need a simple tool for my cafe so waiters take orders on a tablet and the kitchen sees them. Stop losing paper tickets. Keep it cheap.
+</pre><div class='body'><label for='x_T01'>Retry reply for T01</label><textarea id='x_T01' data-k='T01_retry'></textarea></div></details></div><div class='item'><div class='head'><span class='tag'>T02</span><span class='state' id='st_T02'>No reply yet</span><button onclick="copyBlock('p_T02',this)">Copy</button></div><pre id='p_T02'>Convert the founder objective into the Cynqra structured objective.
+The founder will review and confirm your answer, so fill every field.
+Where the text states a field, use its words.
+Where the text only implies a field, write the most reasonable reading and
+list that key in inferred_fields.
+Do not add features, users, or constraints the founder did not state or
+clearly imply.
+Leave a field empty only if nothing in the text supports any reading, and
+list that key in missing_fields.
+
+Return JSON only with these keys:
+product
+target_customer
+primary_outcome
+business_outcome
+success_criteria
+constraints
+priorities
+inferred_fields
+missing_fields
+
+Founder objective:
+Build me an internal tracker so my two recruiters can log candidates, set a stage, and I can see who is stuck. No public careers site.
+</pre><div class='body'><label for='r_T02'>Paste the whole reply for T02 here, untouched</label><textarea id='r_T02' data-k='T02' data-main='1'></textarea></div><details><summary>Retry block for T02, only if the scorer says it failed</summary><div class='head'><span class='tag'>T02 retry</span><button onclick="copyBlock('q_T02',this)">Copy</button></div><pre id='q_T02'>
+Retry. Fill every field the text states or clearly implies, and list the keys you inferred in inferred_fields. Do not add facts the founder did not state or imply.
+Convert the founder objective into the Cynqra structured objective.
+The founder will review and confirm your answer, so fill every field.
+Where the text states a field, use its words.
+Where the text only implies a field, write the most reasonable reading and
+list that key in inferred_fields.
+Do not add features, users, or constraints the founder did not state or
+clearly imply.
+Leave a field empty only if nothing in the text supports any reading, and
+list that key in missing_fields.
+
+Return JSON only with these keys:
+product
+target_customer
+primary_outcome
+business_outcome
+success_criteria
+constraints
+priorities
+inferred_fields
+missing_fields
+
+Founder objective:
+Build me an internal tracker so my two recruiters can log candidates, set a stage, and I can see who is stuck. No public careers site.
+</pre><div class='body'><label for='x_T02'>Retry reply for T02</label><textarea id='x_T02' data-k='T02_retry'></textarea></div></details></div><div class='item'><div class='head'><span class='tag'>T03</span><span class='state' id='st_T03'>No reply yet</span><button onclick="copyBlock('p_T03',this)">Copy</button></div><pre id='p_T03'>Convert the founder objective into the Cynqra structured objective.
+The founder will review and confirm your answer, so fill every field.
+Where the text states a field, use its words.
+Where the text only implies a field, write the most reasonable reading and
+list that key in inferred_fields.
+Do not add features, users, or constraints the founder did not state or
+clearly imply.
+Leave a field empty only if nothing in the text supports any reading, and
+list that key in missing_fields.
+
+Return JSON only with these keys:
+product
+target_customer
+primary_outcome
+business_outcome
+success_criteria
+constraints
+priorities
+inferred_fields
+missing_fields
+
+Founder objective:
+We run a small clinic. Reception keeps a shared spreadsheet of appointments and it breaks every week. I want staff to book, move, and cancel slots. Patients should not see the admin screen.
+</pre><div class='body'><label for='r_T03'>Paste the whole reply for T03 here, untouched</label><textarea id='r_T03' data-k='T03' data-main='1'></textarea></div><details><summary>Retry block for T03, only if the scorer says it failed</summary><div class='head'><span class='tag'>T03 retry</span><button onclick="copyBlock('q_T03',this)">Copy</button></div><pre id='q_T03'>
+Retry. Fill every field the text states or clearly implies, and list the keys you inferred in inferred_fields. Do not add facts the founder did not state or imply.
+Convert the founder objective into the Cynqra structured objective.
+The founder will review and confirm your answer, so fill every field.
+Where the text states a field, use its words.
+Where the text only implies a field, write the most reasonable reading and
+list that key in inferred_fields.
+Do not add features, users, or constraints the founder did not state or
+clearly imply.
+Leave a field empty only if nothing in the text supports any reading, and
+list that key in missing_fields.
+
+Return JSON only with these keys:
+product
+target_customer
+primary_outcome
+business_outcome
+success_criteria
+constraints
+priorities
+inferred_fields
+missing_fields
+
+Founder objective:
+We run a small clinic. Reception keeps a shared spreadsheet of appointments and it breaks every week. I want staff to book, move, and cancel slots. Patients should not see the admin screen.
+</pre><div class='body'><label for='x_T03'>Retry reply for T03</label><textarea id='x_T03' data-k='T03_retry'></textarea></div></details></div><div class='item'><div class='head'><span class='tag'>T04</span><span class='state' id='st_T04'>No reply yet</span><button onclick="copyBlock('p_T04',this)">Copy</button></div><pre id='p_T04'>Convert the founder objective into the Cynqra structured objective.
+The founder will review and confirm your answer, so fill every field.
+Where the text states a field, use its words.
+Where the text only implies a field, write the most reasonable reading and
+list that key in inferred_fields.
+Do not add features, users, or constraints the founder did not state or
+clearly imply.
+Leave a field empty only if nothing in the text supports any reading, and
+list that key in missing_fields.
+
+Return JSON only with these keys:
+product
+target_customer
+primary_outcome
+business_outcome
+success_criteria
+constraints
+priorities
+inferred_fields
+missing_fields
+
+Founder objective:
+Inventory for a tiny warehouse. Scan boxes in, scan boxes out, show what is low. Do not connect to accounting yet.
+</pre><div class='body'><label for='r_T04'>Paste the whole reply for T04 here, untouched</label><textarea id='r_T04' data-k='T04' data-main='1'></textarea></div><details><summary>Retry block for T04, only if the scorer says it failed</summary><div class='head'><span class='tag'>T04 retry</span><button onclick="copyBlock('q_T04',this)">Copy</button></div><pre id='q_T04'>
+Retry. Fill every field the text states or clearly implies, and list the keys you inferred in inferred_fields. Do not add facts the founder did not state or imply.
+Convert the founder objective into the Cynqra structured objective.
+The founder will review and confirm your answer, so fill every field.
+Where the text states a field, use its words.
+Where the text only implies a field, write the most reasonable reading and
+list that key in inferred_fields.
+Do not add features, users, or constraints the founder did not state or
+clearly imply.
+Leave a field empty only if nothing in the text supports any reading, and
+list that key in missing_fields.
+
+Return JSON only with these keys:
+product
+target_customer
+primary_outcome
+business_outcome
+success_criteria
+constraints
+priorities
+inferred_fields
+missing_fields
+
+Founder objective:
+Inventory for a tiny warehouse. Scan boxes in, scan boxes out, show what is low. Do not connect to accounting yet.
+</pre><div class='body'><label for='x_T04'>Retry reply for T04</label><textarea id='x_T04' data-k='T04_retry'></textarea></div></details></div><div class='item'><div class='head'><span class='tag'>T05</span><span class='state' id='st_T05'>No reply yet</span><button onclick="copyBlock('p_T05',this)">Copy</button></div><pre id='p_T05'>Convert the founder objective into the Cynqra structured objective.
+The founder will review and confirm your answer, so fill every field.
+Where the text states a field, use its words.
+Where the text only implies a field, write the most reasonable reading and
+list that key in inferred_fields.
+Do not add features, users, or constraints the founder did not state or
+clearly imply.
+Leave a field empty only if nothing in the text supports any reading, and
+list that key in missing_fields.
+
+Return JSON only with these keys:
+product
+target_customer
+primary_outcome
+business_outcome
+success_criteria
+constraints
+priorities
+inferred_fields
+missing_fields
+
+Founder objective:
+A donor CRM for our nonprofit. Store name and gift date only. I need a list and a way to add a gift. No email blasts.
+</pre><div class='body'><label for='r_T05'>Paste the whole reply for T05 here, untouched</label><textarea id='r_T05' data-k='T05' data-main='1'></textarea></div><details><summary>Retry block for T05, only if the scorer says it failed</summary><div class='head'><span class='tag'>T05 retry</span><button onclick="copyBlock('q_T05',this)">Copy</button></div><pre id='q_T05'>
+Retry. Fill every field the text states or clearly implies, and list the keys you inferred in inferred_fields. Do not add facts the founder did not state or imply.
+Convert the founder objective into the Cynqra structured objective.
+The founder will review and confirm your answer, so fill every field.
+Where the text states a field, use its words.
+Where the text only implies a field, write the most reasonable reading and
+list that key in inferred_fields.
+Do not add features, users, or constraints the founder did not state or
+clearly imply.
+Leave a field empty only if nothing in the text supports any reading, and
+list that key in missing_fields.
+
+Return JSON only with these keys:
+product
+target_customer
+primary_outcome
+business_outcome
+success_criteria
+constraints
+priorities
+inferred_fields
+missing_fields
+
+Founder objective:
+A donor CRM for our nonprofit. Store name and gift date only. I need a list and a way to add a gift. No email blasts.
+</pre><div class='body'><label for='x_T05'>Retry reply for T05</label><textarea id='x_T05' data-k='T05_retry'></textarea></div></details></div><div class='item'><div class='head'><span class='tag'>T06</span><span class='state' id='st_T06'>No reply yet</span><button onclick="copyBlock('p_T06',this)">Copy</button></div><pre id='p_T06'>Convert the founder objective into the Cynqra structured objective.
+The founder will review and confirm your answer, so fill every field.
+Where the text states a field, use its words.
+Where the text only implies a field, write the most reasonable reading and
+list that key in inferred_fields.
+Do not add features, users, or constraints the founder did not state or
+clearly imply.
+Leave a field empty only if nothing in the text supports any reading, and
+list that key in missing_fields.
+
+Return JSON only with these keys:
+product
+target_customer
+primary_outcome
+business_outcome
+success_criteria
+constraints
+priorities
+inferred_fields
+missing_fields
+
+Founder objective:
+Help desk for my 8 person SaaS. Customers open a ticket, we set status, they see status. No chat. Email is enough later.
+</pre><div class='body'><label for='r_T06'>Paste the whole reply for T06 here, untouched</label><textarea id='r_T06' data-k='T06' data-main='1'></textarea></div><details><summary>Retry block for T06, only if the scorer says it failed</summary><div class='head'><span class='tag'>T06 retry</span><button onclick="copyBlock('q_T06',this)">Copy</button></div><pre id='q_T06'>
+Retry. Fill every field the text states or clearly implies, and list the keys you inferred in inferred_fields. Do not add facts the founder did not state or imply.
+Convert the founder objective into the Cynqra structured objective.
+The founder will review and confirm your answer, so fill every field.
+Where the text states a field, use its words.
+Where the text only implies a field, write the most reasonable reading and
+list that key in inferred_fields.
+Do not add features, users, or constraints the founder did not state or
+clearly imply.
+Leave a field empty only if nothing in the text supports any reading, and
+list that key in missing_fields.
+
+Return JSON only with these keys:
+product
+target_customer
+primary_outcome
+business_outcome
+success_criteria
+constraints
+priorities
+inferred_fields
+missing_fields
+
+Founder objective:
+Help desk for my 8 person SaaS. Customers open a ticket, we set status, they see status. No chat. Email is enough later.
+</pre><div class='body'><label for='x_T06'>Retry reply for T06</label><textarea id='x_T06' data-k='T06_retry'></textarea></div></details></div><div class='item'><div class='head'><span class='tag'>T07</span><span class='state' id='st_T07'>No reply yet</span><button onclick="copyBlock('p_T07',this)">Copy</button></div><pre id='p_T07'>Convert the founder objective into the Cynqra structured objective.
+The founder will review and confirm your answer, so fill every field.
+Where the text states a field, use its words.
+Where the text only implies a field, write the most reasonable reading and
+list that key in inferred_fields.
+Do not add features, users, or constraints the founder did not state or
+clearly imply.
+Leave a field empty only if nothing in the text supports any reading, and
+list that key in missing_fields.
+
+Return JSON only with these keys:
+product
+target_customer
+primary_outcome
+business_outcome
+success_criteria
+constraints
+priorities
+inferred_fields
+missing_fields
+
+Founder objective:
+Course waitlist. People join a list, I approve them into a cohort, they get a seat. Payments stay off this system.
+</pre><div class='body'><label for='r_T07'>Paste the whole reply for T07 here, untouched</label><textarea id='r_T07' data-k='T07' data-main='1'></textarea></div><details><summary>Retry block for T07, only if the scorer says it failed</summary><div class='head'><span class='tag'>T07 retry</span><button onclick="copyBlock('q_T07',this)">Copy</button></div><pre id='q_T07'>
+Retry. Fill every field the text states or clearly implies, and list the keys you inferred in inferred_fields. Do not add facts the founder did not state or imply.
+Convert the founder objective into the Cynqra structured objective.
+The founder will review and confirm your answer, so fill every field.
+Where the text states a field, use its words.
+Where the text only implies a field, write the most reasonable reading and
+list that key in inferred_fields.
+Do not add features, users, or constraints the founder did not state or
+clearly imply.
+Leave a field empty only if nothing in the text supports any reading, and
+list that key in missing_fields.
+
+Return JSON only with these keys:
+product
+target_customer
+primary_outcome
+business_outcome
+success_criteria
+constraints
+priorities
+inferred_fields
+missing_fields
+
+Founder objective:
+Course waitlist. People join a list, I approve them into a cohort, they get a seat. Payments stay off this system.
+</pre><div class='body'><label for='x_T07'>Retry reply for T07</label><textarea id='x_T07' data-k='T07_retry'></textarea></div></details></div><div class='item'><div class='head'><span class='tag'>T08</span><span class='state' id='st_T08'>No reply yet</span><button onclick="copyBlock('p_T08',this)">Copy</button></div><pre id='p_T08'>Convert the founder objective into the Cynqra structured objective.
+The founder will review and confirm your answer, so fill every field.
+Where the text states a field, use its words.
+Where the text only implies a field, write the most reasonable reading and
+list that key in inferred_fields.
+Do not add features, users, or constraints the founder did not state or
+clearly imply.
+Leave a field empty only if nothing in the text supports any reading, and
+list that key in missing_fields.
+
+Return JSON only with these keys:
+product
+target_customer
+primary_outcome
+business_outcome
+success_criteria
+constraints
+priorities
+inferred_fields
+missing_fields
+
+Founder objective:
+I manage 12 rental units. I need tenants, leases, and a repair ticket per unit. Tenants should not edit leases.
+</pre><div class='body'><label for='r_T08'>Paste the whole reply for T08 here, untouched</label><textarea id='r_T08' data-k='T08' data-main='1'></textarea></div><details><summary>Retry block for T08, only if the scorer says it failed</summary><div class='head'><span class='tag'>T08 retry</span><button onclick="copyBlock('q_T08',this)">Copy</button></div><pre id='q_T08'>
+Retry. Fill every field the text states or clearly implies, and list the keys you inferred in inferred_fields. Do not add facts the founder did not state or imply.
+Convert the founder objective into the Cynqra structured objective.
+The founder will review and confirm your answer, so fill every field.
+Where the text states a field, use its words.
+Where the text only implies a field, write the most reasonable reading and
+list that key in inferred_fields.
+Do not add features, users, or constraints the founder did not state or
+clearly imply.
+Leave a field empty only if nothing in the text supports any reading, and
+list that key in missing_fields.
+
+Return JSON only with these keys:
+product
+target_customer
+primary_outcome
+business_outcome
+success_criteria
+constraints
+priorities
+inferred_fields
+missing_fields
+
+Founder objective:
+I manage 12 rental units. I need tenants, leases, and a repair ticket per unit. Tenants should not edit leases.
+</pre><div class='body'><label for='x_T08'>Retry reply for T08</label><textarea id='x_T08' data-k='T08_retry'></textarea></div></details></div><div class='item'><div class='head'><span class='tag'>T09</span><span class='state' id='st_T09'>No reply yet</span><button onclick="copyBlock('p_T09',this)">Copy</button></div><pre id='p_T09'>Convert the founder objective into the Cynqra structured objective.
+The founder will review and confirm your answer, so fill every field.
+Where the text states a field, use its words.
+Where the text only implies a field, write the most reasonable reading and
+list that key in inferred_fields.
+Do not add features, users, or constraints the founder did not state or
+clearly imply.
+Leave a field empty only if nothing in the text supports any reading, and
+list that key in missing_fields.
+
+Return JSON only with these keys:
+product
+target_customer
+primary_outcome
+business_outcome
+success_criteria
+constraints
+priorities
+inferred_fields
+missing_fields
+
+Founder objective:
+Make a board for my hardware shop jobs. Job comes in, parts reserved, job done. One shop, one owner, no multi location.
+</pre><div class='body'><label for='r_T09'>Paste the whole reply for T09 here, untouched</label><textarea id='r_T09' data-k='T09' data-main='1'></textarea></div><details><summary>Retry block for T09, only if the scorer says it failed</summary><div class='head'><span class='tag'>T09 retry</span><button onclick="copyBlock('q_T09',this)">Copy</button></div><pre id='q_T09'>
+Retry. Fill every field the text states or clearly implies, and list the keys you inferred in inferred_fields. Do not add facts the founder did not state or imply.
+Convert the founder objective into the Cynqra structured objective.
+The founder will review and confirm your answer, so fill every field.
+Where the text states a field, use its words.
+Where the text only implies a field, write the most reasonable reading and
+list that key in inferred_fields.
+Do not add features, users, or constraints the founder did not state or
+clearly imply.
+Leave a field empty only if nothing in the text supports any reading, and
+list that key in missing_fields.
+
+Return JSON only with these keys:
+product
+target_customer
+primary_outcome
+business_outcome
+success_criteria
+constraints
+priorities
+inferred_fields
+missing_fields
+
+Founder objective:
+Make a board for my hardware shop jobs. Job comes in, parts reserved, job done. One shop, one owner, no multi location.
+</pre><div class='body'><label for='x_T09'>Retry reply for T09</label><textarea id='x_T09' data-k='T09_retry'></textarea></div></details></div><div class='item'><div class='head'><span class='tag'>T10</span><span class='state' id='st_T10'>No reply yet</span><button onclick="copyBlock('p_T10',this)">Copy</button></div><pre id='p_T10'>Convert the founder objective into the Cynqra structured objective.
+The founder will review and confirm your answer, so fill every field.
+Where the text states a field, use its words.
+Where the text only implies a field, write the most reasonable reading and
+list that key in inferred_fields.
+Do not add features, users, or constraints the founder did not state or
+clearly imply.
+Leave a field empty only if nothing in the text supports any reading, and
+list that key in missing_fields.
+
+Return JSON only with these keys:
+product
+target_customer
+primary_outcome
+business_outcome
+success_criteria
+constraints
+priorities
+inferred_fields
+missing_fields
+
+Founder objective:
+We need a CRUD app for grant applications. Applicant submits, reviewer scores, I decide. Keep files in our drive, do not store passports.
+</pre><div class='body'><label for='r_T10'>Paste the whole reply for T10 here, untouched</label><textarea id='r_T10' data-k='T10' data-main='1'></textarea></div><details><summary>Retry block for T10, only if the scorer says it failed</summary><div class='head'><span class='tag'>T10 retry</span><button onclick="copyBlock('q_T10',this)">Copy</button></div><pre id='q_T10'>
+Retry. Fill every field the text states or clearly implies, and list the keys you inferred in inferred_fields. Do not add facts the founder did not state or imply.
+Convert the founder objective into the Cynqra structured objective.
+The founder will review and confirm your answer, so fill every field.
+Where the text states a field, use its words.
+Where the text only implies a field, write the most reasonable reading and
+list that key in inferred_fields.
+Do not add features, users, or constraints the founder did not state or
+clearly imply.
+Leave a field empty only if nothing in the text supports any reading, and
+list that key in missing_fields.
+
+Return JSON only with these keys:
+product
+target_customer
+primary_outcome
+business_outcome
+success_criteria
+constraints
+priorities
+inferred_fields
+missing_fields
+
+Founder objective:
+We need a CRUD app for grant applications. Applicant submits, reviewer scores, I decide. Keep files in our drive, do not store passports.
+</pre><div class='body'><label for='x_T10'>Retry reply for T10</label><textarea id='x_T10' data-k='T10_retry'></textarea></div></details></div><div class='bar'><button class='primary' onclick='download()'>Save answers file</button><span class='state' id='count'></span></div><div class='foot'>Saving downloads <code>s1_answers.json</code>. Put it in <code>02_harness/spikes/s1/answers/</code>, then double click <code>RUN_M1.bat</code> and choose the hand pasted S1 option, or send the file to Claude. Replies also stay in this browser until you clear it. The expected answers were written on 24 August and are not in this page.</div><script>
+var KEY='cynqra_s1_v2_26sep2026';
+function load(){try{return JSON.parse(localStorage.getItem(KEY)||'{}')}catch(e){return {}}}
+function save(){var d={};document.querySelectorAll('[data-k]').forEach(function(el){d[el.dataset.k]=el.value});try{localStorage.setItem(KEY,JSON.stringify(d))}catch(e){}refresh()}
+function refresh(){var n=0;document.querySelectorAll('textarea[data-main]').forEach(function(el){var s=document.getElementById('st_'+el.dataset.k);if(el.value.trim()){n++;s.textContent='Reply saved';s.className='state ok'}else{s.textContent='No reply yet';s.className='state'}});document.getElementById('count').textContent=n+' of 10 replies'}
+function copyBlock(id,btn){var t=document.getElementById(id).innerText;function ok(){btn.textContent='Copied';btn.classList.add('copied');setTimeout(function(){btn.textContent='Copy';btn.classList.remove('copied')},1500)}
+if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(t).then(ok,function(){manual()})}else{manual()}
+function manual(){var r=document.createRange();r.selectNodeContents(document.getElementById(id));var s=window.getSelection();s.removeAllRanges();s.addRange(r);try{document.execCommand('copy');ok()}catch(e){btn.textContent='Select and copy'}}}
+function download(){var d={prompt_version:'v2_26sep2026',model:document.getElementById('model').value.trim(),saved_at:new Date().toISOString(),answers:{}};document.querySelectorAll('textarea[data-k]').forEach(function(el){if(el.value.trim())d.answers[el.dataset.k]=el.value});var b=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='s1_answers.json';document.body.appendChild(a);a.click();a.remove()}
+(function(){var d=load();document.querySelectorAll('[data-k]').forEach(function(el){if(d[el.dataset.k])el.value=d[el.dataset.k];el.addEventListener('input',save)});refresh()})();
+</script></div></body></html>
