@@ -6,6 +6,7 @@ whole journey through the real engine, gateway, verification and deployment.
 """
 from __future__ import annotations
 
+import json
 import os
 import unittest
 
@@ -156,6 +157,35 @@ class FileBlockTests(unittest.TestCase):
         self.assertIn("no files in the required layout", seen[1][0])
         self.assertEqual(seen[1][1], 0.4)
         self.assertEqual((usage["tokens_in"], usage["tokens_out"]), (20, 10))
+
+    def test_blank_objective_fields_are_inferred_in_one_short_follow_up(self):
+        from cynqra import intelligence
+        first = {"product": "Cake order tracker", "target_customer": "Bakery staff", "primary_outcome": "No lost orders",
+                 "business_outcome": "Fewer refunds", "success_criteria": "", "constraints": "Internal only",
+                 "priorities": "", "inferred_fields": ["business_outcome"], "missing_fields": ["success_criteria"]}
+        second = {"success_criteria": "Every custom order is logged and none is missed at pickup",
+                  "priorities": "Logging orders first, then the due soon view"}
+        seen = []
+
+        def fake(prompt, **kw):
+            seen.append((prompt, kw.get("schema")))
+            reply = first if len(seen) == 1 else second
+            return {"text": json.dumps(reply), "tokens_in": 100, "tokens_out": 50, "estimated": False, "error": None}
+        saved = intelligence.model_adapter.complete
+        intelligence.model_adapter.complete = fake
+        os.environ["CYNQRA_LOCAL_BASE_URL"] = "http://127.0.0.1:9/v1"
+        try:
+            data, usage = ModelSource().structure_objective("My staff lose cake orders.")
+        finally:
+            intelligence.model_adapter.complete = saved
+        self.assertEqual(len(seen), 2)
+        self.assertIn("success_criteria, priorities", seen[1][0])
+        self.assertEqual(sorted(seen[1][1]["required"]), ["priorities", "success_criteria"])
+        self.assertFalse(seen[1][1]["additionalProperties"])
+        self.assertEqual(data["priorities"], second["priorities"])
+        self.assertEqual(data["inferred_fields"], ["business_outcome", "success_criteria", "priorities"])
+        self.assertEqual(data["missing_fields"], [])
+        self.assertEqual((usage["tokens_in"], usage["tokens_out"]), (200, 100))
 
     def test_json_before_code_with_braces_still_parses(self):
         self.assertEqual(_parse_json('Sure.\n{"a": 1}\n=== FILE: x.py ===\nd = {1: 2}\n=== END FILE ==='), {"a": 1})

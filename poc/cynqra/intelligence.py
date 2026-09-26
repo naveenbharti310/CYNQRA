@@ -345,6 +345,29 @@ class ModelSource:
 
     def structure_objective(self, messy: str) -> tuple[dict, dict]:
         data, usage = self._call(self.prompt_v2 + messy + "\n", max_tokens=1500, schema=SCHEMAS["objective"])
+        empty = [k for k in OBJECTIVE_KEYS if not str(data.get(k) or "").strip()]
+        if empty:
+            # Small models (and strongly compressed ones) leave implied fields blank instead of inferring them. One
+            # short follow-up for just those fields gives the founder a reading to check instead of a blank to fill.
+            fields = {k: str(data.get(k) or "") for k in OBJECTIVE_KEYS}
+            prompt = ("A founder described what they want built:\n" + messy.strip() + "\n\nThe structured objective so "
+                      "far:\n" + json.dumps(fields, indent=1) + "\n\nThese fields are still empty: " + ", ".join(empty) +
+                      ". For each one, write the most reasonable reading of the founder's words, one or two sentences, "
+                      "without adding features, users or constraints they did not state or clearly imply. The founder "
+                      "will check each one. Return JSON with exactly these keys.")
+            schema = _closed({"type": "object", "properties": {k: S for k in empty}, "required": empty})
+            try:
+                more, usage2 = self._call(prompt, max_tokens=600, schema=schema)
+            except IntelligenceError:
+                return data, usage  # the founder fills the blanks on the confirm screen, as before
+            filled = [k for k in empty if str(more.get(k) or "").strip()]
+            data = dict(data)
+            for k in filled:
+                data[k] = str(more[k]).strip()
+            data["inferred_fields"] = list(dict.fromkeys(list(data.get("inferred_fields") or []) + filled))
+            data["missing_fields"] = [k for k in (data.get("missing_fields") or []) if k not in filled]
+            for k in ("tokens_in", "tokens_out", "units"):
+                usage[k] += usage2[k]
         return data, usage
 
     def plan(self, objective: dict, note: str = "") -> tuple[dict, dict]:

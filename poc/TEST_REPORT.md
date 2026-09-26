@@ -187,7 +187,7 @@ Measured on those machines (Windows Server 2025, macOS 26 on Apple M1, Ubuntu 24
 | Self-test: bundled Python and llama-server run, app server, engine journey with real tests and deploy, model files on Hugging Face | 7 of 7 | 7 of 7 | 7 of 7 |
 | App window loads Cynqra (Edge app mode, pywebview, Chrome) | pass | pass | pass |
 | Launch like a user (Start menu, open Cynqra.app, menu entry), Quit stops app and llama-server | pass | pass | pass |
-| Real model: download, llama-server, objective, code that passes its own tests | pass (Qwen3.6 35B-A3B 2-bit: 23 tests right first time) | the emulated GPU froze (below) | pass (Qwen3.6 35B-A3B 2-bit: 15 tests right first time; one objective field left for the founder) |
+| Real model: download, llama-server, objective, code that passes its own tests | pass (Qwen3.6 35B-A3B 2-bit: 23 tests right first time) | pass (Qwen3.5 4B on Metal, 7 GB machine: 14 tests passing after two fixes; reads 49, writes 12.9 tokens/s) | pass (Qwen3.6 35B-A3B 2-bit: 15 tests right first time) |
 | Uninstall keeps the models; reinstall and self-test in `Program Files Tést\Cynqra Ü` with data in `Données de l'équipe` | pass | | |
 
 The first real runs found three defects, each fixed and covered by a test:
@@ -200,7 +200,12 @@ The first real runs found three defects, each fixed and covered by a test:
   then gave no answer to a 150-token request within the hour. A GPU that loads a model but cannot
   compute would freeze a founder's first run, so every GPU start is now followed by a 4-token test
   answer; a start that cannot answer within 2 minutes, or answers slower than 1.5 tokens/s, falls
-  back to the processor by itself.
+  back to the processor by itself. On the next run the same Mac passed that test and did the whole
+  check on Metal.
+- Qwen3.6 35B-A3B 2-bit on Linux left two of the seven objective fields empty (success criteria,
+  priorities) on one run and one on another. When fields come back empty, Cynqra now asks the
+  model once more, briefly, to infer just those from the founder's words; they are marked
+  Inferred for the founder to check.
 
 Model race on the 16 GB Linux machine, CPU only, Cynqra's own work (tokens per second are
 llama-server's own timings): Qwen3.5 9B passed after one fix, reading 12 and writing 5.1;
@@ -210,6 +215,5 @@ speed; gpt-oss 20B passed first time, reading 17 and writing 9.1; the smallest 2
 The recommended model now follows memory: Qwen3.6 35B-A3B at 4, 3 and 2 bits for 32, 24 and 16 GB.
 
 Unrun here: a GPU (GitHub's standard machines have none), so the Vulkan path is exercised only
-up to device detection and the fallback to the processor; the macOS real-model check on the
-7 GB machine; Gatekeeper and SmartScreen prompts, which appear only for a file downloaded by a
+up to device detection and the fallback to the processor; Gatekeeper and SmartScreen prompts, which appear only for a file downloaded by a
 browser. Whole end-to-end runs with a real model on Windows and Linux are in progress.
