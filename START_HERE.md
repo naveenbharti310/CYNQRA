@@ -30,24 +30,27 @@ organization fail. Read it as a test fixture.
 ```
 START_HERE.md          this file
 RUNBOOK.md             how to run everything on your machine
-STATE_OF_PLAY.md       what is proven, what is not, and what is next
+M1_RESTART_26SEP2026.md  where things stand now; supersedes STATE_OF_PLAY.md
+STATE_OF_PLAY.md       the 25 August record: what was proven, what was not
 
 00_canon/              the company documents, five books plus live status pages
-01_history/            the runs as reading material: reports, the void notice, the audit,
-                       the spike memos, the event log and the measured numbers
 02_harness/            the working tree exactly as it ran: spike runners, verifier kit,
-                       protocol templates, and the run 002 records
+                       protocol templates, the G0 material and the run 002 records
 03_pages/              browser readable reports, open any of them by double click
-04_prior_builds/       earlier document releases and full tree exports, for provenance
-poc/                   the working proof of concept: engine, UI, mockups, tests, demo video
-RUN_M1.bat             double click to run the M1 spikes on Windows
+poc/                   the working proof of concept: engine, UI, mockups, tests, real model test
+RUN_M1.bat             double click to run the M1 spikes, or the POC against a real model
 RUN_POC.bat            double click to start the POC on Windows
 ```
 
-One thing to know about that layout. `01_history/` is a reading copy. The originals live
-under `02_harness/run_002/`, because the verifier kit reruns its tests against those exact
-files. Do not move `run_002` out of `02_harness` or the kit tests lose their inputs. That
-is not a guess, it is a mistake that was made and caught while building this package.
+The run records live under `02_harness/`. The verifier kit reruns its tests against the
+files in `02_harness/run_002/`, so do not move that folder.
+
+Removed on 26 September to keep the repository clean, all recoverable from the first
+commit (`git show 29f8ca2:<path>`): `01_history/`, a reading copy whose 19 files were byte
+for byte copies of originals in `02_harness/`; `04_prior_builds/`, three earlier release
+zips, one identical to the PDFs in `00_canon/`, now kept by git history; `MANIFEST.txt`,
+a 25 August file list that git now replaces; five HTML pages in `02_harness/` identical to
+their copies in `03_pages/`; the run 002 export zip; and a server log.
 
 ## How to read the canon
 

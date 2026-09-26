@@ -1,4 +1,0 @@
-intervention_id,created_at,action,counts,reason,related_decision_id,related_event_id,notes
-int_001,2026-08-24T16:33:30+05:30,confirm_objective,yes,Day 1 founder confirmation of structured objective,,evt_003,Inherited from run 001. Still counts.
-int_002,2026-08-24T16:56:00+05:30,reject_and_amend,yes,Rejected clock as stuck. Required a named reason.,decision_001,,Inherited from run 001. Still counts. Not re-asked.
-int_003,2026-08-25T20:31:31+05:30,reject,no,Day 8 drill. HIGH external message. Rejected on purpose. No send.,decision_002,evt_034,Audit: does not count. Operator executed Day 8 reject. Founder did not see the Approval.
