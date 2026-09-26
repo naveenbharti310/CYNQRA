@@ -96,6 +96,43 @@ jobs:
           if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a $CYNQRA --window-test; else $CYNQRA --window-test; fi
       - name: A real open model on this machine (download, llama-server, objective, code that passes its tests)
         run: $CYNQRA --check-model ${{ matrix.model }}
+      - name: Launch like a user (Start menu shortcut), let the window load, Quit
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $data = "$env:LOCALAPPDATA\Cynqra"
+          Remove-Item "$data\instance.json" -ErrorAction SilentlyContinue
+          $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut("$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Cynqra.lnk")
+          "Shortcut: $($lnk.TargetPath) $($lnk.Arguments)"
+          $p = Start-Process $lnk.TargetPath -ArgumentList $lnk.Arguments -WorkingDirectory $lnk.WorkingDirectory -PassThru
+          for ($i = 0; $i -lt 60 -and -not (Test-Path "$data\instance.json"); $i++) { Start-Sleep 1 }
+          $url = (Get-Content "$data\instance.json" | ConvertFrom-Json).url
+          Start-Sleep 15
+          $st = Invoke-RestMethod "$url/api/state"
+          "desktop=$($st.desktop) model=$($st.runtime.model) state=$($st.runtime.state)"
+          Invoke-RestMethod -Method Post "$url/api/app/quit" -Body '{}' -ContentType 'application/json'
+          $p.WaitForExit(30000) | Out-Null
+          if (-not $p.HasExited) { throw "Cynqra did not exit after Quit" }
+          if (Get-Process llama-server -ErrorAction SilentlyContinue) { throw "llama-server still running after Quit" }
+          Get-Content "$data\app.log" -Tail 15
+          "PASS: launched from the Start menu, served the app, quit cleanly"
+      - name: Launch like a user (open Cynqra.app), let the window load, Quit
+        if: runner.os != 'Windows'
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then DATA="$HOME/Library/Application Support/Cynqra"; else DATA="$HOME/.local/share/cynqra"; fi
+          rm -f "$DATA/instance.json"
+          if [ "$RUNNER_OS" = "macOS" ]; then open ~/Applications/Cynqra.app; else
+            EXEC=$(grep '^Exec=' ~/.local/share/applications/cynqra.desktop | cut -d= -f2-); (xvfb-run -a "$EXEC" &) ; fi
+          for i in $(seq 60); do [ -f "$DATA/instance.json" ] && break; sleep 1; done
+          URL=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['url'])" "$DATA/instance.json")
+          sleep 15
+          curl -sf "$URL/api/state" | python3 -c "import json,sys; d=json.load(sys.stdin); r=d['runtime']; print('desktop', d['desktop'], 'model', r['model'], 'state', r['state'])"
+          curl -sf -X POST -H 'Content-Type: application/json' -d '{}' "$URL/api/app/quit"; echo
+          for i in $(seq 30); do pgrep -f "app/desktop.py" >/dev/null || break; sleep 1; done
+          if pgrep -f "app/desktop.py"; then echo "Cynqra did not exit after Quit"; exit 1; fi
+          if pgrep -x llama-server; then echo "llama-server still running after Quit"; exit 1; fi
+          tail -15 "$DATA/app.log"
+          echo "PASS: launched like a user, served the app, quit cleanly"
       - name: Collect
         if: always()
         run: |

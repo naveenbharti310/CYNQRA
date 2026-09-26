@@ -16,6 +16,7 @@ import platform
 import re
 import shutil
 import socket
+import ssl
 import subprocess
 import sys
 import threading
@@ -92,9 +93,36 @@ def recommended(ram_gb: float | None) -> str:
     return DEFAULT_BIG if (ram_gb or 0) >= BY_ID[DEFAULT_BIG]["min_gb"] else DEFAULT_SMALL
 
 
+_TLS: list = []  # the TLS context that works on this machine, once found
+
+
+def _tls_contexts() -> list:
+    """The system's certificates first; then the certifi bundle shipped with the app, for machines where the
+    bundled Python cannot find the system's (some Linux distributions, some macOS setups)."""
+    out = [ssl.create_default_context()]
+    try:
+        import certifi
+        out.append(ssl.create_default_context(cafile=certifi.where()))
+    except ImportError:
+        pass
+    return out
+
+
 def _request(url: str, method: str = "GET", headers: dict | None = None, timeout: float = 30.0):
-    return urllib.request.urlopen(urllib.request.Request(url, method=method, headers={
-        "User-Agent": "cynqra-desktop", **(headers or {})}), timeout=timeout)
+    req = urllib.request.Request(url, method=method, headers={"User-Agent": "cynqra-desktop", **(headers or {})})
+    if not url.startswith("https:"):
+        return urllib.request.urlopen(req, timeout=timeout)
+    tries = _TLS or _tls_contexts()
+    for i, ctx in enumerate(tries):
+        try:
+            r = urllib.request.urlopen(req, timeout=timeout, context=ctx)
+            if not _TLS:
+                _TLS.append(ctx)
+            return r
+        except urllib.error.URLError as exc:
+            if not isinstance(exc.reason, ssl.SSLCertVerificationError) or i == len(tries) - 1:
+                raise
+    raise ModelRuntimeError("no TLS context")
 
 
 def resolve(model: dict) -> dict:

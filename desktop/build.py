@@ -38,6 +38,7 @@ PBS_URL = "https://github.com/astral-sh/python-build-standalone/releases/downloa
 LLAMA_TAG = "b11201"
 LLAMA_URL = "https://github.com/ggml-org/llama.cpp/releases/download/" + LLAMA_TAG
 PYWEBVIEW = "pywebview==6.2.1"
+CERTIFI = "certifi==2026.7.22"
 
 TARGETS = {
     "windows-x64": {"pbs": "x86_64-pc-windows-msvc", "llama": {"cpu": "win-cpu-x64.zip", "vulkan": "win-vulkan-x64.zip"}},
@@ -229,9 +230,9 @@ def stage_for(target: str, cache: Path) -> tuple[Path, Path]:
     stage.mkdir(parents=True)
     py = add_python(target, stage, cache)
     add_llama(target, stage, cache)
-    if target.startswith("macos"):
-        subprocess.run([str(py), "-m", "pip", "install", "--disable-pip-version-check", "--no-warn-script-location",
-                        PYWEBVIEW], check=True)
+    extra = [CERTIFI] + ([PYWEBVIEW] if target.startswith("macos") else [])
+    subprocess.run([str(py), "-m", "pip", "install", "--disable-pip-version-check", "--no-warn-script-location", *extra],
+                   check=True)
     add_app(stage, py)
     shutil.copy2(DESKTOP / "icon" / "cynqra.png", stage / "cynqra.png")
     return stage, py

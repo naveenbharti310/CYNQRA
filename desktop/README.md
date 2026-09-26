@@ -17,7 +17,7 @@ Output: `dist/Cynqra-Setup-<v>-windows-x64.exe`, `dist/Cynqra-<v>-macos-arm64.dm
 | Python 3.12 (relocatable, stripped; Tk and IDLE removed) | python-build-standalone | `PBS_TAG`, checked against its `SHA256SUMS` |
 | `llama-server`: CPU and Vulkan builds (Windows, Linux), Metal build (macOS) | llama.cpp releases | `LLAMA_TAG`, checked against GitHub's published SHA-256 |
 | Visual C++ runtime DLLs that llama-server imports (Windows) | the build machine's System32 | found by reading llama-server's PE import table |
-| pywebview, for a native window (macOS only) | PyPI | `PYWEBVIEW` |
+| pywebview, for a native window (macOS only); certifi, a fallback for HTTPS certificates | PyPI | `PYWEBVIEW`, `CERTIFI` |
 | The app: `poc/desktop.py`, `poc/cynqra/`, `poc/ui/`, `poc/scenarios/`, `poc/live_check.py` | this repository | precompiled |
 
 Layout: `python/`, `llama/<cpu|vulkan|metal>/`, `app/`. On Windows the Start menu shortcut runs
