@@ -432,9 +432,17 @@ class Engine:
         self.event("objective.changed", "objective", "obj_1", {"version": obj["version"], "status": "confirmed"},
                    actor="founder", actor_type="human", authority="founder")
         self._instantiate_org()
-        self._plan()
+        try:
+            self._plan()
+        except IntelligenceError as exc:
+            obj["status"] = "draft"
+            self.store.put("objective", "obj_1", obj)
+            self._set_meta(notice=f"Planning failed: {exc}. Nothing was invented. Confirm again to retry.")
+            raise
 
     def _instantiate_org(self) -> None:
+        if self.store.get("organization", "org_1"):
+            return
         label = self.intel.label
         org = {"id": "org_1", "company_id": self.cid, "template": "fixed_mvp_4", "version": 1, "status": "proposed",
                "workers": [w["id"] for w in TEMPLATE], "reports_to": REPORTS_TO,
@@ -452,8 +460,8 @@ class Engine:
             self.store.put("worker", t["id"], w)
             self.event("worker.hired", "worker", t["id"], {"role": t["role"], "intelligence": label})
 
-    def _plan(self) -> None:
-        plan, usage = self.intel.plan(self.objective())
+    def _plan(self, note: str = "") -> None:
+        plan, usage = self.intel.plan(self.objective(), note=note)
         self._record_call("plan", "w_pm", "plan", usage)
         order = []
         for i, t in enumerate(plan["tasks"]):
@@ -486,9 +494,9 @@ class Engine:
             self.store.put("company", self.cid, company)
             self.event("state.changed", "company", self.cid, {"stage": "MVP", "phase": "running"}, actor="founder",
                        actor_type="human", authority="founder")
-            self._set_meta(phase="running", started_at=time.time())
+            self._set_meta(phase="running", started_at=time.time(), notice="")
         else:
-            self._plan()
+            self._plan(note=d.get("note", ""))
 
     # --- the run --------------------------------------------------------------
     def step(self) -> dict:
@@ -522,6 +530,9 @@ class Engine:
                     self._save_task(t)
                     if t["attempts"] >= MAX_ATTEMPTS:
                         return self._escalate(t, f"{t['id']}: the worker kept returning invalid protocol objects ({exc})")
+                    if s in ("PLANNED", "BLOCKED"):
+                        # assignment or a Blocker answer failed: retry that same step, not the work
+                        return {"did": "retry", "task": t["id"], "why": str(exc)}
                     t.update({"status": "REWORK", "feedback": f"Your reply was not a valid protocol object: {exc}"})
                     self._save_task(t)
                     return {"did": "rework", "task": t["id"], "why": str(exc)}
@@ -591,9 +602,15 @@ class Engine:
         if t["work_calls"] == 0:
             self.event("task.started", "task", t["id"], {"owner": owner}, actor=owner, actor_type="worker",
                        correlation_id=t["id"])
+        out = self._ws(owner, t["id"]) / "out"
+        previous = {p.relative_to(out).as_posix(): p.read_text(encoding="utf-8", errors="replace")
+                    for p in sorted(out.rglob("*")) if p.is_file()}
+        repo = sorted(p.relative_to(self.paths["integration"]).as_posix()
+                      for p in self.paths["integration"].rglob("*") if p.is_file() and "__pycache__" not in p.parts)
         result, usage = self.intel.work(t, worker=owner, objective=self.objective()["structured"], rules=self.rules(),
                                         handoff=t.get("handoff") or {}, inbox=self._inbox(t), feedback=t.get("feedback", ""),
-                                        answers=t.get("answers", []), call_index=t["work_calls"])
+                                        answers=t.get("answers", []), call_index=t["work_calls"], previous=previous,
+                                        repo_files=repo)
         t["work_calls"] += 1
         self._save_task(t)
         self._record_call(t["id"], owner, "work", usage)
@@ -610,20 +627,25 @@ class Engine:
                        correlation_id=t["id"], protocol_hash=blocker["object_hash"])
             return {"did": "blocked", "task": t["id"]}
         if kind in ("spec", "code"):
-            files = result.get("files") or {}
-            if not files:
-                raise IntelligenceError(f"{t['id']}: work returned no files")
-            out = self._ws(owner, t["id"]) / "out"
-            for old in out.iterdir():
-                if old.is_file():
-                    old.unlink()
+            files = result.get("files")
+            if not isinstance(files, dict) or not files:
+                raise ProtocolError("a done result needs files: an object of file name to full file content")
+            bad = [k for k, v in files.items() if not isinstance(v, str)]
+            if bad:
+                raise ProtocolError(f"file content must be text: {', '.join(map(str, bad))}")
+            shutil.rmtree(out)
+            out.mkdir()
             written = []
             for name, text in files.items():
-                g = self.gateway(owner, t["id"], "write_file", target=name, content=text)
+                g = self.gateway(owner, t["id"], "write_file", target=str(name), content=text)
                 if g["status"] != "executed":
-                    t.update({"status": "REWORK", "feedback": f"write refused: {g['policy']['reason']}"})
+                    if self.budget()["state"] == "breaker":
+                        return {"did": "paused", "task": t["id"], "why": "budget breaker open"}
                     t["attempts"] += 1
+                    t.update({"status": "REWORK", "feedback": f"write refused: {g['policy']['reason']}"})
                     self._save_task(t)
+                    if t["attempts"] >= MAX_ATTEMPTS:
+                        return self._escalate(t, f"{t['id']}: writes kept being refused ({g['policy']['reason']})")
                     return {"did": "write_refused", "task": t["id"]}
                 written.append(g["result"])
             done = self.send("Handoff", {"artifacts": [w["file"] for w in written], "context_ref": f"result of {t['id']}",
@@ -676,7 +698,7 @@ class Engine:
             extra["deployment_id"] = rid
             evidence.append(f"{len(pre.get('test_ids', []))} tests passed in the build, preview health and smoke passed")
             side = result.get("side_action")
-            if side:
+            if isinstance(side, dict) and side:
                 g = self.gateway(owner, t["id"], side.get("action_type", ""), target=side.get("target", ""))
                 extra["side_action"] = {"summary": side.get("summary", ""), "status": g["status"],
                                         "reason": g["policy"]["reason"]}
@@ -706,7 +728,7 @@ class Engine:
                            risk=t["risk_tier"], confidence="low", cost="one more attempt",
                            evidence=[f"escalation {esc['object_hash']}"], change="A fix that makes the checks pass.",
                            task_id=t["id"], source=owner, severity="SEV-2")
-        t.update({"status": "FAILED", "decision_id": d["id"]})
+        t.update({"status": "FAILED", "failed_from": t["status"], "decision_id": d["id"]})
         self._save_task(t)
         self.event("task.failed", "task", t["id"], {"reason": why[:200]}, correlation_id=t["id"], actor=owner,
                    actor_type="worker", protocol_hash=esc["object_hash"])
@@ -745,9 +767,11 @@ class Engine:
             shutil.rmtree(vdir)
         shutil.copytree(self.paths["integration"], vdir)
         out = self._ws(owner, t["id"]) / "out"
-        for p in out.iterdir():
+        for p in out.rglob("*"):
             if p.is_file():
-                shutil.copy2(p, vdir / p.name)
+                dest = vdir / self._repo_path(p.relative_to(out))
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(p, dest)
         n = self._count("verification") + 1
         vid = f"v_{n:03d}"
         if t["kind"] == "code":
@@ -755,10 +779,22 @@ class Engine:
             passed = report["passed"]
             test_ids = [x["id"] for x in report["tests"]]
             checks = {"ran": report["ran"], "failed": report["failed"], "prior_tests_rerun": True}
-            feedback = ("Failing tests: " + ", ".join(report["failed"]) + "\n" + report["output"][-1500:]) if not passed else ""
+            if not passed:
+                why = ", ".join(report["failed"]) or ("no test_*.py at the repository root" if not report["ran"]
+                                                      else "the test run did not complete")
+                feedback = "Failing tests: " + why + "\n" + report["output"][-1500:]
+            else:
+                feedback = ""
             method = "automated tests, prior tests rerun"
+            if passed and (out / "app.py").exists():
+                contract = deploy.contract_check(vdir, self._smoke_checks(vdir))
+                checks["delivery_contract"] = contract["results"]
+                if not contract["ok"]:
+                    passed = False
+                    feedback = "The app breaks the delivery contract: " + contract["why"]
+                method += ", delivery contract"
         else:
-            docs = {p.name: p.read_text(encoding="utf-8") for p in out.iterdir() if p.is_file()}
+            docs = {p.name: p.read_text(encoding="utf-8", errors="replace") for p in out.rglob("*") if p.is_file()}
             lint = lint_documents(docs, self.objective()["structured"])
             passed = lint["passed"]
             test_ids = []
@@ -799,26 +835,35 @@ class Engine:
 
     def _integrate(self, t: dict, out: Path) -> None:
         dest_root = self.paths["integration"]
-        for p in sorted(out.iterdir()):
+        for p in sorted(out.rglob("*")):
             if not p.is_file():
                 continue
-            rel = Path("docs") / p.name if p.suffix == ".md" else Path(p.name)
+            rel = self._repo_path(p.relative_to(out))
             (dest_root / rel).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(p, dest_root / rel)
-            aid = f"{t['id']}/{p.name}"
+            aid = f"{t['id']}/{p.relative_to(out).as_posix()}"
             self.store.put("artifact", aid, {"id": aid, "task_id": t["id"], "path": str(rel).replace("\\", "/"),
                                              "hash": digest(p.read_bytes()), "by": t["owner_worker_id"]})
         self.event("action.executed", "action", f"integrate_{t['id']}", {"task_id": t["id"], "action_type": "integrate",
-                   "files": sorted(p.name for p in out.iterdir() if p.is_file())}, actor="verification",
+                   "files": sorted(p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file())}, actor="verification",
                    correlation_id=t["id"])
+
+    @staticmethod
+    def _repo_path(rel: Path) -> Path:
+        """Markdown is filed under docs/, everything else keeps its path from the repository root."""
+        if rel.suffix == ".md" and rel.parts[0] != "docs":
+            return Path("docs") / rel
+        return rel
 
     def _smoke_checks(self, folder: Path) -> list[dict]:
         f = folder / "smoke.json"
         if f.exists():
             try:
-                return json.loads(f.read_text(encoding="utf-8")).get("checks", [])
+                checks = json.loads(f.read_text(encoding="utf-8")).get("checks", [])
             except (ValueError, AttributeError):
                 return []
+            return [c for c in checks if isinstance(c, dict) and isinstance(c.get("path"), str)
+                    and c["path"].startswith("/")] if isinstance(checks, list) else []
         return [{"method": "GET", "path": "/health", "expect": 200}]
 
     # --- after founder decisions on proposals -----------------------------------
@@ -838,7 +883,10 @@ class Engine:
     def _after_escalation(self, d: dict, action: str) -> None:
         t = self.task(d["task_id"])
         if action == "approve":
-            t.update({"status": "REWORK" if t["kind"] in ("spec", "code") else "ASSIGNED", "attempts": 0})
+            back = t.get("failed_from")
+            if back not in ("PLANNED", "BLOCKED"):
+                back = "REWORK" if t["kind"] in ("spec", "code") else "ASSIGNED"
+            t.update({"status": back, "attempts": 0})
             self._save_task(t)
         else:
             self._set_meta(phase="stopped", notice=f"Run stopped by the founder at {t['id']}.")
@@ -978,6 +1026,16 @@ class Engine:
             self._intervention("kill_switch", "on" if on else "off")
             self.event("state.changed", "company", self.cid, {"frozen": bool(on), "control": "kill_switch"},
                        actor="founder", actor_type="human", authority="founder", policy_decision="DENY" if on else "ALLOW")
+            return self.meta
+
+    def resume(self) -> dict:
+        """After a model or network error: try the same step again. Nothing was written by the failed call."""
+        with self.lock:
+            self._require("stopped_error")
+            self._set_meta(phase="running", notice="")
+            self._intervention("resume", "retry after an intelligence error")
+            self.event("state.changed", "company", self.cid, {"phase": "running", "control": "resume"},
+                       actor="founder", actor_type="human", authority="founder")
             return self.meta
 
     def request_objective_change(self, fields: dict) -> dict:

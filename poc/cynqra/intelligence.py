@@ -43,33 +43,61 @@ def _parse_json(text: str):
     return None
 
 
+def _int(value, default: int) -> int:
+    try:
+        return max(0, int(float(value)))
+    except (TypeError, ValueError):
+        return default
+
+
 def validate_plan(plan: dict) -> dict:
-    """The platform owns the rubric: a kind's risk tier and owner are not the model's call."""
+    """The platform owns the rubric: a kind's risk tier and owner are not the model's call.
+
+    Task ids are renumbered t_01, t_02 in plan order and dependencies follow them, because
+    ids end up in URLs and decision ids; model text never becomes an identifier.
+    """
     if not isinstance(plan, dict) or not isinstance(plan.get("tasks"), list) or not plan["tasks"]:
         raise IntelligenceError("plan has no tasks")
+    if not all(isinstance(t, dict) for t in plan["tasks"]):
+        raise IntelligenceError("every task must be an object")
+    rename = {}
+    for i, t in enumerate(plan["tasks"], start=1):
+        old = str(t.get("id") or "").strip()
+        new = f"t_{i:02d}"
+        if old:
+            rename[old] = new
+        t["id"] = new
     ids = set()
     kinds = []
     for t in plan["tasks"]:
-        for key in ("id", "workstream_id", "kind", "owner_worker_id", "title"):
+        for key in ("workstream_id", "kind", "owner_worker_id", "title"):
             if not str(t.get(key) or "").strip():
-                raise IntelligenceError(f"task is missing {key}")
+                raise IntelligenceError(f"{t['id']} is missing {key}")
+            t[key] = str(t[key]).strip()
         if t["kind"] not in KIND_TIER:
             raise IntelligenceError(f"unknown task kind {t['kind']}")
         if t["owner_worker_id"] not in KIND_OWNERS[t["kind"]]:
             raise IntelligenceError(f"{t['id']}: {t['kind']} cannot be owned by {t['owner_worker_id']}")
         t["risk_tier"] = KIND_TIER[t["kind"]]
-        for dep in t.get("dependencies") or []:
+        deps = t.get("dependencies") or []
+        if isinstance(deps, str):
+            deps = [d for d in re.split(r"[,\s]+", deps) if d]
+        if not isinstance(deps, list):
+            raise IntelligenceError(f"{t['id']}: dependencies must be a list")
+        t["dependencies"] = []
+        for dep in deps:
+            dep = rename.get(str(dep).strip(), str(dep).strip())
             if dep not in ids:
                 raise IntelligenceError(f"{t['id']} depends on {dep}, which is not an earlier task")
+            if dep not in t["dependencies"]:
+                t["dependencies"].append(dep)
         ids.add(t["id"])
         kinds.append(t["kind"])
-        t.setdefault("inputs", "")
-        t.setdefault("expected_output", "")
-        t.setdefault("tools", [])
-        t.setdefault("budget", 10)
-        t.setdefault("deadline_day", 1)
-        t.setdefault("verification_method", "")
-        t.setdefault("dependencies", [])
+        for key in ("inputs", "expected_output", "verification_method"):
+            t[key] = str(t.get(key) or "")
+        t["tools"] = [str(x) for x in t.get("tools") or []] if isinstance(t.get("tools"), list) else []
+        t["budget"] = _int(t.get("budget"), 10)
+        t["deadline_day"] = _int(t.get("deadline_day"), 1)
     for kind, n in (("review_merge", 1), ("deploy", 1)):
         if kinds.count(kind) != n:
             raise IntelligenceError(f"plan needs exactly {n} {kind} task")
@@ -77,8 +105,8 @@ def validate_plan(plan: dict) -> dict:
         raise IntelligenceError("deploy must be the last task")
     if "code" not in kinds:
         raise IntelligenceError("plan has no code task")
-    ws = plan.get("workstreams") or []
-    known = {w.get("id") for w in ws}
+    ws = [w for w in (plan.get("workstreams") or []) if isinstance(w, dict) and w.get("id")]
+    known = {w["id"] for w in ws}
     for t in plan["tasks"]:
         if t["workstream_id"] not in known:
             ws.append({"id": t["workstream_id"], "name": t["workstream_id"]})
@@ -115,7 +143,7 @@ class ScriptedSource:
                              "Switch to live mode to build your own.")
         return out, self._usage()
 
-    def plan(self, objective: dict) -> tuple[dict, dict]:
+    def plan(self, objective: dict, note: str = "") -> tuple[dict, dict]:
         return validate_plan(json.loads(json.dumps(self.data["plan"]))), self._usage()
 
     def assign(self, task: dict, **_) -> tuple[dict, dict]:
@@ -145,9 +173,15 @@ ROLE_TEXT = {
     "w_eng_b": "You are Engineer B. You write Python and unittest tests inside your own workspace only.",
 }
 
-DELIVERY_CONTRACT = ("The product is a Python standard library web app: app.py serves on the port in the PORT "
-                     "environment variable and answers GET /health with 200. Tests are unittest files named "
-                     "test_*.py that pass with `python -m unittest discover`. No third party packages.")
+DELIVERY_CONTRACT = ("Delivery contract. The product is a Python 3.10 standard library web app. No third party "
+                     "packages. app.py sits at the repository root and starts its HTTP server only under "
+                     "`if __name__ == \"__main__\":`, on 127.0.0.1 and the port in the PORT environment variable. "
+                     "It answers GET /health with 200 and GET / with 200 and the product's web page. It keeps its "
+                     "data in the JSON file named by the DATA_FILE environment variable. Tests are unittest files "
+                     "named test_*.py at the repository root; they must not need the network, and a test that "
+                     "starts a server uses port 0. Every test in the repository is rerun with "
+                     "`python -m unittest discover` on each change. File names are paths relative to the "
+                     "repository root; Markdown documents are filed under docs/.")
 
 
 class ModelSource:
@@ -189,20 +223,29 @@ class ModelSource:
         data, usage = self._call(self.prompt_v2 + messy + "\n", max_tokens=1500)
         return data, usage
 
-    def plan(self, objective: dict) -> tuple[dict, dict]:
+    def plan(self, objective: dict, note: str = "") -> tuple[dict, dict]:
         prompt = (ROLE_TEXT["w_pm"] + "\n" + self._ctx(objective, []) + "\n" + DELIVERY_CONTRACT + "\n\n"
                   "Plan the work for the fixed organization: w_cto, w_pm, w_eng_a, w_eng_b. Use only these task kinds:\n"
                   "spec (owner w_pm): spec.md and acceptance.md.\n"
                   "decision (owner w_pm): exactly the one product rule the objective leaves open, for the founder.\n"
-                  "code (owner w_eng_a or w_eng_b): 2 or 3 tasks, each producing Python files and test_*.py.\n"
+                  "code (owner w_eng_a or w_eng_b): 2 or 3 tasks, each producing Python files and test_*.py. "
+                  "Exactly one code task owns app.py and the web page.\n"
                   "review_merge (owner w_cto): exactly one, after all code tasks.\n"
                   "deploy (owner w_cto): exactly one, the last task.\n"
                   "Ids t_01, t_02 and so on. dependencies may only name earlier tasks.\n"
+                  + (f"The founder rejected the previous plan: {note}\n" if note else "") +
                   'Return JSON: {"workstreams": [{"id", "name"}], "tasks": [{"id", "workstream_id", "kind", '
                   '"owner_worker_id", "title", "inputs", "expected_output", "dependencies", "tools", "budget", '
                   '"deadline_day", "verification_method"}]}')
         data, usage = self._call(prompt, max_tokens=3000)
-        return validate_plan(data), usage
+        try:
+            return validate_plan(data), usage
+        except IntelligenceError as exc:
+            data2, usage2 = self._call(prompt + f"\n\nYour previous plan was refused: {exc}. Return a corrected plan.",
+                                       max_tokens=3000)
+            for k in ("tokens_in", "tokens_out", "units"):
+                usage[k] += usage2[k]
+            return validate_plan(data2), usage
 
     def assign(self, task: dict, objective: dict, rules: list[str], artifact_index: list[str], **_) -> tuple[dict, dict]:
         prompt = (ROLE_TEXT["w_pm"] + "\n" + self._ctx(objective, rules) + "\n" + DELIVERY_CONTRACT + "\n\n"
@@ -214,13 +257,17 @@ class ModelSource:
         return self._call(prompt, max_tokens=1500)
 
     def work(self, task: dict, worker: str, objective: dict, rules: list[str], handoff: dict,
-             inbox: dict[str, str], feedback: str = "", answers: list[dict] | None = None, **_) -> tuple[dict, dict]:
+             inbox: dict[str, str], feedback: str = "", answers: list[dict] | None = None,
+             previous: dict[str, str] | None = None, repo_files: list[str] | None = None, **_) -> tuple[dict, dict]:
         files = "\n".join(f"--- {k} ---\n{v}" for k, v in inbox.items()) or "none"
         extra = ""
         if answers:
             extra += "\nAnswers to your Blockers:\n" + "\n".join(a.get("acceptance_check", "") for a in answers)
         if feedback:
             extra += "\nVerification sent this back. Fix it:\n" + feedback
+            if previous:
+                extra += ("\nYour previous files, to fix rather than rewrite from nothing:\n"
+                          + "\n".join(f"--- {k} ---\n{v}" for k, v in previous.items()))
         kind = task["kind"]
         if kind in ("spec", "code"):
             shape = ('{"result": "done", "summary": "...", "files": {"name.ext": "full file content"}, '
@@ -229,10 +276,11 @@ class ModelSource:
         else:
             shape = ('{"result": "proposal", "problem": "...", "recommendation": "...", "evidence_refs": [], '
                      '"cost": "...", "confidence": "low, medium or high", "what_would_change_this": "..."}')
+        repo = f"Files already in the repository: {json.dumps(repo_files or [])}\n" if kind == "code" else ""
         prompt = (ROLE_TEXT.get(worker, "") + "\n" + self._ctx(objective, rules) + "\n" + DELIVERY_CONTRACT + "\n\n"
                   f"Task {task['id']}: {task['title']}. Expected output: {task['expected_output']}.\n"
                   f"Handoff: {json.dumps({k: handoff.get(k) for k in ('acceptance_check', 'context_ref', 'artifacts')})}\n"
-                  f"Files handed to you:\n{files}\n{extra}\n"
+                  f"{repo}Files handed to you:\n{files}\n{extra}\n"
                   "If a fact you need is missing and you would have to guess it, raise a Blocker instead.\n"
                   f"Return one JSON object: {shape}")
         return self._call(prompt, max_tokens=8000 if kind == "code" else 3000)

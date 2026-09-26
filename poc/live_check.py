@@ -6,8 +6,9 @@
   python poc/live_check.py --max-usd 5 --objective "one founder sentence"
 
 Every model call goes through cynqra/model_adapter.py against the provider's real API.
-A shell command model (CYNQRA_S1_MODEL_CMD) is refused: its tokens are estimated and it
-may not be a model at all.
+A shell command model (CYNQRA_S1_MODEL_CMD) is refused unless --allow-cmd is given; then
+the report says so, tokens are estimated, no dollars are counted and the dollar cap does
+not apply, and counts_as_measured_result is false. tests/model_bridge.py is such a command.
 
 The founder's decisions are approved automatically, the same way tests/helpers.run_journey
 does it, and every one is listed in the report. The run passes only when the product the
@@ -56,7 +57,8 @@ PRICES = {
     "gpt-4o-mini": (0.15, 0.60),
 }
 WORST = (10.00, 50.00)
-UNRUN_MARKERS = ("HTTP 4", "HTTP 5", "network error", "No model", "refused", "URLError", "timed out")
+UNRUN_MARKERS = ("HTTP 4", "HTTP 5", "network error", "No model", "refused (category", "URLError", "timed out",
+                 "model command exited")
 
 
 def price(model: str) -> tuple[float, float]:
@@ -100,11 +102,13 @@ def health(url: str | None) -> dict:
         return {"url": url, "status": None, "error": str(exc)[:200]}
 
 
-def run(objective: str, max_usd: float, cap_units: int, data_dir: Path, log=print) -> dict:
+def run(objective: str, max_usd: float, cap_units: int, data_dir: Path, log=print, allow_cmd: bool = False) -> dict:
     resolved = model_adapter.resolve()
+    measured = bool(resolved) and resolved["kind"] != "cmd"
     report = {"started_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "objective": objective,
-              "max_usd": max_usd, "model": resolved, "effort": os.environ.get("CYNQRA_EFFORT") or "model default"}
-    if resolved is None or resolved["kind"] == "cmd":
+              "max_usd": max_usd, "model": resolved, "effort": os.environ.get("CYNQRA_EFFORT") or "model default",
+              "counts_as_measured_result": measured}
+    if resolved is None or (resolved["kind"] == "cmd" and not allow_cmd):
         report.update(outcome="UNRUN", reason="No real model API key. Set ANTHROPIC_API_KEY or OPENAI_API_KEY.")
         return report
 
@@ -113,7 +117,7 @@ def run(objective: str, max_usd: float, cap_units: int, data_dir: Path, log=prin
     decisions, steps = [], []
 
     def cost() -> float:
-        return spend(e.store.all("call"))
+        return spend(e.store.all("call")) if measured else 0.0
 
     def finish(outcome: str, reason: str) -> dict:
         calls = e.store.all("call")
@@ -136,7 +140,8 @@ def run(objective: str, max_usd: float, cap_units: int, data_dir: Path, log=prin
 
     try:
         e.create_company("Live check", "live")
-        log(f"model: {resolved['label']} ({resolved['kind']}), spend cap ${max_usd:.2f}")
+        log(f"model: {resolved['label']} ({resolved['kind']}), "
+            + (f"spend cap ${max_usd:.2f}" if measured else "command model: tokens estimated, no dollar cap"))
         obj = e.draft_objective(objective)
         log(f"objective structured: {len(obj['structured'])} fields, inferred {obj['inferred_fields']}, "
             f"missing {obj['missing_fields']}  ${cost():.3f}")
@@ -148,7 +153,7 @@ def run(objective: str, max_usd: float, cap_units: int, data_dir: Path, log=prin
         if e.meta["phase"] == "stopped_error":
             raise RuntimeError(e.meta.get("notice", "planning failed"))
         for _ in range(400):
-            if cost() > max_usd:
+            if measured and cost() > max_usd:
                 e.kill_switch(True)
                 return finish("UNRUN", f"spend cap reached: ${cost():.3f} > ${max_usd:.2f}. Run stopped by the kill switch.")
             phase = e.meta["phase"]
@@ -201,7 +206,8 @@ def write(report: dict) -> Path:
     j.write_text(json.dumps(report, indent=1), encoding="utf-8")
     lines = [f"# Live check {ts}", "", f"**Outcome: {report['outcome']}**. {report.get('reason', '')}", "",
              f"Model: {(report.get('model') or {}).get('label')}, effort {report.get('effort')}. "
-             f"Spend ${report.get('usd', 0):.3f} of ${report['max_usd']:.2f} cap. "
+             + (f"Spend ${report.get('usd', 0):.3f} of ${report['max_usd']:.2f} cap. " if report["counts_as_measured_result"]
+                else "Command model: tokens are estimated, spend is not measured, not a cost result. ") +
              f"Tokens {report.get('tokens_in', 0)} in, {report.get('tokens_out', 0)} out. "
              f"{report.get('seconds', 0)} s.", "", f"Objective: {report['objective']}", ""]
     if report.get("plan"):
@@ -227,15 +233,16 @@ def main() -> int:
     ap.add_argument("--max-usd", type=float, default=3.00, help="hard spend cap; the run is killed above it")
     ap.add_argument("--cap-units", type=int, default=4000, help="POC budget cap in work units (1 unit = 1000 tokens)")
     ap.add_argument("--keep", action="store_true", help="keep the run folder under poc/live_reports/")
+    ap.add_argument("--allow-cmd", action="store_true", help="accept a command model (CYNQRA_S1_MODEL_CMD); not measured")
     args = ap.parse_args()
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     data = REPORTS / f"run_{ts}"
-    report = run(args.objective, args.max_usd, args.cap_units, data)
+    report = run(args.objective, args.max_usd, args.cap_units, data, allow_cmd=args.allow_cmd)
     path = write(report)
     if not args.keep:
         shutil.rmtree(data, ignore_errors=True)
     print(f"\n{report['outcome']}: {report.get('reason', '')}\nreport: {path}")
-    if report.get("model") is None or (report.get("model") or {}).get("kind") == "cmd":
+    if report.get("model") is None or ((report.get("model") or {}).get("kind") == "cmd" and not args.allow_cmd):
         return 2
     return {"PASS": 0, "FAIL": 1}.get(report["outcome"], 3)
 

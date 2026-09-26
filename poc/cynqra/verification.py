@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 
 LINE = re.compile(r"^(\w+) \(([\w.]+)\) \.\.\. (ok|FAIL|ERROR|skipped.*|expected failure|unexpected success)$")
+HEAD = re.compile(r"^(\w+) \(([\w.]+)\)$")  # verbose output puts a docstring on the next line
+TAIL = re.compile(r" \.\.\. (ok|FAIL|ERROR|skipped.*|expected failure|unexpected success)$")
 VERDICTS = ("VERIFIED", "REJECTED", "REQUIRES_REWORK", "REQUIRES_HUMAN", "INCONCLUSIVE")
 
 
@@ -40,12 +42,22 @@ def run_unittests(folder: Path, timeout: int = 120) -> dict:
         out = f"timed out after {timeout}s\n" + str(exc.stdout or "")
         code = -1
     tests = []
-    for line in out.splitlines():
-        m = LINE.match(line.strip())
+    pending = None
+    for raw in out.splitlines():
+        line = raw.strip()
+        m = LINE.match(line)
         if m:
             name, owner, status = m.groups()
-            module = owner.split(".")[0]
-            tests.append({"id": f"{module}.{name}", "status": "ok" if status == "ok" else status.split()[0]})
+        elif HEAD.match(line):
+            pending = HEAD.match(line).groups()
+            continue
+        elif pending and TAIL.search(line):
+            (name, owner), status = pending, TAIL.search(line).group(1)
+        else:
+            continue
+        pending = None
+        module = owner.split(".")[0]
+        tests.append({"id": f"{module}.{name}", "status": "ok" if status == "ok" else status.split()[0]})
     failed = [t["id"] for t in tests if t["status"] in ("FAIL", "ERROR")]
     ran_match = re.search(r"Ran (\d+) tests?", out)
     ran = int(ran_match.group(1)) if ran_match else len(tests)

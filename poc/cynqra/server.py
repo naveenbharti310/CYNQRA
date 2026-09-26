@@ -10,6 +10,7 @@ POST /api/decisions/<id>            {action: approve|reject|request_evidence, no
 POST /api/run/step
 POST /api/run/auto                  {on, delay}
 POST /api/killswitch                {on}
+POST /api/run/resume                retry after a model or network error
 GET  /api/replay/<task_id>
 GET  /api/graph?q=approves|owns|depends&subject=...
 GET  /api/export                    builds and downloads the export bundle
@@ -119,6 +120,8 @@ def make_server(app: App, port: int = 8750) -> ThreadingHTTPServer:
                 return self._send(200, fn())
             except (EngineError, IntelligenceError, ProtocolError, ValueError, KeyError) as exc:
                 return self._send(400, {"error": str(exc)})
+            except Exception as exc:  # noqa: BLE001 - shown to the founder, never a dropped connection
+                return self._send(500, {"error": f"{type(exc).__name__}: {exc}"})
 
         def do_GET(self):
             u = urlparse(self.path)
@@ -163,13 +166,18 @@ def make_server(app: App, port: int = 8750) -> ThreadingHTTPServer:
                 "/api/objective/confirm": e.confirm_objective,
                 "/api/run/step": e.step,
                 "/api/killswitch": lambda: e.kill_switch(bool(body.get("on"))),
+                "/api/run/resume": e.resume,
             }
             if path in routes:
                 return self._guard(routes[path])
             if path == "/api/run/auto":
+                try:
+                    delay = None if body.get("delay") is None else max(0.0, min(5.0, float(body["delay"])))
+                except (TypeError, ValueError):
+                    return self._send(400, {"error": "delay must be a number of seconds"})
                 app.auto["on"] = bool(body.get("on"))
-                if body.get("delay") is not None:
-                    app.auto["delay"] = max(0.0, min(5.0, float(body["delay"])))
+                if delay is not None:
+                    app.auto["delay"] = delay
                 return self._send(200, app.auto)
             if path == "/api/reset":
                 app.reset()
