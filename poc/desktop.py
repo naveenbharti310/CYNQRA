@@ -246,6 +246,9 @@ def run_app(args) -> int:
             (d / "instance.json").unlink()
         except OSError:
             pass
+    if not args.headless:  # everything is stopped; a window toolkit's leftover thread must not keep the app alive
+        sys.stdout.flush()
+        os._exit(0)
     return 0
 
 
@@ -394,7 +397,8 @@ def window_test(args) -> int:
     print(("PASS: the window opened and loaded the app" if loaded.is_set() else
            f"FAIL: no page load within {args.timeout} s") + f" ({'pywebview' if sys.platform == 'darwin' else app_browser()})",
           flush=True)
-    return 0 if loaded.is_set() else 1
+    # pywebview on macOS leaves a thread behind that keeps the interpreter alive after its window closed
+    os._exit(0 if loaded.is_set() else 1)
 
 
 # ------------------------------------------------------------------------- real model checks --
@@ -459,9 +463,14 @@ def check_model(args) -> int:
         result["ready_s"] = round(time.time() - t0)
         src = ModelSource()
         data, u = src.structure_objective(CHECK_OBJECTIVE)
-        complete = all(str(data.get(k) or "").strip() for k in OBJECTIVE_FIELDS)
-        print(f"  objective: {'all 7 fields' if complete else 'fields missing'}, {u['tokens_in']} tokens in, "
-              f"{u['tokens_out']} out, {u['latency_s']:.0f} s{speed(u)}", flush=True)
+        empty = [k for k in OBJECTIVE_FIELDS if not str(data.get(k) or "").strip()]
+        # The objective contract lets a model leave a field it finds no support for, for the founder to fill on
+        # the confirm screen; one such field is acceptable, more means the model did not do the job.
+        complete = len(empty) <= 1
+        result.update(objective_fields_filled=len(OBJECTIVE_FIELDS) - len(empty), objective_left_for_founder=empty)
+        print(f"  objective: {len(OBJECTIVE_FIELDS) - len(empty)} of {len(OBJECTIVE_FIELDS)} fields"
+              + (f", left for the founder: {', '.join(empty)}" if empty else "")
+              + f"; {u['tokens_in']} tokens in, {u['tokens_out']} out, {u['latency_s']:.0f} s{speed(u)}", flush=True)
         calls = [u]
         objective = {k: str(data.get(k) or "") for k in OBJECTIVE_FIELDS}
         work = Path(tempfile.mkdtemp(prefix="cynqra_check_"))

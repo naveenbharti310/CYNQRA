@@ -19,10 +19,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: cynqra-desktop-${{ github.ref }}
-  cancel-in-progress: true
-
 env:
   E2E_OBJECTIVE: >-
     I run a small bakery and my staff keep losing track of custom cake orders. I want a simple internal web
