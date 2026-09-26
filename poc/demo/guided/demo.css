@@ -1,0 +1,64 @@
+/* Presenter layer for the guided demo. Uses the app's own tokens from ui/app.css. */
+:root{--guide-h:150px}
+#app{padding-bottom:var(--guide-h)}
+nav.side{height:calc(100vh - var(--guide-h))}
+.toasts{bottom:calc(var(--guide-h) + 16px)}
+
+.g-panel{position:fixed;left:0;right:0;bottom:0;z-index:60;background:var(--ink);color:#F3F1EC;
+  padding:16px 28px calc(16px + env(safe-area-inset-bottom,0px));display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px 28px;
+  align-items:center;box-shadow:0 -10px 30px rgba(0,0,0,.16)}
+.g-text{display:flex;flex-direction:column;gap:4px;min-width:0}
+.g-chapter{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#9FD3C7;font-weight:600}
+.g-title{font-family:var(--serif);font-size:22px;line-height:1.2;font-weight:600;text-wrap:balance}
+.g-body{font-size:15px;line-height:1.5;color:#D9D6CE;max-width:88ch;margin:0}
+.g-controls{display:flex;align-items:center;gap:10px}
+.g-controls .btn{min-height:42px;border-color:#55595B;background:transparent;color:#F3F1EC}
+.g-controls .btn:hover{background:#2C2F31}
+.g-controls .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.g-controls .btn.primary:hover{background:#12806E}
+.g-controls .btn:disabled{opacity:.35}
+.g-count{font-family:var(--mono);font-size:13px;color:#B7B3AA;min-width:52px;text-align:right;font-variant-numeric:tabular-nums}
+.g-track{grid-column:1/-1;height:3px;background:#34383A;border-radius:2px;overflow:hidden}
+.g-track i{display:block;height:3px;width:0;background:#9FD3C7;transition:width .35s ease}
+.g-meta{grid-column:1/-1;display:flex;justify-content:space-between;gap:12px;font-size:12px;color:#9C988F;flex-wrap:wrap}
+.g-meta button{all:unset;cursor:pointer;color:#9FD3C7;text-decoration:underline;text-underline-offset:3px}
+.g-meta button:focus-visible{outline:2px solid #9FD3C7}
+
+.g-overlay{position:fixed;inset:0;z-index:80;background:rgba(27,29,31,.55);display:flex;align-items:center;justify-content:center;padding:16px}
+#g-modal{z-index:55;bottom:var(--guide-h)}
+.g-card{background:var(--panel);color:var(--ink);border-radius:16px;max-width:760px;width:100%;max-height:calc(100% - 32px);overflow:auto;
+  padding:28px 32px;display:flex;flex-direction:column;gap:14px;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+.g-card h2{font-family:var(--serif);font-size:26px;line-height:1.15;font-weight:600;text-wrap:balance}
+.g-card p{margin:0;line-height:1.55;color:var(--ink2)}
+.g-card img{display:block;max-width:100%;border:1px solid var(--line);border-radius:10px}
+.g-card figure{margin:0;display:flex;flex-direction:column;gap:8px}
+.g-card figcaption{font-size:14px;color:var(--muted);line-height:1.45}
+.g-figs{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px}
+.g-figs img{width:100%;height:240px;object-fit:cover;object-position:top left}
+.g-note{font-size:13px;color:var(--muted)!important}
+.g-list{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}
+.g-list li{display:flex;justify-content:space-between;gap:12px;padding:8px 12px;background:var(--paper);border-radius:8px;text-transform:capitalize}
+.g-list li span{font-family:var(--mono);font-size:13px;color:var(--muted);text-transform:none}
+.g-card .g-close{align-self:flex-end}
+
+.g-welcome .g-card{max-width:620px;gap:16px}
+.g-kicker{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);font-weight:600}
+.g-welcome h1{font-family:var(--serif);font-size:40px;line-height:1.05;font-weight:600;letter-spacing:-.02em;text-wrap:balance}
+.g-steps{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;color:var(--ink2);line-height:1.45}
+.g-row{display:flex;gap:10px;flex-wrap:wrap}
+.g-keys{font-size:13px;color:var(--muted)}
+kbd{font-family:var(--mono);font-size:12px;border:1px solid var(--line2);border-bottom-width:2px;border-radius:5px;padding:1px 6px;background:var(--paper)}
+
+@media (max-width:760px){
+  :root{--guide-h:230px}
+  .g-panel{grid-template-columns:1fr;padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px));gap:8px}
+  .g-title{font-size:18px}
+  .g-body{font-size:14px;max-height:30vh;overflow:auto}
+  .g-controls{justify-content:space-between}
+  .g-card{padding:20px}
+  .g-welcome h1{font-size:30px}
+  .g-meta span{display:none}
+}
+.toasts .toast:nth-last-child(n+3){display:none}
+@media (prefers-reduced-motion:reduce){.g-track i{transition:none}}
+[hidden]{display:none!important}

@@ -9,6 +9,7 @@ Read them in this order.
 
 | File | What it shows |
 | --- | --- |
+| `how-cynqra-works.html` | Start here. A guided replay of one complete run of the real engine, every step explained. Built by poc/demo/build_demo.py |
 | `cynqra-run-002.html` | The run board. Ten days, four workers, every break, the measured numbers |
 | `cynqra-run-002-close.html` | The closing verdict on run 002, which was NO-GO on M2 |
 | `cynqra-run-002-audit.html` | The audit of that run, including which claimed results were thrown out |

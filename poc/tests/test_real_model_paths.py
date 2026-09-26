@@ -323,6 +323,17 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(code, 500)
         self.assertIn("TypeError", body["error"])
 
+    def test_the_guide_knows_what_just_happened(self):
+        self.post("/api/company", {"name": "Harbor Recruiting", "mode": "demo"})
+        self.post("/api/objective/draft", {"messy": SCENARIO["messy"]})
+        self.post("/api/objective/confirm")
+        plan = self.app.engine.pending_decisions()[0]["id"]
+        self.post(f"/api/decisions/{plan}", {"action": "approve"})
+        self.assertEqual(self.app.state()["last_step"], {"did": "plan approved"})
+        code, body = self.post("/api/run/step")
+        self.assertEqual((code, body["did"]), (200, "assigned"))
+        self.assertEqual(self.app.state()["last_step"]["task"], "t_01")
+
     def test_resume_route_and_a_bad_auto_delay(self):
         self.assertEqual(self.post("/api/run/resume")[0], 400)
         self.assertEqual(self.post("/api/run/auto", {"on": True, "delay": "soon"})[0], 400)

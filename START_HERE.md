@@ -1,5 +1,9 @@
 # CYNQRA HANDOVER
 
+> To show someone how Cynqra works: open 03_pages/how-cynqra-works.html, or the link in
+> DEMO_SCRIPT.md, and press Start. DEMO_SCRIPT.md has the talk track and the answers to the
+> questions people ask.
+
 > 26 September 2026: read M1_RESTART_26SEP2026.md first. It supersedes
 > STATE_OF_PLAY.md, which is kept as the 25 August record.
 >

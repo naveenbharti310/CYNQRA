@@ -78,6 +78,17 @@ class App:
                 shutil.move(str(cur), str(self.root / f"archive_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"))
             self.engine = self._new_engine()
 
+    def step(self) -> dict:
+        self.last_step = self.engine.step()
+        return self.last_step
+
+    def decide(self, decision_id: str, action: str, note: str, edited) -> dict:
+        d = self.engine.decide(decision_id, action, note, edited)
+        if action == "approve":
+            self.last_step = ({"did": "plan approved"} if d["kind"] == "approve_plan"
+                              else {"did": "approved", "decision": d["id"], "kind": d["kind"]})
+        return d
+
     def state(self) -> dict:
         s = self.engine.snapshot()
         s["auto"] = dict(self.auto)
@@ -164,7 +175,7 @@ def make_server(app: App, port: int = 8750) -> ThreadingHTTPServer:
                 "/api/objective/fields": lambda: e.edit_objective(body.get("fields") or {}),
                 "/api/objective/guardrails": lambda: e.set_guardrails(body.get("budget_cap"), body.get("risk_tolerance")),
                 "/api/objective/confirm": e.confirm_objective,
-                "/api/run/step": e.step,
+                "/api/run/step": app.step,
                 "/api/killswitch": lambda: e.kill_switch(bool(body.get("on"))),
                 "/api/run/resume": e.resume,
             }
@@ -184,8 +195,8 @@ def make_server(app: App, port: int = 8750) -> ThreadingHTTPServer:
                 return self._send(200, {"ok": True})
             m = re.match(r"^/api/decisions/(dec_\w+)$", path)
             if m:
-                return self._guard(lambda: e.decide(m.group(1), body.get("action", ""), body.get("note", ""),
-                                                     body.get("edited") or None))
+                return self._guard(lambda: app.decide(m.group(1), body.get("action", ""), body.get("note", ""),
+                                                       body.get("edited") or None))
             return self._send(404, {"error": "not found"})
 
     return ThreadingHTTPServer(("127.0.0.1", port), Handler)

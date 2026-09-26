@@ -4,7 +4,7 @@
 
 const S = {
   st: null, view: "company", worker: "w_eng_b", replayTask: null, replay: null, replayKey: "",
-  seen: -1, sig: "", err: "", busy: false, graph: null, mode: "demo", shown: new Set(),
+  seen: -1, sig: "", err: "", busy: false, graph: null, mode: "demo", shown: new Set(), guide: true,
 };
 /* Cards animate in only the first time they appear; a repaint must not replay it for every card. */
 const fresh = (key) => { if (S.shown.has(key)) return ""; S.shown.add(key); return "fresh"; };
@@ -57,7 +57,7 @@ function signature() {
   const st = S.st; if (!st) return "";
   const ev = st.events || [];
   return [ev.length ? ev[ev.length - 1].seq : 0, st.meta.phase, st.meta.frozen, st.auto.on, S.view, S.worker,
-    S.replayTask, S.replayKey, S.err, S.busy, JSON.stringify(S.graph), (st.decisions.pending || []).map((d) => d.id).join()].join("|");
+    S.replayTask, S.replayKey, S.err, S.busy, S.guide, JSON.stringify(S.graph), (st.decisions.pending || []).map((d) => d.id).join()].join("|");
 }
 
 function paint(force) {
@@ -68,10 +68,28 @@ function paint(force) {
   $$("#app input, #app textarea, #app select").forEach((el) => { if (el.id) keep[el.id] = el.value; });
   const focus = document.activeElement && document.activeElement.id;
   const phase = S.st.meta.phase;
-  $("#app").innerHTML = ["new", "objective", "planning"].includes(phase) ? wizard() : shell();
+  const g = guideBar();
+  $("#app").innerHTML = (["new", "objective", "planning"].includes(phase) ? wizard() : shell()) + g;
+  $("#app").classList.toggle("with-guide", !!g);
+  const bar = $(".guide-bar");
+  if (bar) document.documentElement.style.setProperty("--guide-h", bar.offsetHeight + "px");
   Object.entries(keep).forEach(([id, v]) => { const el = document.getElementById(id); if (el && el.dataset.keep !== "no") el.value = v; });
   if (focus) { const el = document.getElementById(focus); if (el) el.focus(); }
   bind();
+}
+
+/* ---------- guide: what is happening, in plain words (ui/tour.js) ---------- */
+function guideBar() {
+  if (!S.guide || window.CYNQRA_GUIDED_DEMO || typeof CynqraTour === "undefined") return "";
+  const n = CynqraTour.narrate(S.st);
+  if (!n) return "";
+  return `<aside class="guide-bar" aria-label="Guide" aria-live="polite"><div class="guide-text"><span class="guide-chapter">${esc(n.chapter)}</span>
+    <b class="guide-title">${esc(n.title)}</b><p class="guide-body">${esc(n.body)}</p></div>
+    <button class="btn sm" id="guide-off" type="button">Hide guide</button></aside>`;
+}
+function guideToggle() {
+  if (window.CYNQRA_GUIDED_DEMO || S.guide) return "";  // while it shows, the bar has its own Hide button
+  return `<button class="btn sm" id="guide-toggle" type="button">Show guide</button>`;
 }
 
 /* ---------- toasts from new events ---------- */
@@ -103,7 +121,7 @@ function toast(msg, kind) {
 function wizard() {
   const st = S.st, phase = st.meta.phase, obj = st.objective;
   const top = `<div class="wiz-top"><div class="row"><span class="wordmark">Cynqra</span><span class="muted small">${esc(st.company ? st.company.name : "New company")}</span></div>
-    ${modePill()}</div>`;
+    <div class="row">${guideToggle()}${modePill()}</div></div>`;
   if (phase === "planning") return `<div class="wiz">${top}${planStep()}</div>`;
   const modeChoice = phase === "new" ? `
       <label class="lbl" for="coname">Company name</label>
@@ -205,7 +223,7 @@ function shell() {
       ${nav}
       <div class="foot">${modePill()}
         <button class="btn danger ${st.meta.frozen ? "on" : ""}" id="kill">${st.meta.frozen ? "Release kill switch" : "Kill switch"}</button>
-        <button class="btn sm" id="reset" title="Archive this run and start again">New run</button></div></nav>
+        <button class="btn sm" id="reset" title="Archive this run and start again">New run</button>${guideToggle()}</div></nav>
     <main class="main">
       <header class="top"><h1>${VIEWS.find((v) => v[0] === S.view)[1]}</h1>
         <div class="row small" style="gap:20px">
@@ -474,6 +492,8 @@ function bind() {
   }));
   on("replan", (ev) => act(() => api(`/api/decisions/${ev.currentTarget.dataset.id}`, { action: "reject", note: "Ask for a different plan" })));
   on("step", () => act(() => api("/api/run/step", {})));
+  on("guide-toggle", () => { S.guide = !S.guide; paint(true); });
+  on("guide-off", () => { S.guide = false; paint(true); });
   on("resume", () => act(() => api("/api/run/resume", {})));
   on("auto", () => act(() => api("/api/run/auto", { on: !S.st.auto.on })));
   on("kill", () => act(() => api("/api/killswitch", { on: !S.st.meta.frozen })));

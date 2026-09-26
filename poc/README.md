@@ -8,6 +8,13 @@ replay. The spec, the decisions it enforces and the acceptance tests are in POC_
 
 This POC is not gate evidence. S1, S2 and S3 v2 still decide Milestone 2.
 
+## Show it
+
+To explain Cynqra to someone, use the guided demo: `03_pages/how-cynqra-works.html` (double
+click, works offline) or its link in `DEMO_SCRIPT.md`. It replays a recorded run of this
+engine through these screens, one explained step at a time. In the running app the guide
+bar at the bottom gives the same explanations live; Hide guide turns it off.
+
 ## Run it
 
 Windows: double click RUN_POC.bat in the project folder.
@@ -102,7 +109,8 @@ TEST_REPORT.md holds the last full run and its coverage.
 | scenarios/candidate_tracker | The demo scenario and the real product code the workers hand over |
 | design/ | High level screen mockups, copied from the design canvas |
 | tests/ | Unit, journey, failure path, provider wire, API and browser tests |
-| demo/ | How the demo video is recorded; the video sits next to the project folder |
+| demo/ | The guided demo (record_replay.py, build_demo.py, guided/) and how the demo video is recorded |
+| ui/tour.js | The plain words for each step, shared by the guide bar and the guided demo |
 
 ## Limits, stated plainly
 

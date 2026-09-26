@@ -149,7 +149,7 @@ header.top h1{font-size:20px;font-weight:600}
 .work{display:flex;gap:20px;align-items:flex-start}
 .cols{flex:1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
 .col{display:flex;flex-direction:column;gap:10px;min-height:200px}
-.tcard{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
+.tcard{overflow-wrap:anywhere;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
 .tcard .meta{font-family:var(--mono);font-size:12px;color:var(--muted)}
 .tcard .ttl{font-weight:600}
 .tcard.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
@@ -209,8 +209,51 @@ textarea.note{min-height:70px;resize:vertical;font-size:14px}
 
 @media (max-width:1180px){
   .tiles{grid-template-columns:repeat(3,minmax(0,1fr))}
-  .work,.dec,.audit,.org{flex-direction:column}
+  .work,.dec,.audit,.org{flex-direction:column;align-items:stretch}
+  .nodes{flex-wrap:wrap;justify-content:center;gap:20px}
+  .tree .row{flex-wrap:wrap}
+  .tree{padding:20px 12px}
+  header.top{height:auto;min-height:64px;flex-wrap:wrap;padding:12px 24px;row-gap:8px}
+  header.top .row{flex-wrap:wrap;row-gap:8px}
   .tape,.dec-side,.replay,.side-panel{width:100%}
   .wiz-body{flex-direction:column;padding:24px}
   .wiz-left{width:100%}
 }
+@media (max-width:760px){
+  .shell{flex-direction:column}
+  nav.side{width:100%;height:auto!important;position:static;flex-direction:row;flex-wrap:wrap;align-items:center;padding:10px 12px;gap:2px;border-right:0;border-bottom:1px solid var(--line)}
+  nav.side .brand{flex-basis:100%;padding:0 8px 6px}
+  nav.side button.nav{padding:8px 10px;font-size:14px}
+  nav.side .foot{margin-top:0;flex-basis:100%;flex-direction:row;flex-wrap:wrap;align-items:center;padding:6px 4px 0}
+  header.top{height:auto;flex-wrap:wrap;padding:12px 16px;position:static}
+  header.top .row{flex-wrap:wrap}
+  .view{padding:16px}
+  .wiz-top{padding:0 16px}
+  .wiz-body{padding:16px}
+  .hero{font-size:32px}
+  .modes{flex-direction:column}
+  .fields,.two,.dgrid{grid-template-columns:1fr}
+  .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .cols{grid-template-columns:1fr}
+  .ribbon{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .stepper{grid-template-columns:repeat(5,minmax(0,1fr))}
+  .plan-table{display:block;overflow-x:auto}
+  .card{padding:16px}
+  .dcard{padding:18px}
+  .tree{padding:12px 0}
+  .nodes{flex-direction:column;align-items:stretch;gap:10px;width:100%}
+  .node{min-width:0}
+  .tree .row{flex-wrap:wrap}
+}
+.toasts .toast:nth-last-child(n+4){display:none}
+#app.with-guide{padding-bottom:var(--guide-h,140px)}
+#app.with-guide nav.side{height:calc(100vh - var(--guide-h,140px))}
+.guide-bar{position:fixed;left:0;right:0;bottom:0;z-index:40;min-height:116px;background:var(--ink);color:#F3F1EC;padding:14px 28px;display:flex;gap:24px;align-items:center;justify-content:space-between;box-shadow:0 -10px 30px rgba(0,0,0,.14)}
+.guide-text{display:flex;flex-direction:column;gap:3px;min-width:0}
+.guide-chapter{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#9FD3C7;font-weight:600}
+.guide-title{font-family:var(--serif);font-size:20px;line-height:1.2;font-weight:600}
+.guide-body{margin:0;font-size:14.5px;line-height:1.5;color:#D9D6CE;max-width:92ch}
+.guide-bar .btn{background:transparent;color:#F3F1EC;border-color:#55595B;flex:none}
+.guide-bar .btn:hover{background:#2C2F31}
+@media (max-width:760px){.guide-bar{flex-direction:column;align-items:flex-start;padding:12px 16px;gap:8px}#app.with-guide{padding-bottom:var(--guide-h,260px)}.guide-body{max-height:30vh;overflow:auto}}
+#app.with-guide + .toasts{bottom:calc(var(--guide-h,140px) + 16px)}

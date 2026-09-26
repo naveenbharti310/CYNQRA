@@ -83,6 +83,10 @@ function loadPlaywright() {
     const rows = await app.$$eval("#rows tr", (r) => r.length);
     steps.push(`live product has ${rows} candidate row(s)`);
     const phase = await page.evaluate(async () => (await (await fetch("/api/state")).json()).meta.phase);
+    await page.waitForTimeout(900);
+    const guide = await page.textContent(".guide-bar .guide-title").catch(() => "");
+    if (guide !== "Delivered and accepted") errors.push(`guide says "${guide}" at the end`);
+    steps.push("guide: " + guide);
     const ok = phase === "accepted" && rows >= 1 && /Replay complete/.test(replay) && errors.length === 0;
     console.log(JSON.stringify({ ok, phase, errors, steps }));
   } catch (e) {
