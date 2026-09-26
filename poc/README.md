@@ -31,6 +31,23 @@ ANTHROPIC_API_KEY (default model claude-sonnet-5) or OPENAI_API_KEY (default gpt
 before starting, then choose Live in the first screen. Set CYNQRA_MODEL to pick another
 model. A model error stops the run and says so. Nothing is invented to fill the gap.
 
+## Real model test
+
+    export ANTHROPIC_API_KEY=...        # or OPENAI_API_KEY
+    python poc/live_check.py            # hard cap 3 dollars, --max-usd to change
+
+Or double click RUN_M1.bat and choose 7; the key goes into a hidden prompt and is never
+written down. It runs the whole journey against the real API, approves the founder's
+decisions automatically (each one is listed), then checks the product independently: the
+live URL must answer /health with 200 and the product's own tests must pass when rerun from
+the merged repository. It writes poc/live_reports/live_<time>.json and .md with the
+outcome, every call's measured tokens, the dollar spend, the plan and the metrics.
+
+PASS, FAIL or UNRUN. A provider error, a missing key or the spend cap is UNRUN, never a
+score. Optional: CYNQRA_MODEL to pick the model, CYNQRA_EFFORT (low to max) to set effort.
+Live mode starts with a 600 work unit budget (one unit is 1000 real tokens); demo mode
+starts with 120.
+
 ## What you will see, about five minutes in demo mode
 
 1. Objective. Structure the sentence into seven fields. Two are marked inferred. Edit,
@@ -62,6 +79,7 @@ TEST_REPORT.md holds the last full run and its coverage.
 | Path | What it is |
 | --- | --- |
 | run_poc.py | Starts the server and opens the browser |
+| live_check.py | The real model test of the whole journey, with a spend cap and a written report |
 | cynqra/engine.py | The orchestrator: journey, gateway, decisions, verification, delivery, replay, export |
 | cynqra/policy.py | D-27 risk rubric and D-28 authority matrix as code |
 | cynqra/protocol.py | Handoff, Blocker, Escalation, Approval as stamped, hashed objects |

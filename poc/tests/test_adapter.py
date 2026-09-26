@@ -38,6 +38,21 @@ class FakeProvider:
                 prompt = body["messages"][0]["content"]
                 if outer.mode == "http500":
                     return self._send(500, {"type": "error", "error": {"type": "api_error", "message": "overloaded"}})
+                if outer.mode == "overloaded_once" and len(outer.requests) == 1:
+                    return self._send(529, {"type": "error", "error": {"type": "overloaded_error", "message": "busy"}})
+                if self.path == "/v1/messages" and "temperature" in body:
+                    return self._send(400, {"type": "error", "error": {"type": "invalid_request_error",
+                                            "message": "temperature is not supported for this model"}})
+                if outer.mode == "refusal":
+                    return self._send(200, {"id": "msg_fake", "type": "message", "role": "assistant", "content": [],
+                                            "stop_reason": "refusal",
+                                            "stop_details": {"type": "refusal", "category": "cyber", "explanation": "x"},
+                                            "usage": {"input_tokens": 5, "output_tokens": 0}})
+                if outer.mode == "truncated":
+                    return self._send(200, {"id": "msg_fake", "type": "message", "role": "assistant",
+                                            "content": [{"type": "text", "text": '{"product": "half'}],
+                                            "stop_reason": "max_tokens",
+                                            "usage": {"input_tokens": 5, "output_tokens": 16000}})
                 if body.get("model") == RETIRED:
                     return self._send(404, {"type": "error", "error": {"type": "not_found_error", "message": f"model: {RETIRED}"}})
                 if outer.mode == "prose" or (outer.mode == "prose_once" and len(outer.requests) == 1):
@@ -47,7 +62,9 @@ class FakeProvider:
                 tin, tout = max(1, len(prompt) // 4), max(1, len(text) // 4)
                 if self.path == "/v1/messages":
                     return self._send(200, {"id": "msg_fake", "type": "message", "role": "assistant",
-                                            "content": [{"type": "text", "text": text}],
+                                            "content": [{"type": "thinking", "thinking": "", "signature": "s"},
+                                                        {"type": "text", "text": text}],
+                                            "stop_reason": "end_turn",
                                             "usage": {"input_tokens": tin, "output_tokens": tout}})
                 return self._send(200, {"choices": [{"message": {"role": "assistant", "content": text}}],
                                         "usage": {"prompt_tokens": tin, "completion_tokens": tout}})
@@ -75,11 +92,15 @@ class ProviderBase(unittest.TestCase):
         self.tmp = TempDir()
         self.p = FakeProvider()
         self.urls = (model_adapter.ANTHROPIC_URL, model_adapter.OPENAI_URL)
+        self.waits = model_adapter.RETRY_WAITS_S
+        model_adapter.RETRY_WAITS_S = (0.0, 0.0)
         model_adapter.ANTHROPIC_URL = self.p.base + "/v1/messages"
         model_adapter.OPENAI_URL = self.p.base + "/v1/chat/completions"
 
     def tearDown(self):
         model_adapter.ANTHROPIC_URL, model_adapter.OPENAI_URL = self.urls
+        model_adapter.RETRY_WAITS_S = self.waits
+        os.environ.pop("CYNQRA_EFFORT", None)
         self.p.close()
         self.tmp.cleanup()
         restore_env(self.saved)
@@ -104,8 +125,42 @@ class AnthropicWireTests(ProviderBase):
         self.assertEqual(r["headers"]["x-api-key"], "test-key-not-real")
         self.assertEqual(r["headers"]["anthropic-version"], "2023-06-01")
         self.assertEqual(r["body"]["model"], "claude-sonnet-5")
-        self.assertEqual(r["body"]["temperature"], 0)
+        self.assertNotIn("temperature", r["body"], "claude-sonnet-5 rejects sampling parameters with HTTP 400")
+        self.assertGreaterEqual(r["body"]["max_tokens"], model_adapter.ANTHROPIC_MIN_MAX_TOKENS,
+                                "room for default thinking, so the answer is not truncated")
+        self.assertNotIn("output_config", r["body"])
         e.close()
+
+    def test_truncated_reply_is_an_error_not_a_short_answer(self):
+        self.p.mode = "truncated"
+        with self.assertRaises(IntelligenceError) as ctx:
+            ModelSource()._call("Convert the founder objective: anything")
+        self.assertIn("truncated", str(ctx.exception))
+
+    def test_refusal_is_an_error_not_an_empty_answer(self):
+        self.p.mode = "refusal"
+        with self.assertRaises(IntelligenceError) as ctx:
+            ModelSource()._call("Convert the founder objective: anything")
+        self.assertIn("refused", str(ctx.exception))
+
+    def test_transient_overload_is_retried(self):
+        self.p.mode = "overloaded_once"
+        data, _ = ModelSource()._call("Convert the founder objective: a tracker")
+        self.assertEqual(data["product"], "Internal candidate tracker")
+        self.assertEqual(len(self.p.requests), 2)
+
+    def test_persistent_outage_gives_up_after_three_attempts(self):
+        self.p.mode = "http500"
+        out = model_adapter.complete("Convert the founder objective: a tracker")
+        self.assertIn("HTTP 500", out["error"])
+        self.assertEqual(len(self.p.requests), 3)
+
+    def test_effort_is_passed_through_and_validated(self):
+        os.environ["CYNQRA_EFFORT"] = "low"
+        ModelSource()._call("Convert the founder objective: a tracker")
+        self.assertEqual(self.p.requests[-1]["body"]["output_config"], {"effort": "low"})
+        os.environ["CYNQRA_EFFORT"] = "turbo"
+        self.assertIn("CYNQRA_EFFORT", model_adapter.complete("x")["error"])
 
     def test_default_is_not_the_retired_model(self):
         self.assertNotEqual(model_adapter.resolve()["label"], RETIRED)
@@ -138,6 +193,33 @@ class AnthropicWireTests(ProviderBase):
         with self.assertRaises(IntelligenceError) as ctx:
             ModelSource()._call("Convert the founder objective: a tracker")
         self.assertIn("did not return a JSON object", str(ctx.exception))
+
+
+class LiveCheckRunnerTests(ProviderBase):
+    """live_check.py is the real model test. Here it runs over the fake provider only, to prove the
+    runner itself; its PASS here is not a model result."""
+
+    def test_runner_drives_the_journey_and_checks_the_product(self):
+        import live_check
+        os.environ["ANTHROPIC_API_KEY"] = "test-key-not-real"
+        rep = live_check.run(live_check.SCENARIO["messy"], 5.0, 4000, self.tmp.path / "run", log=lambda *a: None)
+        self.assertEqual(rep["outcome"], "PASS", rep.get("reason"))
+        self.assertEqual(rep["health"]["status"], 200)
+        self.assertTrue(rep["product_tests"]["ran"] and rep["product_tests"]["passed"])
+        self.assertGreater(rep["usd"], 0)
+        self.assertTrue(all(not c["estimated"] for c in rep["calls"]))
+
+    def test_runner_refuses_without_a_key_and_the_spend_cap_stops_it(self):
+        import live_check
+        rep = live_check.run("anything", 5.0, 4000, self.tmp.path / "a", log=lambda *a: None)
+        self.assertEqual(rep["outcome"], "UNRUN")
+        os.environ["CYNQRA_S1_MODEL_CMD"] = "echo"
+        self.assertEqual(live_check.run("x", 5.0, 4000, self.tmp.path / "b", log=lambda *a: None)["outcome"], "UNRUN")
+        del os.environ["CYNQRA_S1_MODEL_CMD"]
+        os.environ["ANTHROPIC_API_KEY"] = "test-key-not-real"
+        rep = live_check.run(live_check.SCENARIO["messy"], 0.0001, 4000, self.tmp.path / "c", log=lambda *a: None)
+        self.assertEqual(rep["outcome"], "UNRUN")
+        self.assertIn("spend cap", rep["reason"])
 
 
 class OpenAIWireTests(ProviderBase):

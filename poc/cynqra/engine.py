@@ -39,6 +39,10 @@ TASK_STATES = ["PLANNED", "ASSIGNED", "IN_PROGRESS", "BLOCKED", "REVIEW", "REWOR
                "APPROVED", "VERIFIED", "FAILED"]
 
 
+DEMO_DEFAULT_CAP = 120
+LIVE_DEFAULT_CAP = 600
+
+
 class EngineError(RuntimeError):
     pass
 
@@ -334,10 +338,12 @@ class Engine:
             self._set_meta(mode=mode)
             self._intel = self._injected
             _ = self.intel  # live mode fails here, before anything is written, if no key
+            # Live mode charges one unit per 1000 real tokens, so a whole run needs far more room than demo mode.
+            cap = LIVE_DEFAULT_CAP if mode == "live" else DEMO_DEFAULT_CAP
             company = {"id": self.cid, "name": name, "stage": "IDEA", "autonomy_level": "L1",
-                       "budget_cap": 120, "risk_tolerance": "conservative", "status": "active", "created_at": now()}
+                       "budget_cap": cap, "risk_tolerance": "conservative", "status": "active", "created_at": now()}
             self.store.put("company", self.cid, company)
-            self.store.put("budget", "company", {"cap": 120, "spent": 0, "warned": [], "state": "ok"})
+            self.store.put("budget", "company", {"cap": cap, "spent": 0, "warned": [], "state": "ok"})
             self.event("company.created", "company", self.cid, {"stage": "IDEA", "autonomy_level": "L1", "mode": mode},
                        actor="founder", actor_type="human", authority="founder")
             self._set_meta(phase="objective")

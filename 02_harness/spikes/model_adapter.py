@@ -16,6 +16,22 @@ which Anthropic retired on 15 June 2026. Every call with an Anthropic key and
 no CYNQRA_MODEL would have failed. Default is now claude-sonnet-5. A shell
 command that exits non zero is now an error, not a reply. Any error is
 reported in the "error" field and callers must treat it as an unrun call.
+
+26 Sep 2026, second pass, before the first real call. Checked against the
+current Messages API reference:
+  * claude-sonnet-5 rejects temperature with HTTP 400 (sampling parameters
+    were removed on the 5 family and Opus 4.7 onward). Every Anthropic call
+    would have failed. temperature is no longer sent to Anthropic.
+  * Sonnet 5 thinks by default and thinking tokens count against max_tokens.
+    A 1500 token cap could be spent on thinking and truncate the answer.
+    Anthropic calls now get at least ANTHROPIC_MIN_MAX_TOKENS of room.
+    Billing is by tokens actually used, so this raises no cost by itself.
+  * stop_reason was never read. A truncated reply (max_tokens) or a safety
+    refusal (refusal) now raises, so it is an unrun call, never a short answer.
+  * A transient 429, 5xx or 529 overload used to stop a whole run. Such
+    calls are retried twice with backoff; anything else fails at once.
+  * CYNQRA_EFFORT (low, medium, high, xhigh, max) optionally sets
+    output_config.effort on Anthropic calls. Unset means the model default.
 """
 from __future__ import annotations
 
@@ -28,6 +44,11 @@ import urllib.request
 
 OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
+ANTHROPIC_MIN_MAX_TOKENS = 16000
+TIMEOUT_S = 600
+RETRY_STATUS = {408, 409, 429, 500, 502, 503, 504, 529}
+RETRY_WAITS_S = (2.0, 6.0)
+EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 
 
 def resolve() -> dict | None:
@@ -49,11 +70,16 @@ def resolve() -> dict | None:
     return None
 
 
-def _post(url: str, payload: dict, headers: dict) -> dict:
-    body = json.dumps(payload).encode("utf-8")
+class _Retryable(RuntimeError):
+    def __init__(self, msg: str, wait: float | None = None):
+        super().__init__(msg)
+        self.wait = wait
+
+
+def _post_once(url: str, body: bytes, headers: dict) -> dict:
     req = urllib.request.Request(url, data=body, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=TIMEOUT_S) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = ""
@@ -61,7 +87,29 @@ def _post(url: str, payload: dict, headers: dict) -> dict:
             detail = exc.read().decode("utf-8", "replace")[:300]
         except Exception:
             pass
-        raise RuntimeError(f"HTTP {exc.code} from provider: {detail}") from exc
+        msg = f"HTTP {exc.code} from provider: {detail}"
+        if exc.code in RETRY_STATUS:
+            wait = None
+            try:
+                wait = min(30.0, float(exc.headers.get("retry-after")))
+            except (TypeError, ValueError):
+                pass
+            raise _Retryable(msg, wait) from exc
+        raise RuntimeError(msg) from exc
+    except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+        raise _Retryable(f"network error: {exc}") from exc
+
+
+def _post(url: str, payload: dict, headers: dict) -> dict:
+    body = json.dumps(payload).encode("utf-8")
+    for wait in RETRY_WAITS_S + (None,):
+        try:
+            return _post_once(url, body, headers)
+        except _Retryable as exc:
+            if wait is None:
+                raise RuntimeError(str(exc)) from exc
+            time.sleep(exc.wait if exc.wait is not None else wait)
+    raise RuntimeError("unreachable")
 
 
 def _openai(prompt: str, model: str, max_tokens: int = 1500) -> dict:
@@ -78,6 +126,8 @@ def _openai(prompt: str, model: str, max_tokens: int = 1500) -> dict:
             "Content-Type": "application/json",
         },
     )
+    if data["choices"][0].get("finish_reason") == "length":
+        raise RuntimeError(f"reply truncated at max_completion_tokens={max_tokens}")
     usage = data.get("usage") or {}
     return {
         "text": (data["choices"][0]["message"]["content"] or ""),
@@ -88,25 +138,38 @@ def _openai(prompt: str, model: str, max_tokens: int = 1500) -> dict:
 
 
 def _anthropic(prompt: str, model: str, max_tokens: int = 1500) -> dict:
+    payload = {
+        "model": model,
+        "max_tokens": max(max_tokens, ANTHROPIC_MIN_MAX_TOKENS),
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    effort = (os.environ.get("CYNQRA_EFFORT") or "").strip().lower()
+    if effort:
+        if effort not in EFFORTS:
+            raise ValueError(f"CYNQRA_EFFORT must be one of {sorted(EFFORTS)}, not {effort!r}")
+        payload["output_config"] = {"effort": effort}
     data = _post(
         ANTHROPIC_URL,
-        {
-            "model": model,
-            "max_tokens": max_tokens,
-            "temperature": 0,
-            "messages": [{"role": "user", "content": prompt}],
-        },
+        payload,
         {
             "x-api-key": os.environ["ANTHROPIC_API_KEY"],
             "anthropic-version": "2023-06-01",
             "Content-Type": "application/json",
         },
     )
+    stop = data.get("stop_reason")
+    if stop == "refusal":
+        details = data.get("stop_details") or {}
+        raise RuntimeError(f"model refused (category {details.get('category')}): {details.get('explanation') or ''}")
+    if stop == "max_tokens":
+        raise RuntimeError(f"reply truncated at max_tokens={payload['max_tokens']}")
     parts = [b.get("text", "") for b in data.get("content", []) if b.get("type") == "text"]
     usage = data.get("usage") or {}
     return {
         "text": "".join(parts),
-        "tokens_in": int(usage.get("input_tokens") or 0),
+        "tokens_in": int(usage.get("input_tokens") or 0)
+        + int(usage.get("cache_read_input_tokens") or 0)
+        + int(usage.get("cache_creation_input_tokens") or 0),
         "tokens_out": int(usage.get("output_tokens") or 0),
         "estimated": False,
     }

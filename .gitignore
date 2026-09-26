@@ -5,3 +5,5 @@ poc/tests/_tmp/
 node_modules/
 poc/demo/out/
 poc/demo/*.mp4
+poc/live_reports/run_*/
+exports/

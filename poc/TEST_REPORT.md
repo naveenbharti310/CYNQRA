@@ -61,3 +61,25 @@ Unrun is not pass and not fail.
 3. Rejecting delivery left no trace in the audit trail. It now records
    transition.rejected and keeps the product live.
 4. The audit table cut the time column short. Widened.
+
+## 26 September, second pass: before the first real model call
+
+Checked the adapter against the current Messages API reference rather than the fake
+provider, which had accepted anything. Three defects would have stopped or corrupted the
+first live run:
+
+1. claude-sonnet-5, the default, rejects temperature with HTTP 400. The adapter sent
+   temperature 0 on every call, so every live POC, S1 and S2 call would have failed. A test
+   asserted temperature 0, which pinned the bug in place. temperature is no longer sent to
+   Anthropic, and the fake provider now returns 400 if it is, as the real API does.
+2. Sonnet 5 thinks by default and thinking counts against max_tokens. S1's 1500 token
+   limit could be spent on thinking. Anthropic calls now get at least 16000 tokens of room.
+3. stop_reason was never read. A truncated reply or a refusal now raises and is an unrun
+   call, never a short answer. OpenAI finish_reason length is treated the same way.
+
+Also: transient 429, 5xx and 529 overloads are retried twice with backoff instead of
+stopping the run; live mode starts at a 600 unit budget because one unit is 1000 real
+tokens; and poc/live_check.py is the real model test, reachable from RUN_M1.bat item 7.
+
+102 POC tests pass (7 new), 15 spike tests and 3 kit tests pass. The real model run itself
+is still unrun here: this environment has no API key. Its report lands in poc/live_reports.

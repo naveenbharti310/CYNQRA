@@ -31,6 +31,7 @@ Cynqra M1
   4  Score S1 answers pasted by hand
   5  Run S3 v2 after the seeds are sealed
   6  Run all harness tests
+  7  Run the whole POC against a real model  (about 10 minutes, capped at 3 dollars)
   Q  Quit
 """
 
@@ -72,6 +73,17 @@ def export(label: str) -> None:
         for p in SPIKES.rglob("*"):
             if p.is_file() and "__pycache__" not in p.parts:
                 z.write(p, p.relative_to(HERE.parent))
+    print(f"Saved a copy of the results: {out}")
+
+
+def export_live() -> None:
+    EXPORTS.mkdir(exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M")
+    out = EXPORTS / f"Cynqra_POC_live_{stamp}.zip"
+    reports = HERE.parent / "poc" / "live_reports"
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for p in reports.glob("live_*"):
+            z.write(p, p.relative_to(HERE.parent))
     print(f"Saved a copy of the results: {out}")
 
 
@@ -122,6 +134,14 @@ def main() -> int:
                 code = run(["spikes/s3v2/run_s3_v2.py"], env)
                 if code in (0, 1):
                     export("S3v2")
+        elif c == "7":
+            env = ask_key()
+            if env:
+                code = run(["../poc/live_check.py"], env)
+                if code in (0, 1, 3):
+                    export_live()
+                if code == 3:
+                    print("\nUnrun: the model could not be reached or the spend cap stopped it. Nothing was scored.")
         elif c == "6":
             run(["spikes/test_spikes.py"])
             run(["kit/test_kit.py"])
