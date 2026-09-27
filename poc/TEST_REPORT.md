@@ -235,6 +235,16 @@ HTTP server and its tests), and two verifier defects kept that engineer going ro
 - The delivery contract now tells engineers how a test starts a server: port 0, serve_forever() in a
   daemon thread, a timeout on every request, and shut down when done.
 
+The two Linux journeys started with it, on the same code, did not finish, and show the same two
+defects from other sides:
+- Qwen3.6 35B-A3B 2-bit: stopped at the 340-minute limit after 30 model calls (176,757 tokens in,
+  136,361 out). t_01 and t_02 were verified in 9 minutes; t_03, the data layer, then failed
+  verification seven times on the same named test (`test_app.test_load_empty_file`), with two
+  escalations approved in between: a model at temperature 0 retrying the same prompt.
+- gpt-oss 20B: t_01 to t_05 verified, t_04 after eleven rounds; t_06 then failed six times on "the test
+  run did not complete", the misread output, until the job's time limit stopped it at 358 minutes.
+Version 0.1.1 fixes both; its whole journeys rerun on Windows and Linux to measure the change.
+
 Unrun here: a GPU (GitHub's standard machines have none), so the Vulkan path is exercised only
 up to device detection and the fallback to the processor; Gatekeeper and SmartScreen prompts, which
 appear only for a file downloaded by a browser.
