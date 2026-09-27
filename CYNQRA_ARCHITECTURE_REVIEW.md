@@ -1,5 +1,9 @@
 # Cynqra: the product against the code
 
+> **Update, 27 September 2026.** The founder made the product definition the core document for the build. Its
+> changes (section 9) are now implemented; what was built, stage by stage, is in CYNQRA_PRODUCT_ALIGNMENT.md.
+> This review stays as the record of the analysis and the risks it names.
+
 27 September 2026. A review of the Cynqra POC (branch `cynqra`) against the product definition of the same day:
 an AI workforce operating system that turns an objective into requirements, synthesizes the workforce, assigns
 intelligence to each worker, budgets it, governs its execution, measures it and replaces its intelligence while

@@ -12,15 +12,18 @@ import unittest
 import urllib.error
 import urllib.request
 
-from helpers import SCENARIO, TempDir, no_model_env, restore_env
+from helpers import SCENARIO, TempDir, approve, no_model_env, restore_env
 from test_failure_paths import FaultySource, approve_until, start
 
-from cynqra import deploy
+from cynqra import deploy, roles
 from cynqra.engine import Engine, EngineError
 from cynqra.intelligence import IntelligenceError, ModelSource, ScriptedSource, validate_plan
 from cynqra.server import App, make_server
 from cynqra.verification import run_unittests
 
+
+
+FIXTURE = roles.instantiate(roles.FIXTURE_M1)
 
 
 def plan_copy() -> dict:
@@ -35,7 +38,7 @@ class PlanValidationTests(unittest.TestCase):
             t["dependencies"] = [f"task-{d[-1]}" for d in t["dependencies"]]
         plan["tasks"][2]["dependencies"] = "task-1, task-2"
         plan["tasks"][0]["budget"] = "ten"
-        out = validate_plan(plan)
+        out = validate_plan(plan, FIXTURE)
         self.assertEqual([t["id"] for t in out["tasks"]], [f"t_0{i}" for i in range(1, 7)])
         self.assertEqual(out["tasks"][2]["dependencies"], ["t_01", "t_02"])
         self.assertEqual(out["tasks"][0]["budget"], 10)
@@ -44,7 +47,7 @@ class PlanValidationTests(unittest.TestCase):
         plan = plan_copy()
         plan["tasks"][4]["owner_worker_id"] = "w_eng_a"
         with self.assertRaises(IntelligenceError):
-            validate_plan(plan)
+            validate_plan(plan, FIXTURE)
 
     def test_a_refused_plan_is_retried_once_with_the_reason(self):
         src = ModelSource.__new__(ModelSource)
@@ -61,7 +64,7 @@ class PlanValidationTests(unittest.TestCase):
         src._call = call
         plan, usage = src.plan({"product": "x"})
         self.assertEqual(len(plan["tasks"]), 6)
-        self.assertIn("previous plan was refused", prompts[1])
+        self.assertIn("previous answer was refused", prompts[1])
         self.assertEqual(usage["units"], 2)
 
 
@@ -176,14 +179,15 @@ class PromptContentTests(unittest.TestCase):
         seen = {}
 
         class Spy(ScriptedSource):
-            def plan(self, objective, note=""):
+            def plan(self, objective, note="", **kw):
                 seen.update(objective)
-                return super().plan(objective, note)
+                return super().plan(objective, note, **kw)
 
         e = Engine(self.tmp.path, intelligence=Spy())
         e.create_company("Harbor Recruiting")
         e.draft_objective(SCENARIO["messy"])
-        e.confirm_objective()
+        e.submit_objective()
+        approve(e, "approve_workforce")
         e.close()
         self.assertEqual(seen.get("product"), SCENARIO["objective"]["product"])
         self.assertTrue(all(seen.get(k) for k in ("target_customer", "success_criteria", "constraints")))
@@ -220,25 +224,27 @@ class OutageTests(unittest.TestCase):
             e.resume()
         e.close()
 
-    def test_a_failed_plan_returns_the_objective_to_draft(self):
+    def test_a_failed_roadmap_stops_and_resumes_on_the_same_stage(self):
         class NoPlan(ScriptedSource):
             ok = False
 
-            def plan(self, objective, note=""):
+            def plan(self, objective, note="", **kw):
                 if not NoPlan.ok:
                     raise IntelligenceError("network error: timed out")
-                return super().plan(objective, note)
+                return super().plan(objective, note, **kw)
 
         e = Engine(self.tmp.path, intelligence=NoPlan())
         e.create_company("Harbor Recruiting")
         e.draft_objective(SCENARIO["messy"])
+        e.submit_objective()
         with self.assertRaises(IntelligenceError):
-            e.confirm_objective()
-        self.assertEqual(e.objective()["status"], "draft")
+            approve(e, "approve_workforce")
+        self.assertEqual(e.meta["phase"], "stopped_error")
         self.assertIn("Planning failed", e.meta["notice"])
         NoPlan.ok = True
-        e.confirm_objective()
+        e.resume()
         self.assertEqual(e.meta["phase"], "planning")
+        self.assertEqual([d["kind"] for d in e.pending_decisions()], ["approve_roadmap"])
         self.assertEqual(len([x for x in e.store.events() if x["event_type"] == "worker.hired"]), 4)
         e.close()
 
@@ -327,9 +333,12 @@ class ServerTests(unittest.TestCase):
         self.post("/api/company", {"name": "Harbor Recruiting", "mode": "demo"})
         self.post("/api/objective/draft", {"messy": SCENARIO["messy"]})
         self.post("/api/objective/confirm")
+        wf = self.app.engine.pending_decisions()[0]["id"]
+        self.post(f"/api/decisions/{wf}", {"action": "approve"})
+        self.assertEqual(self.app.state()["last_step"], {"did": "workforce approved"})
         plan = self.app.engine.pending_decisions()[0]["id"]
         self.post(f"/api/decisions/{plan}", {"action": "approve"})
-        self.assertEqual(self.app.state()["last_step"], {"did": "plan approved"})
+        self.assertEqual(self.app.state()["last_step"], {"did": "roadmap approved"})
         code, body = self.post("/api/run/step")
         self.assertEqual((code, body["did"]), (200, "assigned"))
         self.assertEqual(self.app.state()["last_step"]["task"], "t_01")

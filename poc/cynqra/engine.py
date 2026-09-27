@@ -1,8 +1,22 @@
-"""The Cynqra POC engine: one company, one fixed organization, one run.
+"""The Cynqra engine: one company, one objective, one run, following the product definition's canonical flow
+(Cynqra Product Flows and Architecture v1, section 3):
 
-Book 0 core loop, first transition only: objective -> organization -> working product.
-Everything a worker does passes the Gateway (identity, policy, budget, target check,
-execute, audit). Everything the founder does is a decision with a label (D-10).
+  Stage 0  the founder submits a project name, an objective, a budget and any constraints
+  Stage 1  Objective Intelligence: the objective structured, then decomposed into requirements and workstreams
+  Stage 2  Workforce Synthesizer (synthesis.py): the organization this objective needs, from the role catalog
+  Stage 3  Workforce approval gate: approve, reject (revised against the feedback), or edit where governance allows
+  Stage 4  Intelligence Router (workforce.py): a model for each worker, from the registry's evidence
+  Stage 5  Execution Planner (planner.py): milestones, tasks, acceptance criteria, owners, accountability
+  Stage 6  Roadmap approval gate, with
+  Stage 7  Budget Engine (budget.py): the budget in layers against the hard cap
+  Stage 8  Governed execution: everything a worker does passes the Gateway (identity, policy, budget, target
+           check, execute, sanitize, audit)
+  Stage 9  Verification: completed is not verified
+  Stage 10 Performance Engine (performance.py) and Replacement Engine (replacement.py): intelligence measured per
+           worker and task, and kept, rerouted or replaced while the worker's identity stays
+
+Everything the founder does is a decision with a label (D-10). The M1 build's fixed four-worker organization is a
+test fixture (roles.FIXTURE_M1), not the product.
 """
 from __future__ import annotations
 
@@ -16,22 +30,23 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-from . import deploy, policy
+import re
+
+from . import budget as budget_engine
+from . import deploy, performance, planner, policy, replacement, roles, synthesis
 from .db import IST, Store, digest, now
 from .intelligence import IntelligenceError, ModelSource, make
-from .workforce import MAX_REPLACEMENTS, ROLE_KINDS, Workforce, estimate
 from .protocol import ProtocolError, build
 from .verification import failure_summary, lint_documents, run_unittests
+from .workforce import Workforce
 
 OBJECTIVE_FIELDS = ["product", "target_customer", "primary_outcome", "business_outcome",
                     "success_criteria", "constraints", "priorities"]
-TEMPLATE = [
-    {"id": "w_cto", "role": "CTO", "title": "CTO", "capabilities": ["architecture", "review", "release"]},
-    {"id": "w_pm", "role": "PM", "title": "PM", "capabilities": ["product", "specs", "planning"]},
-    {"id": "w_eng_a", "role": "Engineer", "title": "Engineer A", "capabilities": ["backend", "testing"]},
-    {"id": "w_eng_b", "role": "Engineer", "title": "Engineer B", "capabilities": ["backend", "frontend", "testing"]},
-]
-REPORTS_TO = {"w_cto": "founder", "w_pm": "w_cto", "w_eng_a": "w_pm", "w_eng_b": "w_pm"}
+CONSTRAINT_KEYS = ["deadline", "geography", "technology", "compliance", "risk_tolerance"]  # Stage 0, optional
+# Output a worker may never write into the workspace: credentials. Found in a write, the write is refused (Stage 8,
+# "output is sanitized and recorded"); the refusal is audited like any policy decision.
+SECRET = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----|\bsk-ant-[\w-]{20,}|\bsk-[A-Za-z0-9]{32,}|\bhf_[A-Za-z0-9]{30,}"
+                    r"|\bAKIA[0-9A-Z]{16}\b|\bghp_[A-Za-z0-9]{36}\b")
 UNIT_COST = {"write_file": 1, "read_artifact": 0, "run_tests": 2, "merge_to_main": 2, "deploy_production": 4,
              "verify": 2, "integrate": 0}
 ALLOWED_EXT = {".py", ".md", ".html", ".json", ".txt", ".css", ".js"}
@@ -119,18 +134,36 @@ class Engine:
             model_id = self.worker(worker_id)["model_id"]
         return model_id, self.wf.reg.route(model_id)
 
-    def _staff(self) -> None:
-        staffing = self.wf.staff(self.store, TEMPLATE)
+    def _staff(self, refine: bool = False) -> None:
+        """Stage 4: a model for every worker. First over its role's kinds of work; once the roadmap exists, refined to
+        the kinds of the tasks the worker actually owns (two workers with the same title can end up on different
+        models when their workloads differ, and one model can power many workers)."""
+        workers = self.store.all("worker")
+        workload = None
+        if refine:
+            workload = {}
+            for t in self.tasks():
+                workload.setdefault(t["owner_worker_id"], [])
+                if t["kind"] not in workload[t["owner_worker_id"]]:
+                    workload[t["owner_worker_id"]].append(t["kind"])
+            a = self.assigner_id()
+            if a and any(t["owner_worker_id"] != a for t in self.tasks()):
+                workload.setdefault(a, []).append("assign")
+        staffing = self.wf.staff(self.store, workers, workload)
         for wid, s in staffing.items():
             w = self.worker(wid)
+            if refine and w.get("model_id") == s["model_id"]:
+                continue
+            before = w.get("model_id")
             w.update({"model_id": s["model_id"], "intelligence_source_id": s["model"], "cost_profile": "USD, metered"})
             self.store.put("worker", wid, w)
+            why = ("refined to the roadmap's workload: " + ", ".join(s["kinds"]) if refine else
+                   "lowest expected cost per verified task for its role's work: " + ", ".join(s["kinds"]))
             self.store.put("staffing", wid, {"worker_id": wid, "model_id": s["model_id"], "candidates": s["candidates"],
-                                              "at": now(), "why": "lowest expected cost per verified task for its role"})
+                                              "at": now(), "why": why, "kinds": s["kinds"], "previous": before})
             self.event("worker.model_assigned", "worker", wid, {"role": w["role"], "model_id": s["model_id"],
-                       "model": s["model"], "candidates": [{k: r[k] for k in ("model", "score", "p_task", "expected_usd",
-                                                                               "expected_minutes")} for r in s["candidates"]]},
-                       actor="workforce")
+                       "model": s["model"], "why": why, "candidates": [{k: r[k] for k in ("model", "score", "p_task",
+                       "expected_usd", "expected_minutes")} for r in s["candidates"]]}, actor="intelligence_router")
 
     def model_of(self, wid: str) -> str | None:
         w = self.worker(wid)
@@ -151,52 +184,38 @@ class Engine:
         self.store.put("meter", t["id"], {"usd": 0.0, "seconds": 0.0, "tokens": 0})
 
     def _replace_or_escalate(self, t: dict, why: str) -> dict:
-        """A worker keeps failing a task: give the worker another model that is expected to do better per dollar
-        and minute, and let it continue from where the last one stopped. The founder decides only when no model
-        fits, the budget does not, or this task has already had its replacements."""
-        if not self.staffed_by_registry() or t.get("replacements", 0) >= MAX_REPLACEMENTS:
-            return self._escalate(t, why)
-        wid = t["owner_worker_id"]
+        """A worker keeps failing a task: the Replacement Engine gives the work another intelligence that passes its
+        regression check (another model for this worker, or a peer of the same role), or the founder decides."""
+        return replacement.evaluate(self, t, why, forced=True)
+
+    # --- the organization, read from the store ---------------------------------------------------------
+    def workers(self) -> list[dict]:
+        return self.store.all("worker")
+
+    def assigner_id(self) -> str | None:
+        return roles.assigner(self.workers())
+
+    def answerers(self) -> list[str]:
+        return roles.answerers(self.workers()) or [self.assigner_id()]
+
+    def persona(self, wid: str) -> str:
         w = self.worker(wid)
-        old = w["model_id"]
-        L = self.wf.ledger(self.store)
-        left = L["reserve"] + max(0.0, L["allocated"].get(t["id"], 0.0) - L["spent"].get(t["id"], 0.0))
-        best, rows = self.wf.choose(self.store, [t["kind"]], budget_left=left, exclude={old})
-        if best is None:
-            return self._escalate(t, why + (" No other model in the registry can take it over within the budget."
-                                            if rows else " No other model in the registry is available."))
-        spent = L["spent"].get(t["id"], 0.0)
-        prior = [o for o in self.wf.reg.outcomes(old) if o["run_id"] == self.cid and o["task_id"] == t["id"]]
-        w.update({"model_id": best["model_id"], "intelligence_source_id": best["model"]})
-        self.store.put("worker", wid, w)
-        e = estimate(self.wf.reg, self.wf.reg.get(best["model_id"]), t["kind"],
-                     self.wf.settings(self.store)["time_value_per_hour"])
-        self.wf.reallocate(self.store, t, old, e)
-        n = self._count("replacement") + 1
-        rep = {"id": f"rep_{n:03d}", "task_id": t["id"], "worker_id": wid, "role": w["role"], "from": old,
-               "to": best["model_id"], "reason": why[:400], "attempts": len(prior), "usd_spent_by_previous": round(spent, 4),
-               "candidates": rows, "at": now(),
-               "inherited": ["objective", "task specification and handoff", "decided rules", "workspace files",
-                             "previous attempts and their failures", "test results"]}
-        self.store.put("replacement", rep["id"], rep)
-        self.event("worker.model_replaced", "worker", wid, {k: rep[k] for k in ("task_id", "from", "to", "reason", "attempts",
-                   "usd_spent_by_previous")} | {"candidates": [{k: r[k] for k in ("model", "score", "p_task", "expected_usd")}
-                                                             for r in rows]}, actor="workforce", correlation_id=t["id"])
-        handover = (f"You are taking over {t['id']} ({t['title']}) from the previous {w['role']}, who ran on "
-                    f"{self.wf.reg.get(old)['name']} and made {len(prior)} attempts without passing verification. "
-                    f"Why it was replaced: {why[:300]} Its files are in your workspace and kept; continue from them "
-                    "rather than starting again.")
-        t.update({"status": "REWORK" if t["kind"] in ("spec", "code") else "ASSIGNED", "attempts": 0, "cut_offs": 0,
-                  "replacements": t.get("replacements", 0) + 1,
-                  "feedback": handover + ("\n" + t["feedback"] if t.get("feedback") else "")})
-        self._save_task(t)
-        return {"did": "replaced", "task": t["id"], "from": old, "to": best["model_id"]}
+        return roles.prompt_text(w) if w else ""
+
+    def objective_ctx(self) -> dict:
+        obj = self.objective()
+        return {**obj["structured"], "_constraints": obj.get("founder_constraints") or {}}
 
     def _model_failed(self, t: dict, exc: IntelligenceError) -> dict | None:
         """A call to a worker's model failed. Counted against the model; a model down after repeated failures is
         replaced in every worker that runs on it, and the step is tried again."""
         if not (self.staffed_by_registry() and exc.model_id):
             return None
+        n = self._count("call_error") + 1
+        involved = [t.get("owner_worker_id"), self.assigner_id(), (t.get("blocker") or {}).get("needs_from")]
+        caller = next((w for w in involved if w and self.model_of(w) == exc.model_id), t.get("owner_worker_id"))
+        self.store.put("call_error", f"ce_{n:04d}", {"id": f"ce_{n:04d}", "worker_id": caller,
+                       "model_id": exc.model_id, "task_id": t.get("id"), "error": str(exc)[:300], "at": now()})
         self.wf.reg.record_call(exc.model_id, role="", purpose="error", task_kind=t.get("kind", ""), usage=exc.usage,
                                 run_id=self.cid, error=str(exc))
         m = self.wf.reg.get(exc.model_id)
@@ -209,11 +228,16 @@ class Engine:
                 target = t if t["owner_worker_id"] == w["id"] else (mine[0] if mine else None)
                 if target is not None:
                     out = self._replace_or_escalate(target, f"{m['name']} stopped answering: {exc}")
-                else:
-                    best, _ = self.wf.choose(self.store, ROLE_KINDS.get(w["role"], ["code"]), exclude={exc.model_id})
+                w = self.worker(w["id"])
+                if w.get("model_id") == exc.model_id:  # no open task, or its task was rerouted to a peer
+                    best, _ = self.wf.choose(self.store, roles.staffing_kinds(w["role"]), exclude={exc.model_id},
+                                             role_name=w["role"])
                     if best:
                         w.update({"model_id": best["model_id"], "intelligence_source_id": best["model"]})
                         self.store.put("worker", w["id"], w)
+                        self.event("worker.model_assigned", "worker", w["id"], {"role": w["role"],
+                                   "model_id": best["model_id"], "model": best["model"],
+                                   "why": f"{m['name']} is down"}, actor="intelligence_router")
         sys_ = self.store.get("workforce", "system")
         if sys_ and sys_.get("model_id") == exc.model_id:
             self.store.put("workforce", "system", {"model_id": None})  # chosen again on the next call
@@ -275,19 +299,26 @@ class Engine:
                 self.event("budget.threshold_reached", "company", self.cid,
                            {"threshold": mark, "spent": b["spent"], "cap": b["cap"], "unit": "work_units"},
                            actor="budget", correlation_id=task_id or self.cid)
-        if b["spent"] >= b["cap"] and b["state"] != "breaker":
-            b["state"] = "breaker"
-            self.event("budget.threshold_reached", "company", self.cid,
-                       {"threshold": 100, "spent": b["spent"], "cap": b["cap"], "unit": "work_units"},
-                       actor="budget", policy_decision="DENY", correlation_id=task_id or self.cid)
-            self.store.put("budget", "company", b)
-            self._decision("budget_breaker", problem="The company budget cap is reached. All work is paused.",
-                           recommendation=f"Raise the cap from {b['cap']} to {b['cap'] + 60} work units, or stop the run.",
-                           risk="HIGH", confidence="high", cost="none until work resumes",
-                           evidence=[f"spent {b['spent']} of {b['cap']}"],
-                           change="Nothing: the cap is yours to set.", severity="SEV-2", source="budget")
-            return
         self.store.put("budget", "company", b)
+        if b["spent"] >= b["cap"] and b["state"] != "breaker":
+            self._breaker(f"{b['spent']} of {b['cap']} work units", unit="work_units", task_id=task_id)
+
+    def _breaker(self, what: str, unit: str, task_id: str | None = None) -> None:
+        """The hard stop: the dollar cap (a run staffed from the registry) or the work-unit cap. All work pauses."""
+        b = self.budget()
+        b.update({"state": "breaker", "breaker_unit": unit})
+        self.store.put("budget", "company", b)
+        self.event("budget.threshold_reached", "company", self.cid, {"threshold": 100, "spent": what, "unit": unit},
+                   actor="budget", policy_decision="DENY", correlation_id=task_id or self.cid)
+        if unit == "USD":
+            cap = float(self.wf.settings(self.store)["budget_usd"])
+            rec = f"Raise the budget from ${cap:.2f} to ${cap * 1.5:.2f}, or stop the run."
+        else:
+            rec = f"Raise the cap from {b['cap']} to {b['cap'] + 60} work units, or stop the run."
+        self._decision("budget_breaker", problem="The project's budget cap is reached. All work is paused.",
+                       recommendation=rec, risk="HIGH", confidence="high", cost="none until work resumes",
+                       evidence=[f"spent {what}"], change="Nothing: the cap is yours to set.", severity="SEV-2",
+                       source="budget", extra={"unit": unit})
 
     # --- gateway ------------------------------------------------------------
     def gateway(self, worker_id: str, task_id: str, action_type: str, target: str = "", *,
@@ -305,7 +336,8 @@ class Engine:
                   "policy_decision": decision["decision"], "policy_reason": decision["reason"],
                   "policy_version": decision["policy_version"],
                   "authority_snapshot": {k: v for k, v in policy.MATRIX.get(w["role"], {}).items()},
-                  "intelligence": w["intelligence_source_id"], "budget_before": b["spent"], "status": "",
+                  "intelligence": w["intelligence_source_id"], "model_id": w.get("model_id"),
+                  "budget_before": b["spent"], "status": "",
                   "created_at": now(), "approval": approval}
         auth = f"{w['role']}:{policy.MATRIX.get(w['role'], {}).get(action_type, 'none')}"
         if decision["decision"] == "DENY":
@@ -335,6 +367,9 @@ class Engine:
                 return self._deny_target(action, task_id, auth, f"target {target!r} is outside the workspace rules")
             if content is None or len(content.encode("utf-8")) > 200_000:
                 return self._deny_target(action, task_id, auth, "content missing or larger than 200 KB")
+            if SECRET.search(content):
+                return self._deny_target(action, task_id, auth, "content holds what looks like a credential; "
+                                         "keys belong in environment variables, never in files")
             dest = (out_dir / rel).resolve()
             if out_dir.resolve() not in dest.parents:
                 return self._deny_target(action, task_id, auth, "path escapes the workspace")
@@ -343,9 +378,10 @@ class Engine:
             result = {"file": target, "hash": digest(content.encode("utf-8")), "bytes": len(content.encode("utf-8"))}
         elif action_type == "run_tests":
             folder = cwd or self._ws(worker_id, task_id) / "out"
+            t0 = time.time()
             report = run_unittests(folder)
             result = {"ran": report["ran"], "passed": report["passed"], "failed": report["failed"],
-                      "test_ids": [t["id"] for t in report["tests"]]}
+                      "test_ids": [t["id"] for t in report["tests"]], "seconds": round(time.time() - t0, 2)}
         elif action_type == "merge_to_main":
             main = self.paths["main"]
             if main.exists():
@@ -529,17 +565,25 @@ class Engine:
             return obj
 
     def set_guardrails(self, budget_cap: int | None = None, risk_tolerance: str | None = None,
-                       budget_usd: float | None = None, time_value_per_hour: float | None = None) -> dict:
+                       budget_usd: float | None = None, time_value_per_hour: float | None = None,
+                       constraints: dict | None = None, governance: dict | None = None) -> dict:
+        """Stage 0: the allocated budget and any explicit constraints (deadline, geography, technology, compliance,
+        risk tolerance)."""
         with self.lock:
             self._require("objective")
-            if budget_usd is not None or time_value_per_hour is not None:
+            if budget_usd is not None or time_value_per_hour is not None or governance:
                 s = Workforce.settings(self.store)
                 if budget_usd is not None:
                     if float(budget_usd) < 0:
                         raise EngineError("the budget cannot be negative")
-                    s["budget_usd"] = round(float(budget_usd), 2)
+                    s["budget_usd"] = round(float(budget_usd), 4)
                 if time_value_per_hour is not None:
                     s["time_value_per_hour"] = max(0.0, float(time_value_per_hour))
+                for k in ("compute_usd_per_hour", "infra_usd_per_day", "reserve_min_pct"):
+                    if (governance or {}).get(k) is not None:
+                        s[k] = max(0.0, float(governance[k]))
+                if (governance or {}).get("allow_workforce_override") is not None:
+                    s["allow_workforce_override"] = bool(governance["allow_workforce_override"])
                 self.store.put("workforce", "settings", s)
                 self.event("budget.changed", "company", self.cid, {"budget_usd": s["budget_usd"],
                            "time_value_per_hour": s["time_value_per_hour"], "unit": "USD"},
@@ -557,63 +601,152 @@ class Engine:
                            actor="founder", actor_type="human", authority="founder")
             if risk_tolerance:
                 company["risk_tolerance"] = risk_tolerance
+            if constraints:
+                obj = self.objective()
+                clean = {k: str(v).strip() for k, v in constraints.items() if k in CONSTRAINT_KEYS and str(v or "").strip()}
+                if obj is not None:
+                    obj["founder_constraints"] = clean
+                    self.store.put("objective", "obj_1", obj)
+                company["constraints"] = clean
+                if clean.get("risk_tolerance"):
+                    company["risk_tolerance"] = clean["risk_tolerance"]
             self.store.put("company", self.cid, company)
             return company
 
-    def confirm_objective(self) -> dict:
+    def submit_objective(self) -> dict:
+        """Stage 0 ends: the founder hands over the outcome, not the team. Stages 1 and 2 run at once: the objective
+        is decomposed into requirements and Cynqra proposes the organization. The founder's first decision is the
+        workforce gate."""
         with self.lock:
             self._require("objective")
             obj = self.objective()
             if obj is None:
-                raise EngineError("no objective to confirm")
-            if obj["missing_fields"]:
-                raise EngineError(f"fill these fields first: {', '.join(obj['missing_fields'])}")
-            d = self._decision("confirm_objective", problem="The structured objective needs the founder's confirmation.",
-                               recommendation="Confirm the objective as shown.", risk="LOW", confidence="high",
-                               cost="none", evidence=["objective obj_1"], change="Any field that reads wrong.",
-                               source="orchestrator")
-            return self.decide(d["id"], "approve")
+                raise EngineError("write the objective first")
+            for k in obj["missing_fields"]:
+                obj["structured"][k] = "not stated in the brief"
+            company = self.store.get("company", self.cid)
+            obj.update({"status": "submitted", "submitted_at": now(), "project": company["name"],
+                        "founder_constraints": obj.get("founder_constraints") or company.get("constraints") or {}})
+            self.store.put("objective", "obj_1", obj)
+            self._intervention("objective", "submitted")
+            self.event("objective.changed", "objective", "obj_1", {"version": obj["version"], "status": "submitted",
+                       "constraints": sorted(obj["founder_constraints"])}, actor="founder", actor_type="human",
+                       authority="founder")
+            try:
+                pkg, usage = self.intel.decompose(self.objective_ctx())
+                self._record_call("objective", "objective_system", "decompose", usage)
+                self.store.put("requirements", "req_1", {"id": "req_1", **pkg, "objective_version": obj["version"],
+                                                         "intelligence": usage["label"], "created_at": now()})
+                self.event("objective.decomposed", "objective", "obj_1", {"requirements": len(pkg["requirements"]),
+                           "workstreams": len(pkg["workstreams"]), "critical_path": pkg["critical_path"]},
+                           actor="objective_intelligence")
+                self._synthesize()
+            except IntelligenceError as exc:
+                obj["status"] = "draft"
+                self.store.put("objective", "obj_1", obj)
+                self._set_meta(notice=f"Objective intelligence failed: {exc}. Nothing was invented. Submit again to retry.")
+                raise
+            return self.objective()
 
-    def _after_confirm_objective(self, d: dict, action: str) -> None:
-        obj = self.objective()
-        obj.update({"status": "confirmed", "confirmed_by": "founder", "confirmed_at": now()})
-        self.store.put("objective", "obj_1", obj)
-        self.event("objective.changed", "objective", "obj_1", {"version": obj["version"], "status": "confirmed"},
-                   actor="founder", actor_type="human", authority="founder")
-        self._instantiate_org()
+    confirm_objective = submit_objective  # the M1 name of the same step
+
+    def requirements(self) -> dict | None:
+        return self.store.get("requirements", "req_1")
+
+    def proposal(self) -> dict | None:
+        cur = (self.store.get("workforce", "proposal") or {}).get("id")
+        return self.store.get("proposal", cur) if cur else None
+
+    def _synthesize(self, note: str = "") -> dict:
+        """Stage 2: the Workforce Synthesizer proposes the organization; Stage 3 puts it in front of the founder."""
+        req = self.requirements()
+        prop, usage = self.intel.synthesize(self.objective_ctx(), req, note=note)
+        self._record_call("objective", "workforce_synthesizer", "synthesize", usage)
+        n = self._count("proposal") + 1
+        prop.update({"id": f"wp_{n}", "version": n, "note": note, "intelligence": usage["label"], "created_at": now(),
+                     "status": "proposed"})
+        costs = synthesis.cost_by_role(self.wf, self.store, prop) if self.staffed_by_registry() else None
+        prop["cost_by_role"] = costs
+        self.store.put("proposal", prop["id"], prop)
+        self.store.put("workforce", "proposal", {"id": prop["id"]})
+        self.event("workforce.proposed", "organization", "org_1", {"proposal": prop["id"], "roles": {
+            r["role"]: r["quantity"] for r in prop["roles"]}, "workers": len(prop["workers"])},
+            actor="workforce_synthesizer")
+        total = sum(r["quantity"] for r in prop["roles"])
+        self._decision("approve_workforce",
+                       problem=f"Cynqra proposes a {total}-worker organization for your objective. {prop['summary']}",
+                       recommendation="Approve the proposed organization. Cynqra then assigns a model to every worker "
+                                      "and builds the roadmap and the budget for your second approval.",
+                       risk="LOW", confidence="medium",
+                       cost=(f"about ${sum(costs.values()):.4f} of model work per unit of each role's work" if costs
+                             else "priced in the roadmap and budget, next"),
+                       evidence=synthesis.evidence(prop, req, costs),
+                       change="A role the requirements do not need, a missing one, or a quantity that is wrong.",
+                       source="workforce_synthesizer", extra={"proposal": prop["id"]})
+        self._set_meta(phase="workforce", notice="")
+        return prop
+
+    def _after_approve_workforce(self, d: dict, action: str) -> None:
+        prop = self.proposal()
+        if action != "approve":
+            prop["status"] = "rejected"
+            self.store.put("proposal", prop["id"], prop)
+            self._synthesize(note=d.get("note") or "The founder rejected the proposal.")
+            return
+        edited = (d.get("edited") or {}).get("roles")
+        if edited:
+            prop = dict(prop, **synthesis.override(prop, edited, self.requirements(),
+                                                   bool(Workforce.settings(self.store)["allow_workforce_override"])))
+            self.event("workforce.overridden", "organization", "org_1", {"proposal": prop["id"], "roles": {
+                r["role"]: r["quantity"] for r in prop["roles"]}}, actor="founder", actor_type="human",
+                authority="founder")
+        prop["status"] = "approved"
+        self.store.put("proposal", prop["id"], prop)
+        self._instantiate_org(prop)
         try:
             self._plan()
         except IntelligenceError as exc:
-            obj["status"] = "draft"
-            self.store.put("objective", "obj_1", obj)
-            self._set_meta(notice=f"Planning failed: {exc}. Nothing was invented. Confirm again to retry.")
+            self._set_meta(notice=f"Planning failed: {exc}. Nothing was invented.", phase="stopped_error",
+                           failed_stage="plan")
             raise
 
-    def _instantiate_org(self) -> None:
+    def _instantiate_org(self, prop: dict) -> None:
+        """The approved proposal becomes the organization: workers with identities, roles, authority and reporting
+        lines generated from who is present (roles.instantiate). Then Stage 4: a model for each worker."""
         if self.store.get("organization", "org_1"):
             return
         label = self.intel.label
-        org = {"id": "org_1", "company_id": self.cid, "template": "fixed_mvp_4", "version": 1, "status": "proposed",
-               "workers": [w["id"] for w in TEMPLATE], "reports_to": REPORTS_TO,
+        workers = prop["workers"]
+        org = {"id": "org_1", "company_id": self.cid, "template": "synthesized", "proposal": prop["id"], "version": 1,
+               "status": "approved", "workers": [w["id"] for w in workers],
+               "roles": {r["role"]: r["quantity"] for r in prop["roles"]},
+               "reports_to": {w["id"]: w["reports_to"] for w in workers},
                "services": [{"id": "verification", "title": "Verification Service",
                              "note": "Platform service, not a worker. Runs tests, lint and review tiers."}]}
         self.store.put("organization", "org_1", org)
-        self.event("organization.changed", "organization", "org_1", {"template": "fixed_mvp_4", "worker_count": 4,
-                   "version": 1})
-        for t in TEMPLATE:
+        self.event("organization.changed", "organization", "org_1", {"template": "synthesized", "proposal": prop["id"],
+                   "worker_count": len(workers), "version": 1})
+        for t in workers:
             w = dict(t)
             w.update({"company_id": self.cid, "intelligence_source_id": label,
                       "authority_policy_id": f"{policy.POLICY_VERSION}:{t['role']}", "cost_profile": "work units",
-                      "status": "active", "reports_to": REPORTS_TO[t["id"]],
+                      "status": "active",
                       "performance_profile": {"verified": 0, "first_pass": 0, "reworks": 0, "blockers": 0}})
             self.store.put("worker", t["id"], w)
-            self.event("worker.hired", "worker", t["id"], {"role": t["role"], "intelligence": label})
+            self.event("worker.hired", "worker", t["id"], {"role": t["role"], "intelligence": label,
+                                                            "reports_to": t["reports_to"]})
         if self.staffed_by_registry():
             self._staff()
 
     def _plan(self, note: str = "") -> None:
-        plan, usage = self.intel.plan(self.objective()["structured"], note=note)
-        self._record_call("plan", "w_pm", "plan", usage)
+        """Stage 5, then Stage 7: the roadmap for the approved organization, and the budget built on it. Stage 6
+        puts both in front of the founder."""
+        workers = self.workers()
+        planner_id = self.assigner_id()
+        plan, usage = self.intel.plan(self.objective_ctx(), note=note, workers=workers, requirements=self.requirements(),
+                                      planner=planner_id, persona=self.persona(planner_id))
+        self._record_call("plan", planner_id, "plan", usage)
+        plan = planner.enrich(plan, workers)
         order = []
         for i, t in enumerate(plan["tasks"]):
             task = dict(t)
@@ -624,18 +757,48 @@ class Engine:
             self._save_task(task)
             order.append(task["id"])
             self.event("task.created", "task", task["id"], {"kind": task["kind"], "risk_tier": task["risk_tier"],
-                       "owner_worker_id": task["owner_worker_id"], "dependencies": task["dependencies"]},
-                       actor="w_pm", actor_type="worker", correlation_id=task["id"])
-        self.store.put("plan", "plan_1", {"id": "plan_1", "workstreams": plan["workstreams"], "order": order})
-        total = sum(int(self.task(t).get("budget") or 0) for t in order)
-        self._decision("approve_plan", problem="Cynqra proposes the fixed organization and a plan for your objective.",
-                       recommendation=f"Approve the four worker organization and the {len(order)} task plan.",
-                       risk="LOW", confidence="high", cost=f"about {total} work units of {self.budget()['cap']}",
-                       evidence=[f"{t}: {self.task(t)['title']}" for t in order],
-                       change="A task that does not serve the objective, or a missing one.", source="orchestrator")
+                       "owner_worker_id": task["owner_worker_id"], "dependencies": task["dependencies"],
+                       "milestone": task["milestone_id"]}, actor=planner_id, actor_type="worker", correlation_id=task["id"])
+        self.store.put("plan", "plan_1", {"id": "plan_1", "workstreams": plan["workstreams"], "order": order,
+                                          "milestones": plan["milestones"], "critical_path": plan["critical_path"],
+                                          "escalation_conditions": plan["escalation_conditions"],
+                                          "reporting": plan["reporting"], "coordination": plan["coordination"],
+                                          "uncovered_requirements": plan["uncovered_requirements"]})
+        if self.staffed_by_registry():
+            self._staff(refine=True)
+        f = self._forecast()
+        units = sum(int(self.task(t).get("budget") or 0) for t in order)
+        L = f["layers"]
+        cost = (f"${f['subtotal_usd']:.4f} forecast of the ${f['cap_usd']:.2f} cap, reserve ${f['reserve_usd']:.4f}"
+                if f["priced"] else f"about {units} work units of {self.budget()['cap']}; no model cost (scripted demo)")
+        ev = ["Milestones: " + "; ".join(f"{m['name']} (day {m['due_day']})" for m in plan["milestones"]),
+              f"Critical path: {' > '.join(plan['critical_path'])}"]
+        ev += [f"{t}: {self.task(t)['title']}, {self.task(t)['owner_worker_id']}" for t in order]
+        ev += [f"{k}: ${v['usd']:.4f} ({v['basis']})" for k, v in L.items()]
+        ev += f["warnings"]
+        if plan["uncovered_requirements"]:
+            ev.append("Requirements no task names: " + ", ".join(plan["uncovered_requirements"]))
+        self._decision("approve_roadmap",
+                       problem=f"The roadmap for the approved organization: {len(plan['milestones'])} milestones, "
+                               f"{len(order)} tasks, and the budget built on it.",
+                       recommendation="Approve the roadmap and the budget. Work starts; MEDIUM and HIGH steps still "
+                                      "come back to you.",
+                       risk="LOW" if f["fits"] else "MEDIUM", confidence="high" if f["fits"] else "medium", cost=cost,
+                       evidence=ev, change="A task that does not serve the objective, a missing one, or a budget line "
+                                           "that looks wrong.", source="execution_planner")
         self._set_meta(phase="planning")
 
-    def _after_approve_plan(self, d: dict, action: str) -> None:
+    def _forecast(self) -> dict:
+        """Stage 7: the Budget Engine's forecast for the current roadmap, kept for reconciliation."""
+        reg = self.wf.reg if self.staffed_by_registry() else None
+        f = budget_engine.construct(self.store, self.tasks(), self.workers(), reg, self.assigner_id())
+        f["at"] = now()
+        self.store.put("forecast", "current", f)
+        self.event("budget.constructed", "company", self.cid, {"subtotal_usd": f["subtotal_usd"], "cap_usd": f["cap_usd"],
+                   "reserve_usd": f["reserve_usd"], "fits": f["fits"], "units": f["units_total"]}, actor="budget_engine")
+        return f
+
+    def _after_approve_roadmap(self, d: dict, action: str) -> None:
         if action == "approve":
             org = self.store.get("organization", "org_1")
             org.update({"status": "active", "approved_by": "founder", "approved_at": now()})
@@ -647,9 +810,9 @@ class Engine:
                        actor_type="human", authority="founder")
             self._set_meta(phase="running", started_at=time.time(), notice="")
             if self.staffed_by_registry():
-                self.wf.allocate(self.store, self.tasks(), {w["id"]: w["model_id"] for w in self.store.all("worker")})
+                self.wf.allocate(self.store, self.tasks(), {w["id"]: w["model_id"] for w in self.workers()})
         else:
-            self._plan(note=d.get("note", ""))
+            self._plan(note=d.get("note") or "The founder asked for a different roadmap.")
 
     # --- the run --------------------------------------------------------------
     def step(self) -> dict:
@@ -681,6 +844,15 @@ class Engine:
                     t = self.task(t["id"])
                     t["attempts"] += 1
                     self._save_task(t)
+                    culprit = self.assigner_id() if s == "PLANNED" else (t.get("blocker") or {}).get("needs_from") \
+                        if s == "BLOCKED" else t["owner_worker_id"]
+                    n = self._count("violation") + 1
+                    self.store.put("violation", f"pv_{n:04d}", {"id": f"pv_{n:04d}", "worker_id": culprit,
+                                   "model_id": self.model_of(culprit) if culprit else None, "task_id": t["id"],
+                                   "error": str(exc)[:300], "at": now()})
+                    self.event("protocol.violation", "task", t["id"], {"worker": culprit, "error": str(exc)[:200]},
+                               actor=culprit or "orchestrator", actor_type="worker", correlation_id=t["id"],
+                               policy_decision="DENY")
                     if t["attempts"] >= MAX_ATTEMPTS:
                         return self._escalate(t, f"{t['id']}: the worker kept returning invalid protocol objects ({exc})")
                     if s in ("PLANNED", "BLOCKED"):
@@ -717,7 +889,10 @@ class Engine:
             c = self.wf.reg.record_call(usage["model_id"], role=(self.worker(worker) or {}).get("role", worker),
                                         purpose=purpose, task_kind=kind, usage=usage, run_id=self.cid)
             usage = dict(usage, usd=c["usd"])
-            self.wf.charge(self.store, worker, task_id, c["usd"])
+            L = self.wf.charge(self.store, worker, task_id, c["usd"])
+            cap_usd = float(self.wf.settings(self.store)["budget_usd"])
+            if L["spent_total"] >= cap_usd and self.budget()["state"] != "breaker":
+                self._breaker(f"${L['spent_total']:.4f} of ${cap_usd:.2f}", unit="USD", task_id=task_id)
             if task_id.startswith("t_") and purpose == "work":
                 m = self._meter(task_id)
                 self.store.put("meter", task_id, {"usd": m["usd"] + c["usd"], "seconds": m["seconds"] + c["seconds"],
@@ -731,19 +906,24 @@ class Engine:
 
     def _assign(self, t: dict) -> dict:
         owner = t["owner_worker_id"]
-        if owner in ("w_pm", "w_cto"):
+        boss = self.assigner_id()
+        if owner == boss or roles.role(self.worker(owner)["role"])["assigns"]:
             assigner = "orchestrator"
             arts = [a["id"] for a in self.store.all("artifact") if a["task_id"] in t.get("dependencies", [])]
+            crit = "; ".join(t.get("acceptance_criteria") or [])
             content = {"artifacts": arts, "context_ref": t["context"],
-                       "acceptance_check": f"{t['title']}. Expected: {t['expected_output']}. Verified by: {t['verification_method']}."}
+                       "acceptance_check": f"{t['title']}. Expected: {t['expected_output']}. "
+                                           + (f"Acceptance criteria: {crit}. " if crit else "")
+                                           + f"Verified by: {t.get('verification_gate') or t['verification_method']}."}
         else:
-            assigner = "w_pm"
-            g = self.gateway("w_pm", t["id"], "assign_task", target=t["id"])
+            assigner = boss
+            g = self.gateway(boss, t["id"], "assign_task", target=t["id"])
             if g["status"] != "executed":
                 return {"did": "blocked_by_policy", "task": t["id"]}
-            content, usage = self.intel.assign(t, objective=self.objective()["structured"], rules=self.rules(),
-                                               artifact_index=self._artifact_index())
-            self._record_call(t["id"], "w_pm", "assign", usage)
+            content, usage = self.intel.assign(t, objective=self.objective_ctx(), rules=self.rules(),
+                                               artifact_index=self._artifact_index(), worker=boss,
+                                               persona=self.persona(boss))
+            self._record_call(t["id"], boss, "assign", usage)
             if self.meta["frozen"]:
                 return self._frozen_during_call(t)
             known = set(self._artifact_index())
@@ -775,10 +955,11 @@ class Engine:
                     for p in sorted(out.rglob("*")) if p.is_file()}
         repo = sorted(p.relative_to(self.paths["integration"]).as_posix()
                       for p in self.paths["integration"].rglob("*") if p.is_file() and "__pycache__" not in p.parts)
-        result, usage = self.intel.work(t, worker=owner, objective=self.objective()["structured"], rules=self.rules(),
+        who = [w for w in self.answerers() if w != owner] or [self.assigner_id()]
+        result, usage = self.intel.work(t, worker=owner, objective=self.objective_ctx(), rules=self.rules(),
                                         handoff=t.get("handoff") or {}, inbox=self._inbox(t), feedback=t.get("feedback", ""),
                                         answers=t.get("answers", []), call_index=t["work_calls"], previous=previous,
-                                        repo_files=repo)
+                                        repo_files=repo, persona=self.persona(owner), answerers=who)
         t["work_calls"] += 1
         self._save_task(t)
         self._record_call(t["id"], owner, "work", usage)
@@ -786,7 +967,7 @@ class Engine:
             return self._frozen_during_call(t)
         kind = t["kind"]
         if result.get("result") == "blocked":
-            needs = result.get("needs_from") if result.get("needs_from") in ("w_pm", "w_cto") else "w_pm"
+            needs = result.get("needs_from") if result.get("needs_from") in who else who[0]
             blocker = self.send("Blocker", {"category": result.get("category", "missing_input"),
                                             "description": result.get("description", ""), "needs_from": needs},
                                 {"raised_by": owner, "task_id": t["id"]}, t["id"], owner)
@@ -942,6 +1123,7 @@ class Engine:
             evidence.append(f"{report.get('ran', 0)} tests on the release candidate, "
                             f"{'all passed' if report.get('passed') else 'failures: ' + ', '.join(report.get('failed', []))}")
             if not report.get("passed"):
+                self._escaped(report.get("failed", []), "release candidate", t["id"])
                 return self._escalate(t, "The release candidate fails its tests, so there is nothing safe to merge.")
         else:
             action_type = "deploy_production"
@@ -1005,12 +1187,13 @@ class Engine:
 
     def _answer(self, t: dict) -> dict:
         blocker = t["blocker"]
-        who = blocker.get("needs_from", "w_pm")
+        who = blocker.get("needs_from") or self.assigner_id()
         g = self.gateway(who, t["id"], "answer_blocker", target=t["id"])
         if g["status"] != "executed":
             return self._escalate(t, g["policy"]["reason"])
-        content, usage = self.intel.answer_blocker(t, worker=who, objective=self.objective()["structured"],
-                                                   rules=self.rules(), blocker=blocker, artifact_index=self._artifact_index())
+        content, usage = self.intel.answer_blocker(t, worker=who, objective=self.objective_ctx(), rules=self.rules(),
+                                                   blocker=blocker, artifact_index=self._artifact_index(),
+                                                   persona=self.persona(who))
         self._record_call(t["id"], who, "answer_blocker", usage)
         if self.meta["frozen"]:
             return self._frozen_during_call(t)
@@ -1033,6 +1216,7 @@ class Engine:
 
     def _verify(self, t: dict) -> dict:
         owner = t["owner_worker_id"]
+        t0 = time.time()
         vdir = self._candidate(t, self.dir / "verify" / f"{t['id']}_{t['attempts'] + 1}")
         out = self._ws(owner, t["id"]) / "out"
         n = self._count("verification") + 1
@@ -1059,17 +1243,27 @@ class Engine:
             lint = lint_documents(docs, self.objective()["structured"])
             passed = lint["passed"]
             test_ids = []
-            checks = {"lint": lint["findings"]}
+            checks = {"lint": lint["findings"], "acceptance_criteria": t.get("acceptance_criteria") or []}
             feedback = "; ".join(f["why"] for f in lint["findings"])
-            method = "coverage lint against the confirmed objective"
+            method = "coverage lint against the objective"
         verdict = "VERIFIED" if passed else ("REQUIRES_REWORK" if t["attempts"] + 1 < MAX_ATTEMPTS else "REQUIRES_HUMAN")
         self._outcome(t, passed, "" if passed else feedback)
         self.charge(UNIT_COST["verify"], "verify", t["id"])
+        work = digest({p.relative_to(out).as_posix(): digest(p.read_bytes()) for p in sorted(out.rglob("*")) if p.is_file()})
         v = {"id": vid, "company_id": self.cid, "task_id": t["id"], "attempt": t["attempts"] + 1,
              "risk_tier": t["risk_tier"], "method": method, "checks": checks, "reviewer_type": "service",
              "reviewer_id": "verification", "verdict": verdict, "test_ids": test_ids,
-             "output_hash": digest(json.dumps(checks)), "created_at": now()}
+             "output_hash": digest(json.dumps(checks)), "work_hash": work, "worker_id": owner,
+             "model_id": self.model_of(owner), "seconds": round(time.time() - t0, 2), "created_at": now()}
         self.store.put("verification", vid, v)
+        if passed:  # the same work failed before and passes now: that earlier verdict was a false rejection
+            for old in self.store.all("verification"):
+                if old["task_id"] == t["id"] and old["id"] != vid and old.get("work_hash") == work \
+                        and old["verdict"] != "VERIFIED" and not old.get("false_rejection"):
+                    old["false_rejection"] = True
+                    self.store.put("verification", old["id"], old)
+                    self.event("verification.false_rejection", "verification", old["id"], {"task_id": t["id"],
+                               "confirmed_by": vid}, actor="verification", correlation_id=t["id"])
         self.event("verification.completed", "verification", vid, {"task_id": t["id"], "verdict": verdict,
                    "method": method, "attempt": v["attempt"]}, actor="verification", correlation_id=t["id"],
                    test_ids=test_ids)
@@ -1093,7 +1287,29 @@ class Engine:
         self._save_task(t)
         self.event("task.failed", "task", t["id"], {"attempt": t["attempts"], "rework": True, "verification": vid},
                    actor="verification", correlation_id=t["id"], test_ids=test_ids)
+        moved = replacement.check_thresholds(self, t)  # Stage 10: evidence, not only the third failure, can move it
+        if moved and moved["did"] in ("replaced", "rerouted"):
+            return moved
         return {"did": "rework", "task": t["id"]}
+
+    def _escaped(self, failed_ids: list[str], where: str, source_task: str) -> None:
+        """Stage 9: a defect found after verification (in the release candidate, on main or live) escaped it. It is
+        counted against the verified task that owns the failing tests, and the model that did that task."""
+        mods = {i.split(".")[0] for i in failed_ids or []}
+        hit = []
+        for x in self.tasks():
+            files = {Path(o.get("file", "")).stem for o in x.get("outputs") or [] if isinstance(o, dict)}
+            if x["status"] == "VERIFIED" and x["kind"] == "code" and (files & mods or (not mods and "app" in files)):
+                hit.append(x)
+        for x in hit:
+            v = [y for y in self.store.all("verification") if y["task_id"] == x["id"] and y["verdict"] == "VERIFIED"]
+            n = self._count("escape") + 1
+            rec = {"id": f"esc_{n:03d}", "task_id": x["id"], "worker_id": x["owner_worker_id"],
+                   "model_id": v[-1].get("model_id") if v else None, "where": where, "found_by": source_task,
+                   "tests": sorted(failed_ids or [])[:20], "at": now()}
+            self.store.put("escape", rec["id"], rec)
+            self.event("verification.defect_escaped", "task", x["id"], {"where": where, "found_by": source_task},
+                       actor="verification", correlation_id=x["id"])
 
     def _integrate(self, t: dict, out: Path) -> None:
         dest_root = self.paths["integration"]
@@ -1154,7 +1370,17 @@ class Engine:
             self._set_meta(phase="stopped", notice=f"Run stopped by the founder at {t['id']}.")
 
     def _after_budget_breaker(self, d: dict, action: str) -> None:
-        if action == "approve":
+        if action == "approve" and (d.get("extra") or {}).get("unit") == "USD":
+            s = Workforce.settings(self.store)
+            spent = Workforce.ledger(self.store)["spent_total"]
+            s["budget_usd"] = round(float(d.get("edited", {}).get("budget_usd") or max(s["budget_usd"], spent) * 1.5), 4)
+            self.store.put("workforce", "settings", s)
+            b = self.budget()
+            b["state"] = "ok"
+            self.store.put("budget", "company", b)
+            self.event("budget.changed", "company", self.cid, {"budget_usd": s["budget_usd"], "unit": "USD"},
+                       actor="founder", actor_type="human", authority="founder")
+        elif action == "approve":
             b = self.budget()
             new_cap = int(d.get("edited", {}).get("cap") or b["cap"] + 60)
             b.update({"cap": new_cap, "state": "ok"})
@@ -1191,6 +1417,7 @@ class Engine:
             report = run_unittests(self.paths["main"])
             test_ids = [x["id"] for x in report["tests"]]
             if not report["passed"]:
+                self._escaped(report.get("failed", []), "main after the merge", t["id"])
                 return self._escalate(t, "main fails its tests after the merge")
             verdict, method, checks = "VERIFIED", "full test run on main", {"ran": report["ran"], "tree": g["result"]["tree"]}
         else:
@@ -1210,6 +1437,7 @@ class Engine:
                 self.event("deployment.failed", "deployment", dep["id"], {"stage": "SMOKE_TEST"}, correlation_id=t["id"],
                            actor="deployment")
                 self.event("deployment.rolled_back", "deployment", dep["id"], {}, correlation_id=t["id"], actor="deployment")
+                self._escaped([], "live health or smoke check", t["id"])
                 return self._escalate(t, "the live release failed its health or smoke check and was rolled back")
             self.event("deployment.verified", "deployment", dep["id"], {"url_port": res["url"].rsplit(":", 1)[-1],
                        "stages": [x["stage"] for x in dep["log"]]}, correlation_id=t["id"], actor="deployment")
@@ -1218,7 +1446,8 @@ class Engine:
         v = {"id": vid, "company_id": self.cid, "task_id": t["id"], "attempt": t["attempts"] + 1, "risk_tier": t["risk_tier"],
              "method": method, "checks": checks, "reviewer_type": "human" if t["kind"] == "decision" else "service",
              "reviewer_id": "founder" if t["kind"] == "decision" else "verification", "verdict": verdict,
-             "test_ids": test_ids, "output_hash": digest(json.dumps(checks)), "created_at": now()}
+             "test_ids": test_ids, "output_hash": digest(json.dumps(checks)), "worker_id": owner,
+             "model_id": self.model_of(owner), "seconds": None, "created_at": now()}
         self.store.put("verification", vid, v)
         self.event("verification.completed", "verification", vid, {"task_id": t["id"], "verdict": verdict, "method": method},
                    actor="verification", correlation_id=t["id"], test_ids=test_ids)
@@ -1244,9 +1473,12 @@ class Engine:
         m = self.metrics()
         tr = {"id": "tr_1", "company_id": self.cid, "problem": self.objective()["statement"],
               "evidence_refs": [v["id"] for v in self.store.all("verification")],
-              "proposed_change": "Create the fixed_mvp_4 organization and run the plan to a live release.",
+              "proposed_change": "Synthesize the organization the objective needs, staff it with intelligence and run "
+                                 "the approved roadmap to a live release.",
               "expected_result": self.objective()["structured"]["success_criteria"],
-              "cost": f"{self.budget()['spent']} work units", "risk": "HIGH (production deploy)",
+              "cost": (f"${budget_engine.actual(self.store, self.store.get('forecast', 'current'))['total_actual']:.4f}, "
+                       if self.staffed_by_registry() else "") + f"{self.budget()['spent']} work units",
+              "risk": "HIGH (production deploy)",
               "reversibility": "Stop the live process; the export holds everything.",
               "authority_check": "every MEDIUM and HIGH step approved by the founder",
               "approval": None, "actual_result": f"Live at {self.live_url()}", "confidence": "high",
@@ -1297,6 +1529,11 @@ class Engine:
         """After a model or network error: try the same step again. Nothing was written by the failed call."""
         with self.lock:
             self._require("stopped_error")
+            if self.meta.get("failed_stage") == "plan":
+                self._set_meta(failed_stage=None, notice="")
+                self._intervention("resume", "retry the roadmap after an intelligence error")
+                self._plan()
+                return self.meta
             self._set_meta(phase="running", notice="")
             self._intervention("resume", "retry after an intelligence error")
             self.event("state.changed", "company", self.cid, {"phase": "running", "control": "resume"},
@@ -1356,6 +1593,14 @@ class Engine:
             "escalation_budget": ESCALATIONS_PER_DAY,
             "seconds_to_live": round(end - start, 1) if start and end else None,
             "events": self.store.count_events(),
+            # Stage 9: what verification itself achieved
+            "first_pass_rate": round(sum(1 for t in verified if not t["attempts"]) / len(verified), 3) if verified else None,
+            "reworks": len([v for v in self.store.all("verification") if v["verdict"] == "REQUIRES_REWORK"]),
+            "defect_escapes": self._count("escape"),
+            "false_rejections": len([v for v in self.store.all("verification") if v.get("false_rejection")]),
+            "verification_seconds": round(sum(float(v.get("seconds") or 0) for v in self.store.all("verification")), 1),
+            "protocol_violations": self._count("violation"),
+            "intelligence_changes": self._count("replacement"),
         }
 
     def evolution(self) -> dict:
@@ -1402,7 +1647,8 @@ class Engine:
             return policy.who_may(subject)
         t = self.task(subject)
         if question == "owns":
-            return {"task": subject, "owner": t["owner_worker_id"], "reports_to": REPORTS_TO[t["owner_worker_id"]]}
+            return {"task": subject, "owner": t["owner_worker_id"],
+                    "reports_to": (self.worker(t["owner_worker_id"]) or {}).get("reports_to", "founder")}
         if question == "depends":
             return {"task": subject, "depends_on": t.get("dependencies", []),
                     "needed_by": [x["id"] for x in self.tasks() if subject in x.get("dependencies", [])]}
@@ -1441,6 +1687,22 @@ class Engine:
                        actor="export")
             return str(path)
 
+    def final_report(self) -> dict:
+        """Section 8, the last screen: what was delivered, the budget forecast against the actual, how every worker
+        and intelligence performed, and every intelligence change."""
+        src = self.paths["main"] if any(self.paths["main"].iterdir()) else self.paths["integration"]
+        files = sorted(p.relative_to(src).as_posix() for p in src.rglob("*") if p.is_file() and "__pycache__" not in p.parts)
+        reg = self.wf.reg if self.staffed_by_registry() else None
+        return {"artifacts": files, "live_url": self.live_url(),
+                "exports": sorted(p.name for p in self.paths["exports"].glob("*.zip")),
+                "requirements": {"total": len((self.requirements() or {}).get("requirements", [])),
+                                 "uncovered_by_tasks": (self.store.get("plan", "plan_1") or {}).get("uncovered_requirements", [])},
+                "economics": budget_engine.actual(self.store, self.store.get("forecast", "current")),
+                "forecast": self.store.get("forecast", "current"),
+                "performance": performance.all_cards(self.store, reg),
+                "intelligence_changes": self.store.all("replacement"), "evaluations": self.store.all("evaluation"),
+                "metrics": self.metrics()}
+
     def snapshot(self) -> dict:
         # Read without self.lock so the UI stays live while a step waits on a model call.
         m = self.meta
@@ -1466,6 +1728,16 @@ class Engine:
             "transition": self.store.get("transition", "tr_1"),
             "budget": self.budget(),
             "workforce": self.workforce_view(),
+            "catalog": roles.catalog(),
+            "requirements": self.requirements(),
+            "proposal": self.proposal(),
+            "forecast": self.store.get("forecast", "current"),
+            "economics": budget_engine.actual(self.store, self.store.get("forecast", "current"))
+            if self.store.get("forecast", "current") else None,
+            "performance": performance.all_cards(self.store, self.wf.reg if self.staffed_by_registry() else None)
+            if self.store.all("worker") else [],
+            "evaluations": self.store.all("evaluation"),
+            "final": self.final_report() if m.get("phase") in ("delivered", "accepted") else None,
             "metrics": self.metrics() if self.store.get("company", self.cid) else {},
             "evolution": self.evolution() if self.store.all("worker") else None,
             "rules": self.rules(),

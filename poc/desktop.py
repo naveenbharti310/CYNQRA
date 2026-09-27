@@ -273,9 +273,10 @@ def scripted_journey(d: Path) -> str:
     try:
         e.create_company("Self test", "demo")
         e.draft_objective(e.demo_messy)
-        e.confirm_objective()
-        plan = [x for x in e.pending_decisions() if x["kind"] == "approve_plan"][0]
-        e.decide(plan["id"], "approve")
+        e.submit_objective()
+        for gate in ("approve_workforce", "approve_roadmap"):  # the founder's two approvals of the canonical flow
+            d = [x for x in e.pending_decisions() if x["kind"] == gate][0]
+            e.decide(d["id"], "approve")
         for _ in range(300):
             if e.meta["phase"] in ("accepted", "stopped", "stopped_error"):
                 break
@@ -561,7 +562,7 @@ def e2e(args) -> int:
             api("/api/objective/fields", {"fields": {k: "none stated" for k in missing}})
         print(f"  objective: {obj['structured'].get('product')!r}; inferred {obj['inferred_fields']}", flush=True)
         api("/api/objective/confirm", {})
-        report["decisions"].append({"kind": "confirm_objective", "action": "approve"})
+        report["decisions"].append({"kind": "submit_objective", "action": "submit"})
         deadline = t0 + args.max_minutes * 60
         while time.time() < deadline:
             st = api("/api/state")
@@ -595,7 +596,7 @@ def e2e(args) -> int:
                                             "action": "approve"})
                 print(f"  {time.time() - t0:7.0f}s  approving {dd['kind']} {dd.get('task_id') or ''}", flush=True)
                 api(f"/api/decisions/{dd['id']}", {"action": "approve", "note": "", "edited": edited})
-                if dd["kind"] == "approve_plan":
+                if dd["kind"] == "approve_roadmap":
                     api("/api/run/auto", {"on": True, "delay": 0})
                 continue
             if phase == "running" and not st["auto"]["on"]:

@@ -40,7 +40,11 @@ def _task_in(prompt: str, prefix: str):
 def answer(prompt: str) -> str:
     if "Convert the founder objective" in prompt:
         out = S["objective"]
-    elif "Plan the work for the fixed organization" in prompt:
+    elif "Decompose the objective into requirements" in prompt:
+        out = S["requirements"]
+    elif "Synthesize the workforce for this objective" in prompt:
+        out = S["workforce"]
+    elif "Plan the work for this organization" in prompt:
         out = S["plan"]
     elif _task_in(prompt, "Assign task "):
         out = S["assign"][_task_in(prompt, "Assign task ")]

@@ -1,8 +1,9 @@
 # Cynqra POC
 
 One founder sentence in, a live product out, with the founder deciding only what needs a
-founder. Everything in the organization layer is real code: objective record, fixed
-organization, protocol objects, policy before every action, Tool Gateway, budget breaker,
+founder. It follows Cynqra Product Flows and Architecture v1 (see ../CYNQRA_PRODUCT_ALIGNMENT.md).
+Everything in the organization layer is real code: objective and requirements, a workforce
+synthesized from the role catalog, intelligence per worker, roadmap and budget, protocol objects, policy before every action, Tool Gateway, budget breaker,
 append only events, tiered verification, approval inbox, deployment lifecycle, export and
 replay. The spec, the decisions it enforces and the acceptance tests are in POC_SPEC.md.
 
@@ -66,16 +67,20 @@ starts with 120.
 ## What you will see, about five minutes in demo mode
 
 1. Objective. Structure the sentence into seven fields. Two are marked inferred. Edit,
-   set the budget cap, confirm. Founder decision 1.
-2. Plan. The fixed organization (CTO, PM, Engineer A, Engineer B, plus the Verification
-   Service) and six tasks. Approve. Founder decision 2.
+   set the dollar budget and any constraints, submit. Cynqra decomposes it into seven
+   requirements and synthesizes the workforce: a CTO, a Project Manager and two engineers,
+   each with the reason it is needed.
+2. Workforce gate. Approve the organization, or reject it with feedback and Cynqra revises it.
+3. Roadmap and budget gate. Three milestones, six tasks with owners, accountability,
+   acceptance criteria and verification gates, and the budget in layers. Approve.
 3. Work. Press Run. Engineer A's first attempt fails a test and goes back for rework.
    Engineer B raises a Blocker; the PM clears it without you. The CTO tries to email the
    recruiters; policy denies it without you.
 4. Your inbox gets four cards: a product rule (MEDIUM), the merge (MEDIUM), the production
-   deploy (HIGH) and delivery. Approve each. Founder decisions 3 to 6.
-5. Delivery. The product is live on a local URL. Open it, add a candidate. Download the
-   export bundle. Replay any task in Audit.
+   deploy (HIGH) and delivery. Approve each.
+5. Delivery. The product is live on a local URL, with the final report: artifacts, budget
+   forecast against actual, every worker's scorecard and every intelligence change. Open it,
+   add a candidate. Download the export bundle. Replay any task in Audit.
 
 Try also: the kill switch, a low budget cap (the breaker stops work at 100 percent),
 editing the objective mid run (the run pauses for your reconfirmation), and rejecting a

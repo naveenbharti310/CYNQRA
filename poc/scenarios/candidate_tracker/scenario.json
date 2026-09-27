@@ -16,6 +16,123 @@
     ],
     "missing_fields": []
   },
+  "requirements": {
+    "outcomes": [
+      "Every candidate has a visible stage",
+      "The founder sees stuck candidates without asking"
+    ],
+    "requirements": [
+      {
+        "id": "r_01",
+        "area": "product",
+        "text": "An internal tool for one company: the founder and two recruiters.",
+        "verification": "Spec names the users and says internal only"
+      },
+      {
+        "id": "r_02",
+        "area": "functional",
+        "text": "A recruiter can create a candidate and set its stage from a closed list.",
+        "verification": "Store and API tests"
+      },
+      {
+        "id": "r_03",
+        "area": "functional",
+        "text": "Anyone can list all candidates and filter the stuck ones.",
+        "verification": "Store and API tests"
+      },
+      {
+        "id": "r_04",
+        "area": "product",
+        "text": "What stuck means is a product rule decided by the founder.",
+        "verification": "Founder decision on record"
+      },
+      {
+        "id": "r_05",
+        "area": "design",
+        "text": "One web page shows candidates by stage with stuck ones marked.",
+        "verification": "App test fetches the page"
+      },
+      {
+        "id": "r_06",
+        "area": "security",
+        "text": "No public careers site and no applicant-facing routes.",
+        "verification": "Smoke test and acceptance check"
+      },
+      {
+        "id": "r_07",
+        "area": "deployment",
+        "text": "Runs as one process on the company's own host.",
+        "verification": "Health check and smoke test on the live URL"
+      }
+    ],
+    "workstreams": [
+      {
+        "id": "ws_spec",
+        "name": "Specification",
+        "requirement_ids": [
+          "r_01",
+          "r_04"
+        ],
+        "depends_on": []
+      },
+      {
+        "id": "ws_build",
+        "name": "Build",
+        "requirement_ids": [
+          "r_02",
+          "r_03",
+          "r_05",
+          "r_06"
+        ],
+        "depends_on": [
+          "ws_spec"
+        ]
+      },
+      {
+        "id": "ws_release",
+        "name": "Release",
+        "requirement_ids": [
+          "r_07"
+        ],
+        "depends_on": [
+          "ws_build"
+        ]
+      }
+    ]
+  },
+  "workforce": {
+    "summary": "A small internal tool: a CTO to own the architecture and the release, a Project Manager to specify and coordinate, and two full-stack engineers, one for the data store and one for the web app.",
+    "roles": [
+      {
+        "role": "CTO",
+        "quantity": 1,
+        "why": "Owns architecture, reviews the release and proposes the merge and the deploy.",
+        "requirement_ids": [
+          "r_06",
+          "r_07"
+        ]
+      },
+      {
+        "role": "PM",
+        "quantity": 1,
+        "why": "Writes the spec and acceptance checks, brings the stuck rule to the founder, assigns and unblocks the engineers.",
+        "requirement_ids": [
+          "r_01",
+          "r_04"
+        ]
+      },
+      {
+        "role": "Engineer",
+        "quantity": 2,
+        "why": "Two parallel builds: the candidate store, then the web app on it.",
+        "requirement_ids": [
+          "r_02",
+          "r_03",
+          "r_05"
+        ]
+      }
+    ]
+  },
   "plan": {
     "workstreams": [
       {
@@ -47,7 +164,16 @@
         "budget": 10,
         "deadline_day": 1,
         "verification_method": "Coverage lint against the confirmed objective",
-        "risk_tier": "LOW"
+        "risk_tier": "LOW",
+        "milestone_id": "m_1",
+        "acceptance_criteria": [
+          "spec.md names the users and the internal-only constraint",
+          "acceptance.md lists numbered checks covering every success criterion"
+        ],
+        "requirement_ids": [
+          "r_01",
+          "r_06"
+        ]
       },
       {
         "id": "t_02",
@@ -64,7 +190,14 @@
         "budget": 5,
         "deadline_day": 1,
         "verification_method": "Founder review (D-17)",
-        "risk_tier": "MEDIUM"
+        "risk_tier": "MEDIUM",
+        "milestone_id": "m_1",
+        "acceptance_criteria": [
+          "The founder has decided what stuck means"
+        ],
+        "requirement_ids": [
+          "r_04"
+        ]
       },
       {
         "id": "t_03",
@@ -85,7 +218,16 @@
         "budget": 20,
         "deadline_day": 2,
         "verification_method": "Automated tests, prior tests rerun",
-        "risk_tier": "LOW"
+        "risk_tier": "LOW",
+        "milestone_id": "m_2",
+        "acceptance_criteria": [
+          "Create, set stage from the closed list, list all and filter stuck work as the acceptance checks say",
+          "test_store.py covers every rule and passes"
+        ],
+        "requirement_ids": [
+          "r_02",
+          "r_03"
+        ]
       },
       {
         "id": "t_04",
@@ -105,7 +247,18 @@
         "budget": 20,
         "deadline_day": 3,
         "verification_method": "Automated tests, prior tests rerun",
-        "risk_tier": "LOW"
+        "risk_tier": "LOW",
+        "milestone_id": "m_2",
+        "acceptance_criteria": [
+          "GET /health and GET / answer 200",
+          "The page lists candidates by stage with stuck ones marked",
+          "No applicant-facing route"
+        ],
+        "requirement_ids": [
+          "r_03",
+          "r_05",
+          "r_06"
+        ]
       },
       {
         "id": "t_05",
@@ -126,7 +279,16 @@
         "budget": 10,
         "deadline_day": 4,
         "verification_method": "Full test run on main after the founder approves the merge",
-        "risk_tier": "MEDIUM"
+        "risk_tier": "MEDIUM",
+        "milestone_id": "m_3",
+        "acceptance_criteria": [
+          "Every test passes on main after the merge"
+        ],
+        "requirement_ids": [
+          "r_02",
+          "r_03",
+          "r_05"
+        ]
       },
       {
         "id": "t_06",
@@ -145,7 +307,31 @@
         "budget": 10,
         "deadline_day": 4,
         "verification_method": "Health check and smoke test on the live URL",
-        "risk_tier": "HIGH"
+        "risk_tier": "HIGH",
+        "milestone_id": "m_3",
+        "acceptance_criteria": [
+          "Health and smoke checks pass on the live URL"
+        ],
+        "requirement_ids": [
+          "r_07"
+        ]
+      }
+    ],
+    "milestones": [
+      {
+        "id": "m_1",
+        "name": "Spec and rules agreed",
+        "due_day": 1
+      },
+      {
+        "id": "m_2",
+        "name": "Tracker built and tested",
+        "due_day": 3
+      },
+      {
+        "id": "m_3",
+        "name": "Release 1 live",
+        "due_day": 4
       }
     ]
   },

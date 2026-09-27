@@ -7,7 +7,9 @@ Default is DENY: an action type or role not listed is refused.
 """
 from __future__ import annotations
 
-POLICY_VERSION = "poc-2026-09-26.1"
+from . import roles
+
+POLICY_VERSION = "poc-2026-09-27.1"
 
 # action_type -> risk tier (D-27 working text)
 RISK = {
@@ -33,25 +35,12 @@ RISK = {
 
 E, P, N = "execute", "propose", "none"
 
-# role -> action_type -> E / P / N (D-28 working text)
-MATRIX = {
-    "Engineer": {
-        "write_file": E, "read_artifact": E, "run_tests": E, "send_protocol": E,
-        "merge_to_main": P, "install_package": P,
-    },
-    "PM": {
-        "write_file": E, "read_artifact": E, "run_tests": E, "send_protocol": E,
-        "assign_task": E, "answer_blocker": E, "review_work": E, "product_rule_decision": P,
-    },
-    "CTO": {
-        "write_file": E, "read_artifact": E, "run_tests": E, "send_protocol": E,
-        "assign_task": E, "answer_blocker": E, "review_work": E, "product_rule_decision": P,
-        "merge_to_main": P, "install_package": P, "deploy_production": P,
-    },
-}
+# role -> action_type -> E / P / N (D-28 working text), one row per role in the catalog (roles.py). The rows of the
+# M1 roles (CTO, PM, Engineer) are unchanged; the roles the product definition adds get rows of their own.
+MATRIX = roles.matrix()
 
-FOUNDER_ONLY = {"change_objective", "change_budget", "change_authority", "confirm_objective",
-                "approve_plan", "accept_delivery", "kill_switch"}
+FOUNDER_ONLY = {"change_objective", "change_budget", "change_authority", "approve_workforce",
+                "approve_roadmap", "accept_delivery", "kill_switch"}
 
 
 def evaluate(*, role: str, action_type: str, autonomy_level: str = "L1", budget_state: str = "ok",

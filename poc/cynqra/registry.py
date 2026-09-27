@@ -113,14 +113,16 @@ class Registry:
         elif runtime == "hf" and os.environ.get("HF_TOKEN"):
             facts = hf_facts(ref)
         m = {"runtime": runtime, "ref": ref, "local": runtime == "llama", "provider": "", "version": "", "context": 0,
-             "license": "", "params": "", "hardware": "hosted" if runtime != "llama" else "", "price_in": 0.0,
-             "price_out": 0.0, "compute_usd_per_hour": 0.0, "base_url": "", "api_key_env": "", "effort": "",
-             "json_schema": True, "tools": False}
+             "license": "", "commercial_use": "", "params": "", "hardware": "hosted" if runtime != "llama" else "",
+             "price_in": 0.0, "price_out": 0.0, "compute_usd_per_hour": 0.0, "base_url": "", "api_key_env": "",
+             "effort": "", "json_schema": True, "tools": False, "mcp": False, "modalities": ["text"],
+             "fallback_id": ""}
         ref = facts.pop("ref", ref)
         m["ref"] = ref
         m.update(facts)
-        for k in ("name", "provider", "version", "context", "license", "params", "hardware", "price_in", "price_out",
-                  "compute_usd_per_hour", "base_url", "api_key_env", "effort", "json_schema", "tools"):
+        for k in ("name", "provider", "version", "context", "license", "commercial_use", "params", "hardware",
+                  "price_in", "price_out", "compute_usd_per_hour", "base_url", "api_key_env", "effort", "json_schema",
+                  "tools", "mcp", "modalities", "fallback_id"):
             if spec.get(k) not in (None, ""):
                 m[k] = spec[k]
         for k in ("price_in", "price_out", "compute_usd_per_hour"):
@@ -130,8 +132,14 @@ class Registry:
         m["id"] = spec.get("id") or slug(m["name"])
         with self.lock:
             old = self.store.get("model", m["id"])
+            # The regression gate: a new model, or a new version of a known one, is unverified until its calibration
+            # work passes (probe.py). A failed check makes it unavailable to the router.
+            same = old is not None and str(old.get("version") or "") == str(m.get("version") or "")
             m.update({"status": "active", "fault": (old or {}).get("fault") or {}, "health": {"errors": 0, "down_until": 0},
-                      "registered_at": (old or {}).get("registered_at") or now()})
+                      "registered_at": (old or {}).get("registered_at") or now(),
+                      "regression": (old or {}).get("regression") if same and (old or {}).get("regression")
+                      else {"status": "unverified", "version": m.get("version") or "", "at": now(),
+                            "previous_version": (old or {}).get("version") if old and not same else None}})
             self.store.put("model", m["id"], m)
         return m
 
@@ -171,6 +179,8 @@ class Registry:
             return False, "HF_TOKEN is not set"
         elif m["runtime"] == "openai_compatible" and m.get("api_key_env") and not os.environ.get(m["api_key_env"]):
             return False, f"{m['api_key_env']} is not set"
+        if (m.get("regression") or {}).get("status") == "failed":
+            return False, "failed its regression check"
         h = m.get("health") or {}
         if h.get("down_until", 0) > time.time():
             return False, f"down after {h.get('errors')} failed calls in a row"
@@ -245,12 +255,22 @@ class Registry:
                        source: str = "project") -> dict:
         """One verification of one attempt at a task: the unit Cynqra learns from."""
         with self.lock:
-            o = {"id": f"o_{self._n('outcome') + 1:06d}", "model_id": model_id, "role": role, "task_kind": task_kind,
+            version = (self.store.get("model", model_id) or {}).get("version") or ""
+            o = {"id": f"o_{self._n('outcome') + 1:06d}", "model_id": model_id, "model_version": version,
+                 "role": role, "task_kind": task_kind,
                  "task_id": task_id, "run_id": run_id, "attempt": attempt, "verified": bool(verified),
                  "first_pass": bool(verified and attempt == 1), "usd": round(usd, 6), "seconds": round(seconds, 1),
                  "tokens": int(tokens), "failure": failure[:400], "source": source, "at": now()}
             self.store.put("outcome", o["id"], o)
             return o
+
+    def set_regression(self, model_id: str, passed: bool, evidence: str) -> dict:
+        with self.lock:
+            m = self.get(model_id)
+            m["regression"] = {"status": "passed" if passed else "failed", "version": m.get("version") or "",
+                               "at": now(), "evidence": evidence[:300]}
+            self.store.put("model", model_id, m)
+            return m
 
     def _n(self, kind: str) -> int:
         return len(self.store.all(kind))
@@ -283,8 +303,19 @@ class Registry:
                 "write_tps": round(sum(tps) / len(tps), 1) if tps else None}
 
     def profile(self, model_id: str) -> dict:
-        kinds = sorted({o["task_kind"] for o in self.outcomes(model_id)})
-        return {"overall": self.stats(model_id), "by_task_kind": {k: self.stats(model_id, k) for k in kinds}}
+        """Measured record: overall, per kind of work, and the role/workload benchmark (the calibration and
+        regression work it did outside projects)."""
+        outs = self.outcomes(model_id)
+        kinds = sorted({o["task_kind"] for o in outs})
+        bench = [o for o in outs if o.get("source") in ("probe", "regression")]
+        by_version: dict[str, list] = {}
+        for o in outs:
+            by_version.setdefault(o.get("model_version") or "", []).append(o["verified"])
+        return {"overall": self.stats(model_id), "by_task_kind": {k: self.stats(model_id, k) for k in kinds},
+                "benchmark": {k: {"attempts": sum(1 for o in bench if o["task_kind"] == k),
+                                  "verified": sum(1 for o in bench if o["task_kind"] == k and o["verified"])}
+                              for k in sorted({o["task_kind"] for o in bench})},
+                "by_version": {v: {"attempts": len(x), "verified": sum(x)} for v, x in by_version.items()}}
 
     def snapshot(self) -> list[dict]:
         out = []

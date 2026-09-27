@@ -386,7 +386,7 @@ class WholeRunTests(DesktopBase):
         self.assertTrue(rep["product_tests"]["passed"])
         self.assertEqual(rep["health"]["status"], 200)
         kinds = [d["kind"] for d in rep["decisions"]]
-        self.assertEqual(kinds[:2], ["confirm_objective", "approve_plan"])
+        self.assertEqual(kinds[:3], ["submit_objective", "approve_workforce", "approve_roadmap"])
         self.assertIn("accept_delivery", kinds)
         self.assertTrue(Path(rep["product_copy"], "app.py").exists())
         self.assertGreater(len(rep["calls"]), 5)
@@ -414,6 +414,60 @@ class SelfTestTests(unittest.TestCase):
             tmp.cleanup()
             restore_env(saved)
 
+
+
+class WorkforceDemoTests(DesktopBase):
+    """desktop.py --workforce local, the [workforce] run, against the llama-server test double: three catalog
+    models downloaded (from a fake Hugging Face), registered, probed, the synthesized workforce approved, Engineer
+    A's model faulted, replaced, and the product delivered."""
+
+    args = WholeRunTests.args
+
+    def setUp(self):
+        super().setUp()
+        self._find, runtime.find_servers = runtime.find_servers, lambda: {"cpu": FAKE_SERVER}
+        os.environ["CYNQRA_REPORTS_DIR"] = str(self.tmp.path / "reports")
+        import workforce_demo
+        self.demo = workforce_demo
+        files = {}
+        for ref, _ in workforce_demo.LOCAL:
+            for repo, path in BY_ID[ref]["files"]:
+                files[(repo, path)] = os.urandom(1024 * 64)
+        self.hf.close()
+        self.hf = FakeHF(files)
+        runtime.HF = self.hf.base
+
+    def tearDown(self):
+        runtime.find_servers = self._find
+        super().tearDown()
+
+    def test_the_workforce_demonstration_passes(self):
+        args = self.args(workforce="local", budget_usd=2.0, no_probe=False, max_minutes=10,
+                         objective="Build me an internal tracker for candidates.")
+        self.assertEqual(self.demo.run(args), 0)
+        rep = json.loads(sorted((self.tmp.path / "reports").glob("workforce_*.json"))[-1].read_text())
+        self.assertEqual(rep["outcome"], "PASS", rep["reason"])
+        self.assertEqual([d["kind"] for d in rep["decisions"]][:2], ["approve_workforce", "approve_roadmap"])
+        self.assertTrue(rep["workforce_proposal"]["roles"])
+        self.assertTrue(rep["replacements"] and rep["replacements"][0]["from"] == rep["fault"]["model_id"])
+        self.assertIn("inference", rep["economics"]["layers"])
+
+
+class PackagingTests(unittest.TestCase):
+    def test_every_module_the_app_imports_is_packaged(self):
+        """The [workforce] run of 27 September failed on ModuleNotFoundError: workforce_demo was never copied into
+        the app. Every top-level module desktop.py imports from the POC folder must be in the build's APP_FILES."""
+        import ast
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("build", POC.parent / "desktop" / "build.py")
+        build = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(build)
+        tree = ast.parse((POC / "desktop.py").read_text(encoding="utf-8"))
+        names = {a.name.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+        names |= {n.module.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module}
+        local = {x for x in names if (POC / f"{x}.py").exists() or (POC / x).is_dir()}
+        packaged = {f.removesuffix(".py") for f in build.APP_FILES}
+        self.assertEqual(local - packaged, set())
 
 if __name__ == "__main__":
     unittest.main()

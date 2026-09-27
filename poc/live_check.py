@@ -163,8 +163,8 @@ def run(objective: str, max_usd: float, cap_units: int, data_dir: Path, log=prin
         if obj["missing_fields"]:
             return finish("FAIL", f"the model left objective fields empty: {obj['missing_fields']}")
         e.set_guardrails(budget_cap=cap_units)
-        e.confirm_objective()
-        decisions.append({"kind": "confirm_objective", "action": "approve"})
+        e.submit_objective()
+        decisions.append({"kind": "submit_objective", "action": "submit"})
         if e.meta["phase"] == "stopped_error":
             raise RuntimeError(e.meta.get("notice", "planning failed"))
         for _ in range(400):

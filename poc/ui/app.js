@@ -3,7 +3,7 @@
    Screens follow the mockups in poc/design/mockups (Book 0 sections 21 and 22). */
 
 const S = {
-  st: null, view: "company", worker: "w_eng_b", replayTask: null, replay: null, replayKey: "",
+  st: null, view: "company", worker: null, replayTask: null, replay: null, replayKey: "",
   seen: -1, sig: "", err: "", busy: false, graph: null, mode: "demo", shown: new Set(), guide: true, modelOpen: false,
   regOpen: false, probes: {},
 };
@@ -20,12 +20,16 @@ const FIELD_LABELS = {
 const KIND_TITLE = {
   decision: "Product rule", review_merge: "Merge release to main", deploy: "Production deploy",
   accept_delivery: "Accept delivery", budget_breaker: "Budget cap reached", escalation: "Escalation",
-  objective_change: "Objective change", approve_plan: "Organization and plan", confirm_objective: "Confirm objective",
+  objective_change: "Objective change", approve_workforce: "Proposed workforce", approve_roadmap: "Roadmap and budget",
 };
-const WORKER_TITLE = { w_cto: "CTO", w_pm: "PM", w_eng_a: "Engineer A", w_eng_b: "Engineer B", orchestrator: "Orchestrator", verification: "Verification", founder: "Founder" };
+const AREA_TITLE = { product: "Product", functional: "Functional", non_functional: "Non-functional", ai_ml: "AI and ML", data: "Data",
+  design: "Design", security: "Security", qa: "QA", devops: "DevOps", deployment: "Deployment" };
+const CONSTRAINTS = [["deadline", "Deadline"], ["geography", "Geography"], ["technology", "Technology"], ["compliance", "Compliance"], ["risk_tolerance", "Risk tolerance"]];
+const SERVICE_TITLE = { orchestrator: "Orchestrator", verification: "Verification", founder: "Founder", budget: "Budget Engine",
+  workforce_synthesizer: "Workforce Synthesizer", execution_planner: "Execution Planner", replacement_engine: "Replacement Engine" };
 const VIEWS = [["company", "Company"], ["organization", "Organization"], ["workforce", "Workforce"], ["work", "Work"],
   ["decisions", "Decisions"], ["models", "Models"], ["evolution", "Evolution"], ["audit", "Audit"], ["delivery", "Delivery"]];
-const wt = (id) => WORKER_TITLE[id] || id;
+const wt = (id) => { const w = ((S.st && S.st.workers) || []).find((x) => x.id === id); return w ? w.title : SERVICE_TITLE[id] || id; };
 
 async function api(path, body) {
   const opts = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
@@ -73,7 +77,7 @@ function paint(force) {
   const phase = S.st.meta.phase;
   const model = showModelScreen();
   const g = model ? "" : guideBar();
-  $("#app").innerHTML = (model ? modelScreen() : S.regOpen ? regScreen() : ["new", "objective", "planning"].includes(phase) ? wizard() : shell()) + g;
+  $("#app").innerHTML = (model ? modelScreen() : S.regOpen ? regScreen() : ["new", "objective", "workforce", "planning"].includes(phase) ? wizard() : shell()) + g;
   $("#app").classList.toggle("with-guide", !!g);
   const bar = $(".guide-bar");
   if (bar) document.documentElement.style.setProperty("--guide-h", bar.offsetHeight + "px");
@@ -108,7 +112,9 @@ function toasts(events) {
     else if (e.event_type === "verification.completed" && p.verdict === "REQUIRES_REWORK") { msg = `${p.task_id} sent back for rework: verification caught a defect`; kind = "warn"; }
     else if (e.event_type === "task.blocked") { msg = `${e.aggregate_id}: ${wt(e.actor_id)} raised a Blocker instead of guessing`; kind = "warn"; }
     else if (e.event_type === "action.denied") { msg = `Policy stopped ${p.action_type} by ${wt(e.actor_id)}`; kind = "bad"; }
-    else if (e.event_type === "decision.created" && !["confirm_objective"].includes(p.kind)) { msg = `Needs you: ${KIND_TITLE[p.kind] || p.kind}`; kind = "warn"; }
+    else if (e.event_type === "decision.created" && !["approve_workforce", "approve_roadmap"].includes(p.kind)) { msg = `Needs you: ${KIND_TITLE[p.kind] || p.kind}`; kind = "warn"; }
+    else if (e.event_type === "worker.model_replaced") { msg = `${wt(e.aggregate_id)} moved to another model: ${p.reason || ""}`.slice(0, 160); kind = "warn"; }
+    else if (e.event_type === "task.rerouted") { msg = `${e.aggregate_id} rerouted from ${wt(p.from_worker)} to ${wt(p.to_worker)}`; kind = "warn"; }
     else if (e.event_type === "deployment.verified") { msg = "Live and verified"; kind = "good"; }
     else if (e.event_type === "budget.threshold_reached") { msg = `Budget passed ${p.threshold} percent`; kind = p.threshold >= 100 ? "bad" : "warn"; }
     if (msg) toast(msg, kind);
@@ -121,80 +127,150 @@ function toast(msg, kind) {
   setTimeout(() => el.remove(), 4200);
 }
 
-/* ---------- wizard: objective, then organization and plan ---------- */
+/* ---------- wizard: the canonical flow up to the start of work ----------
+   1 Objective (Stage 0, 1)  2 Workforce (Stages 2, 3)  3 Roadmap and budget (Stages 4 to 7)  4 Run */
+function steps(on) {
+  return `<div class="steps">${["1 Objective", "2 Workforce", "3 Roadmap and budget", "4 Run"].map((x, i) => `<span class="${i === on ? "on" : ""}">${x}</span>`).join("")}</div>`;
+}
+
 function wizard() {
   const st = S.st, phase = st.meta.phase, obj = st.objective;
-  const top = `<div class="wiz-top"><div class="row"><span class="wordmark">Cynqra</span><span class="muted small">${esc(st.company ? st.company.name : "New company")}</span></div>
+  const top = `<div class="wiz-top"><div class="row"><span class="wordmark">Cynqra</span><span class="muted small">${esc(st.company ? st.company.name : "New project")}</span></div>
     <div class="row"><button class="btn sm" data-reg-open="1">Models (${regModels().length})</button>${guideToggle()}${modePill()}</div></div>`;
+  if (phase === "workforce") return `<div class="wiz">${top}${workforceStep()}</div>`;
   if (phase === "planning") return `<div class="wiz">${top}${planStep()}</div>`;
   const modeChoice = phase === "new" ? `
-      <label class="lbl" for="coname">Company name</label>
+      <label class="lbl" for="coname">Project name</label>
       <input type="text" id="coname" value="Harbor Recruiting">
       ${isDesktop() ? "" : `<div class="modes" role="radiogroup" aria-label="Intelligence">
         <label class="mode ${S.mode === "demo" ? "on" : ""}" id="m-demo"><input type="radio" name="mode" value="demo" ${S.mode === "demo" ? "checked" : ""}>Demo: scripted workers</label>
-        <label class="mode ${S.mode === "live" ? "on" : ""}" id="m-live"><input type="radio" name="mode" value="live" ${S.mode === "live" ? "checked" : ""}>Live: a real model</label>
+        <label class="mode ${S.mode === "live" ? "on" : ""}" id="m-live"><input type="radio" name="mode" value="live" ${S.mode === "live" ? "checked" : ""}>Live: real models</label>
       </div>`}` : "";
   const right = obj ? objectiveCard(obj) : `<div class="card" style="flex:1;display:flex;align-items:center;justify-content:center"><p class="muted">Your structured objective appears here.</p></div>`;
   return `<div class="wiz">${top}<div class="wiz-body">
     <div class="wiz-left">
-      <div class="steps"><span class="on">1 Objective</span><span>2 Organization and plan</span><span>3 Run</span></div>
-      <h1 class="hero">Tell Cynqra what you want to achieve.</h1>
-      <p class="lede">One sentence is enough. Cynqra turns it into a structured objective, proposes the organization to pursue it, and brings you only the decisions that need you.</p>
+      ${steps(0)}
+      <h1 class="hero">Tell Cynqra the outcome you want.</h1>
+      <p class="lede">You give the outcome, the budget and any constraints, not the team. Cynqra works out the requirements, the organization that delivers them, the intelligence for each worker, the roadmap and the budget, and asks you at two gates.</p>
       ${modeChoice}
       <label class="lbl" for="messy">Your objective</label>
       <textarea class="big" id="messy">${esc(obj ? obj.statement : st.demo_messy)}</textarea>
       <div class="row"><button class="btn primary" id="structure" ${S.busy ? "disabled" : ""}>${obj ? "Structure it again" : "Structure my objective"}</button></div>
       <div class="err" role="alert">${esc(S.err)}</div>
-      <p class="small muted" style="margin:0">${isDesktop() ? `Every word the CTO, the PM and the engineers write comes from ${esc(rt().model_name || "the model")}, running on this computer. Nothing leaves it. On a laptop each step takes minutes; the Work view shows what the model is doing.`
-        : "Demo mode: the words the workers write come from a prepared script, and every screen says so. Code is still written, tested and deployed for real. Live mode uses a model through the Cynqra model registry and needs an API key on this machine."}</p>
+      <p class="small muted" style="margin:0">${isDesktop() ? `Every word the workers write comes from ${esc(rt().model_name || "the model")}, running on this computer, or from the models in the registry. On a laptop each step takes minutes; the Work view shows what the model is doing.`
+        : "Demo mode: the words the workers write come from a prepared script, and every screen says so. Code is still written, tested and deployed for real. Live mode staffs every worker from the model registry."}</p>
     </div>
     <div class="wiz-right">${right}</div></div></div>`;
 }
 
 function objectiveCard(obj) {
-  const st = S.st;
+  const st = S.st, s = wfv().settings || { budget_usd: 5, time_value_per_hour: 10 };
   const fields = Object.keys(FIELD_LABELS).map((k) => {
     const inf = obj.inferred_fields.includes(k);
     return `<div class="field ${inf ? "inf" : ""}"><div class="between caps"><span>${FIELD_LABELS[k]}</span>
       <span class="tag ${inf ? "inferred" : "stated"}">${inf ? "Inferred, check it" : "Stated"}</span></div>
       <textarea rows="2" id="f_${k}" data-field="${k}" data-keep="no" aria-label="${FIELD_LABELS[k]}">${esc(obj.structured[k])}</textarea></div>`;
   }).join("");
+  const given = obj.founder_constraints || {};
+  const cons = CONSTRAINTS.map(([k, l]) => `<div class="between"><label for="c_${k}">${l}</label><input type="text" id="c_${k}" data-constraint="${k}" data-keep="no" value="${esc(given[k] || "")}" placeholder="optional" style="width:220px"></div>`).join("");
   return `<div class="card stack" style="flex:1">
-    <div class="between"><h2 style="font-size:20px">Structured objective</h2><span class="small muted">Version ${obj.version}, not yet confirmed · ${esc(obj.intelligence)}</span></div>
+    <div class="between"><h2 style="font-size:20px">Structured objective</h2><span class="small muted">Version ${obj.version} · ${esc(obj.intelligence)}</span></div>
     ${obj.notice ? `<div class="notice">${esc(obj.notice)}</div>` : ""}
     <div class="fields">${fields}
-      <div class="field" style="border-style:dashed"><div class="caps">Guardrails</div>
-        <div class="between"><label for="cap">Budget cap, work units</label><input type="number" id="cap" data-keep="no" min="20" value="${esc(st.budget.cap)}" style="width:110px"></div>
-        ${wfSettings() ? `<div class="between"><label for="usd">Budget, US dollars</label><input type="number" id="usd" data-keep="no" min="0" step="0.5" value="${esc(wfSettings().budget_usd)}" style="width:110px"></div>
-        <div class="between"><label for="tv">Value of an hour, US dollars</label><input type="number" id="tv" data-keep="no" min="0" step="1" value="${esc(wfSettings().time_value_per_hour)}" style="width:110px"></div>` : ""}
-        <div class="between small"><span>Autonomy</span><span>L1: low risk only (D-5)</span></div></div>
+      <div class="field" style="border-style:dashed"><div class="caps">Budget</div>
+        <div class="between"><label for="usd">Budget, US dollars (hard cap)</label><input type="number" id="usd" data-keep="no" min="0" step="0.5" value="${esc(s.budget_usd)}" style="width:110px"></div>
+        <div class="between"><label for="tv">Value of an hour, US dollars</label><input type="number" id="tv" data-keep="no" min="0" step="1" value="${esc(s.time_value_per_hour)}" style="width:110px"></div>
+        <div class="between"><label for="cap">Safety cap, work units</label><input type="number" id="cap" data-keep="no" min="20" value="${esc(st.budget.cap)}" style="width:110px"></div></div>
+      <div class="field" style="border-style:dashed"><div class="caps">Constraints, optional</div>${cons}</div>
     </div>
     <div class="between" style="margin-top:auto;padding-top:14px;border-top:1px solid var(--line)">
-      <span class="small muted">Confirming counts as one founder intervention.</span>
-      <button class="btn dark" id="confirm" ${S.busy ? "disabled" : ""}>Confirm objective</button></div></div>`;
+      <span class="small muted">Cynqra decomposes it into requirements and proposes the workforce. Submitting counts as one founder intervention.</span>
+      <button class="btn dark" id="confirm" ${S.busy ? "disabled" : ""}>Submit to Cynqra</button></div></div>`;
 }
 
-function planStep() {
-  const st = S.st;
-  const d = (st.decisions.pending || []).find((x) => x.kind === "approve_plan");
-  const rows = (st.tasks || []).map((t) => `<tr><td class="mono">${esc(t.id)}</td><td>${esc(t.title)}</td><td>${esc(wt(t.owner_worker_id))}</td>
-    <td>${riskPill(t.risk_tier)}</td><td class="mono small">${esc((t.dependencies || []).join(", ") || "none")}</td><td class="small">${esc(t.verification_method)}</td></tr>`).join("");
-  const workers = (st.workers || []).map((w) => `<div class="kv"><span>${esc(w.title)}</span><span>${esc(w.intelligence_source_id)}</span></div>`).join("");
+function orgChart(workers) {
+  const kids = (id) => workers.filter((w) => (w.reports_to || "founder") === id);
+  const node = (w) => `<li><div class="onode"><b>${esc(w.title)}</b><small>${esc(w.role)}${w.model ? " · " + esc(w.model) : ""}</small></div>${kids(w.id).length ? `<ul>${kids(w.id).map(node).join("")}</ul>` : ""}</li>`;
+  return `<div class="ochart"><ul><li><div class="onode founder"><b>Founder</b><small>approval gates</small></div><ul>${kids("founder").map(node).join("")}</ul></li></ul></div>`;
+}
+
+function reqList(req) {
+  if (!req) return "";
+  const byArea = {};
+  req.requirements.forEach((r) => (byArea[r.area] = byArea[r.area] || []).push(r));
+  return Object.entries(byArea).map(([a, rs]) => `<div class="stack" style="gap:2px"><span class="caps">${esc(AREA_TITLE[a] || a)}</span>
+    ${rs.map((r) => `<div class="small"><span class="mono">${esc(r.id)}</span> ${esc(r.text)} <span class="muted">Verified by: ${esc(r.verification || "n/a")}</span></div>`).join("")}</div>`).join("");
+}
+
+function workforceStep() {
+  const st = S.st, prop = st.proposal || {}, req = st.requirements, d = (st.decisions.pending || []).find((x) => x.kind === "approve_workforce");
+  const cost = prop.cost_by_role || {};
+  const roles = (prop.roles || []).map((r) => {
+    const cat = (st.catalog || []).find((c) => c.role === r.role) || {};
+    return `<tr><td><b>${esc(cat.title || r.role)}</b></td><td class="mono">${esc(r.quantity)}</td><td class="small">${esc(r.why)}</td>
+      <td class="mono small">${esc((r.requirement_ids || []).join(", "))}</td><td class="mono small">${cost[r.role] === undefined ? "n/a" : usd(cost[r.role])}</td>
+      ${allowOverride() ? `<td><input type="number" min="0" max="${esc(cat.max || 1)}" id="q_${esc(r.role)}" data-role="${esc(r.role)}" data-keep="no" value="${esc(r.quantity)}" style="width:60px" aria-label="Quantity"></td>` : ""}</tr>`;
+  }).join("");
+  const ws = req ? req.workstreams.map((w) => `<span class="pill grey">${esc(w.id)} ${esc(w.name)}</span>`).join(" ") : "";
   return `<div class="wiz-body">
     <div class="wiz-left">
-      <div class="steps"><span>1 Objective</span><span class="on">2 Organization and plan</span><span>3 Run</span></div>
-      <h1 class="hero">Your organization and plan.</h1>
-      <p class="lede">The fixed template for the MVP: a CTO, a PM and two engineers. The Verification Service checks their work and is not a worker. Nothing starts until you approve.</p>
-      <div class="card stack"><div class="caps">Organization, fixed_mvp_4</div>${workers}
-        <div class="kv"><span>Verification Service</span><span>platform, not a worker</span></div></div>
+      ${steps(1)}
+      <h1 class="hero">The workforce your objective needs.</h1>
+      <p class="lede">Cynqra decomposed the objective into ${req ? req.requirements.length : 0} requirements and synthesized the organization from its role catalog. You approve the organization; you do not have to build it.</p>
+      <div class="card stack"><div class="caps">Requirements</div>${reqList(req)}
+        <div class="small">Workstreams: ${ws}</div><div class="small">Critical path: <span class="mono">${esc(((req || {}).critical_path || []).join(" > "))}</span></div></div>
       <div class="err" role="alert">${esc(S.err)}</div>
     </div>
     <div class="wiz-right"><div class="card stack">
-      <div class="between"><h2 style="font-size:20px">Plan: ${(st.tasks || []).length} tasks</h2><span class="small muted">${esc(d ? d.cost : "")}</span></div>
-      <table class="plan-table"><thead><tr><th>Task</th><th>Title</th><th>Owner</th><th>Risk</th><th>Depends on</th><th>Verified by</th></tr></thead><tbody>${rows}</tbody></table>
-      <p class="small muted" style="margin:0">MEDIUM and HIGH work comes back to you before it happens (D-17, D-21). Approving counts as one founder intervention.</p>
-      <div class="row"><button class="btn primary" id="approve-plan" data-id="${esc(d ? d.id : "")}" ${S.busy || !d ? "disabled" : ""}>Approve organization and plan</button>
-        <button class="btn" id="replan" data-id="${esc(d ? d.id : "")}" ${S.busy || !d ? "disabled" : ""}>Ask for a different plan</button></div>
+      <div class="between"><h2 style="font-size:20px">Proposed organization: ${(prop.workers || []).length} workers</h2><span class="small muted">proposal ${esc(prop.id || "")} · ${esc(prop.intelligence || "")}</span></div>
+      <p class="small" style="margin:0">${esc(prop.summary || "")}</p>
+      <div class="tscroll"><table class="tbl"><thead><tr><th>Role</th><th>Qty</th><th>Why required</th><th>Covers</th><th>Expected cost</th>${allowOverride() ? "<th>Edit</th>" : ""}</tr></thead><tbody>${roles}</tbody></table></div>
+      ${orgChart(prop.workers || [])}
+      <p class="small muted" style="margin:0">Reporting lines are generated from the roles present. The Verification Service checks everyone's work and is not a worker. ${allowOverride() ? "Your governance policy allows editing the proposal: an edit is checked like any proposal and recorded as an override." : "Your governance policy does not allow editing it: reject with your feedback and Cynqra revises it."}</p>
+      <label class="lbl" for="wf_note">Feedback, if you reject</label><textarea class="note" id="wf_note" data-keep="yes"></textarea>
+      <div class="row"><button class="btn primary" id="approve-workforce" data-id="${esc(d ? d.id : "")}" ${S.busy || !d ? "disabled" : ""}>Approve the workforce</button>
+        <button class="btn" id="revise-workforce" data-id="${esc(d ? d.id : "")}" ${S.busy || !d ? "disabled" : ""}>Reject and revise</button></div>
+    </div></div></div>`;
+}
+const allowOverride = () => !!(wfv().settings || {}).allow_workforce_override;
+
+function budgetTable(f) {
+  if (!f) return "";
+  const rows = Object.entries(f.layers).map(([k, v]) => `<tr><td>${esc(k.charAt(0).toUpperCase() + k.slice(1))}</td><td class="mono">${usd(v.usd)}</td><td class="small">${esc(v.basis)}</td></tr>`).join("");
+  const byw = Object.entries(f.by_worker || {}).map(([w, v]) => `<span class="pill grey">${esc(wt(w))} ${f.priced ? usd(v.usd) : v.units + " units"}</span>`).join(" ");
+  return `<div class="tscroll"><table class="tbl"><thead><tr><th>Layer</th><th>USD</th><th>Basis</th></tr></thead><tbody>${rows}
+    <tr><td><b>Project total</b></td><td class="mono"><b>${usd(f.total_usd)}</b></td><td class="small">against the hard cap of ${usd(f.cap_usd)}${f.priced ? "" : `; ${f.units_total} work units`}</td></tr></tbody></table></div>
+    <div class="small">By worker: ${byw}</div>${(f.warnings || []).map((w) => `<div class="notice small">${esc(w)}</div>`).join("")}`;
+}
+
+function planStep() {
+  const st = S.st, plan = st.plan || {};
+  const d = (st.decisions.pending || []).find((x) => x.kind === "approve_roadmap");
+  const tasks = st.tasks || [];
+  const ms = (plan.milestones || []).map((m) => `<tr class="ms"><td colspan="6"><b>${esc(m.name)}</b> <span class="muted small">day ${esc(m.due_day)}</span></td></tr>
+    ${tasks.filter((t) => t.milestone_id === m.id).map((t) => `<tr><td class="mono">${esc(t.id)}</td><td>${esc(t.title)}<div class="small muted">${esc((t.acceptance_criteria || []).join("; "))}</div></td>
+      <td>${esc(wt(t.owner_worker_id))}<div class="small muted">accountable: ${esc(wt(t.accountable))}</div></td><td>${riskPill(t.risk_tier)}</td>
+      <td class="mono small">${esc((t.dependencies || []).join(", ") || "none")}</td><td class="small">${esc(t.verification_gate || t.verification_method)}</td></tr>`).join("")}`).join("");
+  const staffed = (wfv().workers || []).map((w) => `<div class="kv"><span>${esc(w.title)}</span><span>${esc(w.model)} · ${pctx((w.candidates[0] || {}).p_task)} · ${usd((w.candidates[0] || {}).expected_usd)}</span></div>`).join("")
+    || (st.workers || []).map((w) => `<div class="kv"><span>${esc(w.title)}</span><span>${esc(w.intelligence_source_id)}</span></div>`).join("");
+  return `<div class="wiz-body">
+    <div class="wiz-left">
+      ${steps(2)}
+      <h1 class="hero">The roadmap and the budget.</h1>
+      <p class="lede">The approved organization, a model for every worker, the roadmap in milestones with owners and acceptance criteria, and the budget built on it. Nothing starts until you approve.</p>
+      <div class="card stack"><div class="caps">Intelligence for each worker</div>${staffed}
+        <span class="small muted">${wfv().active ? "Chosen by the Intelligence Router from measured evidence: probability of passing verification, expected cost." : "Demo mode: one scripted source for every worker."}</span></div>
+      <div class="card stack"><div class="caps">Budget</div>${budgetTable(st.forecast)}</div>
+      <div class="err" role="alert">${esc(S.err)}</div>
+    </div>
+    <div class="wiz-right"><div class="card stack">
+      <div class="between"><h2 style="font-size:20px">Roadmap: ${(plan.milestones || []).length} milestones, ${tasks.length} tasks</h2><span class="small muted">${esc(d ? d.cost : "")}</span></div>
+      <table class="plan-table"><thead><tr><th>Task</th><th>Title and acceptance</th><th>Owner</th><th>Risk</th><th>Depends on</th><th>Verification gate</th></tr></thead><tbody>${ms}</tbody></table>
+      <div class="small">Critical path: <span class="mono">${esc((plan.critical_path || []).join(" > "))}</span></div>
+      <details><summary class="small">Escalation conditions</summary><ul class="small">${(plan.escalation_conditions || []).map((c) => `<li>${esc(c)}</li>`).join("")}</ul></details>
+      <p class="small muted" style="margin:0">MEDIUM and HIGH work still comes back to you before it happens. Approving counts as one founder intervention.</p>
+      <div class="row"><button class="btn primary" id="approve-plan" data-id="${esc(d ? d.id : "")}" ${S.busy || !d ? "disabled" : ""}>Approve roadmap and budget</button>
+        <button class="btn" id="replan" data-id="${esc(d ? d.id : "")}" ${S.busy || !d ? "disabled" : ""}>Ask for a different roadmap</button></div>
     </div></div></div>`;
 }
 
@@ -349,12 +425,13 @@ function stage() {
   const st = S.st, ts = st.tasks || [], by = (k) => ts.filter((t) => t.kind === k), m = st.meta;
   const ver = (arr) => arr.length && arr.every((t) => t.status === "VERIFIED");
   const waiting = (arr) => arr.some((t) => t.status === "AWAITING_FOUNDER");
-  const obj = st.objective && st.objective.status === "confirmed";
+  const obj = st.objective && st.objective.status === "submitted";
+  const wf = !!st.organization;
   const org = st.organization && st.organization.status === "active";
   const cls = (done, now, work) => done ? "done" : now ? "now" : work ? "work" : "";
   const build = by("spec").concat(by("decision"), by("code"));
   return [
-    ["Objective", cls(obj)], ["Organization", cls(org, !org && obj)],
+    ["Objective", cls(obj)], ["Workforce", cls(wf, !wf && obj)], ["Roadmap and budget", cls(org, !org && wf)],
     ["Build", cls(ver(build), waiting(build), org)], ["Verify", cls(ver(by("review_merge")), waiting(by("review_merge")), ver(build))],
     ["Deploy", cls(ver(by("deploy")), waiting(by("deploy")), ver(by("review_merge")))],
     ["Export", cls(["delivered", "accepted"].includes(m.phase) && m.phase === "accepted", m.phase === "delivered")],
@@ -373,7 +450,7 @@ function vCompany() {
   const tile = (v, l) => `<div class="tile"><b>${esc(v ?? "0")}</b><span>${l}</span></div>`;
   return `<div class="card stack">
       <div class="between" style="align-items:flex-start"><div class="stack" style="gap:6px">
-        <span class="caps">Objective, confirmed version ${esc(o.version)}</span>
+        <span class="caps">Objective, version ${esc(o.version)}, submitted by the founder</span>
         <span class="serif" style="font-size:28px;font-weight:600;line-height:1.2">${esc(o.structured.product)} for ${esc(o.structured.target_customer.toLowerCase())}</span>
         <span style="color:var(--ink2)">Success: ${esc(o.structured.success_criteria)}. ${esc(o.structured.constraints)}.</span></div>
         <span class="pill teal">Stage: ${esc(st.company.stage)}</span></div>
@@ -402,6 +479,7 @@ function vOrg() {
     return `<button class="node ${S.worker === id ? "sel" : ""}" data-worker="${id}"><b>${esc(ws[id] ? ws[id].title : id)}</b><small>${esc(note)}</small>
       ${b ? `<span class="busy">${esc(b.id)}: ${esc(statusText(b))}</span>` : ""}</button>`;
   };
+  if (!ws[S.worker] && (st.workers || []).length) S.worker = st.workers[st.workers.length - 1].id;
   const w = ws[S.worker] || {};
   const p = w.performance_profile || {};
   const cur = (st.tasks || []).filter((t) => t.owner_worker_id === S.worker && t.status !== "VERIFIED").map((t) => `${t.id} ${statusText(t)}`).join(", ") || "none";
@@ -413,11 +491,11 @@ function vOrg() {
     return `<div class="kv"><span class="mono">${a}</span><span class="auth-${cls}">${txt}</span></div>`;
   }).join("");
   const ans = S.graph ? `<div class="small" id="graph-answer">${graphAnswer(S.graph)}</div>` : "";
+  const kids = (id) => (st.workers || []).filter((x) => (x.reports_to || "founder") === id);
+  const branch = (id) => kids(id).length ? `<div class="vline"></div><div class="nodes">${kids(id).map((x) => `<div class="branch">${node(x.id, x.role)}${branch(x.id)}</div>`).join("")}</div>` : "";
   return `<div class="org"><div class="card tree">
-      <div class="node founder"><b>Founder</b><small>Objective, budget, HIGH risk, proposals</small></div><div class="vline"></div>
-      <div class="nodes">${node("w_cto", "Reviews, merges, proposes deploys")}<div class="node svc"><b>Verification Service</b><small style="color:var(--accent-ink)">Not a worker. Tests, lint, review</small></div></div>
-      <div class="vline"></div>${node("w_pm", "Specs, plans, assigns, clears Blockers")}<div class="vline"></div>
-      <div class="nodes">${node("w_eng_a", "Backend and tests")}${node("w_eng_b", "Web app and tests")}</div>
+      <div class="node founder"><b>Founder</b><small>Outcome, budget, the two approval gates, MEDIUM and HIGH risk</small></div>${branch("founder")}
+      <div class="nodes" style="margin-top:18px"><div class="node svc"><b>Verification Service</b><small style="color:var(--accent-ink)">Not a worker. Tests, lint, review</small></div></div>
       <div class="card stack" style="margin-top:28px;width:100%;background:var(--paper);border:0">
         <label class="lbl" for="gq">Ask the organization graph</label>
         <div class="row"><select id="gq"><option value="approves">Who approves</option><option value="owns">Who owns</option><option value="depends">What depends on</option></select>
@@ -430,7 +508,7 @@ function vOrg() {
       <div class="kv"><span>Verified, first pass</span><span class="mono">${p.verified || 0}, ${p.first_pass || 0}</span></div>
       <div class="kv"><span>Reworks, Blockers raised</span><span class="mono">${p.reworks || 0}, ${p.blockers || 0}</span></div>
       <h3 style="font-size:15px;margin-top:6px">Authority (${esc(st.policy.version)})</h3>${auth}
-      <p class="small muted" style="margin:6px 0 0">Identity stays when the intelligence changes: switch to a live model and the role, memory and history carry over.</p></div></div>`;
+      <p class="small muted" style="margin:6px 0 0">Worker is not model: the identity, role, authority and history stay when the intelligence under it changes.</p></div></div>`;
 }
 /* ---------------------------------------------------------------- the AI workforce and the model registry -- */
 const wfv = () => (S.st && S.st.workforce) || {};
@@ -470,11 +548,50 @@ function vWorkforce() {
       <details><summary class="small">The choice: every other available model</summary>${candTable(r.candidates, r.to)}</details></div>`).join("")
     || `<p class="muted small">No worker has been replaced in this run.</p>`;
   const ledger = (L.events || []).slice(-8).reverse().map((e) => `<div class="list-row small"><span>${e.what === "allocated" ? `Allocated ${e.tasks} tasks` : `${esc(e.task)}: released ${usd(e.released)} from ${esc(modelName(e.from))}, drew ${usd(e.drawn)} for ${esc(modelName(e.to))}`}</span><span class="mono">reserve ${usd(e.reserve)}</span></div>`).join("");
+  const inUse = {};
+  (wf.workers || []).forEach((w) => (inUse[w.model] = inUse[w.model] || []).push(w.title));
+  const reuse = Object.entries(inUse).map(([m, ws]) => `<div class="kv"><span>${esc(m)}</span><span>${esc(ws.join(", "))}</span></div>`).join("");
+  const evals = (S.st.evaluations || []).slice().reverse().map((e) => `<div class="list-row small"><span><b>${esc(e.decision)}</b> ${esc(e.task_id)}, ${esc(wt(e.worker_id))}: ${esc(e.why)}${e.regression_check ? ` · regression check: ${esc(e.regression_check)}` : ""}${e.why_kept ? ` · ${esc(e.why_kept)}` : ""}</span><span class="mono">${esc(e.at.slice(11, 19))}</span></div>`).join("");
   return `<div class="tiles">${tile(usd(s.budget_usd), "Budget")}${tile(usd(alloc), "Allocated to tasks")}${tile(usd(L.spent_total), "Spent")}
       ${tile(usd(L.reserve), "Reserve for retries and replacements")}${tile(`$${esc(s.time_value_per_hour)}/h`, "Value of an hour")}${tile((wf.replacements || []).length, "Replacements")}</div>
+    <div class="two"><div class="card stack"><h2 style="font-size:17px">Models in use</h2><span class="small muted">One model can power many workers; workers with the same title can run on different models.</span>${reuse}</div>
+      <div class="card stack"><h2 style="font-size:17px">Replacement Engine</h2><span class="small muted">Keep, reroute or replace, each with its reason.</span>${evals || '<p class="muted small">No evaluation yet.</p>'}</div></div>
     <div class="grid2">${workers}</div>
+    ${scorecards()}
     <h2 style="font-size:18px;margin:10px 0 4px">Replacements</h2>${reps}
     <div class="card"><h2 style="font-size:17px;margin-bottom:6px">Budget ledger</h2>${ledger || '<p class="muted small">Nothing allocated yet.</p>'}</div>`;
+}
+
+function scorecards() {
+  const cards = S.st.performance || [];
+  if (!cards.length) return "";
+  const n = (v) => (v === null || v === undefined ? "n/a" : v);
+  const rows = cards.map((c) => c.by_model.map((m) => `<tr><td>${esc(c.title)}</td><td>${esc(modelName(m.model_id) || "")}${m.model_id === c.model_id ? " (now)" : ""}</td>
+    <td class="mono">${pctx(m.quality.acceptance_rate)}</td><td class="mono">${n(m.quality.defect_escapes)}</td>
+    <td class="mono">${pctx(m.reliability.failure_rate)} / ${n(m.reliability.protocol_violations)} / ${n(m.reliability.tool_errors)}</td>
+    <td class="mono">${n(m.efficiency.latency_s)} s / ${n(m.efficiency.retries)}</td><td class="mono">${usd(m.economics.usd_per_verified)}</td>
+    <td class="mono">${m.capability_fit ? pctx(m.capability_fit.benchmark_pass_rate) : "n/a"}</td><td class="small">${m.stability ? esc(m.stability.regression) : "n/a"}</td>
+    <td class="mono">${n(m.human_friction.escalations)} / ${n(m.human_friction.rejections)}</td></tr>`).join("")).join("");
+  return `<div class="card"><h2 style="font-size:17px;margin-bottom:6px">Performance Engine: every worker on every model it ran on</h2>
+    <div class="tscroll"><table class="tbl"><thead><tr><th>Worker</th><th>Model</th><th>Acceptance</th><th>Escapes</th><th>Fail rate / violations / tool errors</th>
+    <th>Latency / retries</th><th>Cost per verified</th><th>Benchmark</th><th>Regression</th><th>Escalations / rejections</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+
+function finalReport() {
+  const f = S.st.final;
+  if (!f) return "";
+  const ec = f.economics || {};
+  const layers = Object.entries(ec.layers || {}).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="mono">${usd(v.forecast)}</td><td class="mono">${usd(v.actual)}</td><td class="mono">${usd(v.variance)}</td></tr>`).join("");
+  const byw = Object.entries(ec.by_worker || {}).map(([w, v]) => `<tr><td>${esc(wt(w))}</td><td class="mono">${usd(v.forecast)}</td><td class="mono">${usd(v.actual)}</td></tr>`).join("");
+  const changes = (f.intelligence_changes || []).map((r) => `<div class="small">${esc(r.task_id)}: ${esc(wt(r.worker_id))} ${r.rerouted ? `rerouted to ${esc(wt(r.to_worker))}` : `moved from ${esc(modelName(r.from))} to ${esc(modelName(r.to))}`}. ${esc(r.reason)}</div>`).join("") || `<p class="small muted">No intelligence changed in this run.</p>`;
+  return `<div class="card stack"><h2 style="font-size:17px">Final report</h2>
+    <div class="small">Delivered: ${esc(f.artifacts.length)} files (${esc(f.artifacts.slice(0, 12).join(", "))}${f.artifacts.length > 12 ? ", ..." : ""})${f.live_url ? `, live at ${esc(f.live_url)}` : ""}.</div>
+    <div class="two"><div><span class="caps">Budget, forecast against actual</span><div class="tscroll"><table class="tbl"><thead><tr><th>Layer</th><th>Forecast</th><th>Actual</th><th>Variance</th></tr></thead><tbody>${layers}
+      <tr><td><b>Total</b></td><td class="mono">${usd(ec.total_forecast)}</td><td class="mono">${usd(ec.total_actual)}</td><td class="mono">cap ${usd(ec.cap_usd)}</td></tr></tbody></table></div></div>
+      <div><span class="caps">By worker</span><div class="tscroll"><table class="tbl"><thead><tr><th>Worker</th><th>Forecast</th><th>Actual</th></tr></thead><tbody>${byw}</tbody></table></div></div></div>
+    <span class="caps">Intelligence changes</span>${changes}
+    <div class="small">First pass ${pctx(f.metrics.first_pass_rate)}, reworks ${esc(f.metrics.reworks)}, defect escapes ${esc(f.metrics.defect_escapes)}, false rejections ${esc(f.metrics.false_rejections)}, verification ${esc(f.metrics.verification_seconds)} s.</div></div>
+    ${scorecards()}`;
 }
 
 function modelName(id) { const m = regModels().find((x) => x.id === id); return m ? m.name : id; }
@@ -661,6 +778,7 @@ function vDelivery() {
     <div class="row small" style="gap:28px;flex-wrap:wrap"><span><span class="muted">URL</span> ${st.live_url ? `<a href="${esc(st.live_url)}" target="_blank" rel="noopener" class="mono" id="live-link">${esc(st.live_url.replace("http://", ""))}</a>` : "not live yet"}</span>
       <span><span class="muted">Health</span> ${esc(health)}</span><span><span class="muted">Smoke</span> ${esc(smoke)}</span>
       <span><span class="muted">Approved by</span> ${esc(dep && dep.approved_by ? dep.approved_by : "not yet (D-21)")}</span></div></div>
+    ${finalReport()}
     <div class="two"><div class="card stack"><h2 style="font-size:17px">Export bundle</h2>
       ${cats.map(([l]) => `<div class="kv"><span>${l}</span><span style="color:${ready ? "var(--green)" : "var(--muted)"};font-weight:600">${ready ? "included" : "after delivery"}</span></div>`).join("")}
       <a class="btn" href="/api/export" style="display:inline-flex;align-items:center;justify-content:center;text-decoration:none;color:var(--ink);margin-top:auto" id="export">Download export bundle</a></div>
@@ -688,20 +806,28 @@ function bind() {
   });
   on("confirm", () => {
     const fields = {}; $$("[data-field]").forEach((i) => fields[i.dataset.field] = i.value);
-    const cap = Number($("#cap").value);
-    const usd = $("#usd") ? Number($("#usd").value) : null, tv = $("#tv") ? Number($("#tv").value) : null;
+    const constraints = {}; $$("[data-constraint]").forEach((i) => constraints[i.dataset.constraint] = i.value);
+    const cap = Number($("#cap").value), usd = Number($("#usd").value), tv = Number($("#tv").value);
     act(async () => {
       await api("/api/objective/fields", { fields });
-      await api("/api/objective/guardrails", usd === null ? { budget_cap: cap } : { budget_cap: cap, budget_usd: usd, time_value_per_hour: tv });
+      await api("/api/objective/guardrails", { budget_cap: cap, budget_usd: usd, time_value_per_hour: tv, constraints });
       await api("/api/objective/confirm", {});
     });
   });
+  on("approve-workforce", (ev) => {
+    const id = ev.currentTarget.dataset.id, roles = [];
+    $$("[data-role]").forEach((i) => { if (Number(i.value) > 0) roles.push({ role: i.dataset.role, quantity: Number(i.value), why: "founder override" }); });
+    const prop = S.st.proposal || {}, same = roles.length === (prop.roles || []).length && roles.every((r) => (prop.roles.find((p) => p.role === r.role) || {}).quantity === r.quantity);
+    act(() => api(`/api/decisions/${id}`, { action: "approve", edited: roles.length && !same ? { roles } : null }));
+  });
+  on("revise-workforce", (ev) => { const id = ev.currentTarget.dataset.id, note = ($("#wf_note") || {}).value || "Revise the workforce";
+    act(() => api(`/api/decisions/${id}`, { action: "reject", note })); });
   on("approve-plan", (ev) => act(async () => {
     await api(`/api/decisions/${ev.currentTarget.dataset.id}`, { action: "approve" });
     await api("/api/run/auto", { on: true });
     S.view = "work";
   }));
-  on("replan", (ev) => act(() => api(`/api/decisions/${ev.currentTarget.dataset.id}`, { action: "reject", note: "Ask for a different plan" })));
+  on("replan", (ev) => act(() => api(`/api/decisions/${ev.currentTarget.dataset.id}`, { action: "reject", note: "Ask for a different roadmap" })));
   on("step", () => act(() => api("/api/run/step", {})));
   on("guide-toggle", () => { S.guide = !S.guide; paint(true); });
   on("guide-off", () => { S.guide = false; paint(true); });

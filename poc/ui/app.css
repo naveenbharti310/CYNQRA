@@ -280,3 +280,13 @@ pre.log{max-height:220px;overflow:auto;font:12px/1.45 var(--mono);background:var
 .row.wrap { flex-wrap: wrap; }
 .tscroll { overflow-x: auto; max-width: 100%; }
 .mcard .pill { white-space: normal; text-align: right; max-width: 55%; }
+/* the synthesized organization: a tree drawn from reporting lines */
+.branch{display:flex;flex-direction:column;align-items:center}
+.nodes{flex-wrap:wrap;justify-content:center}
+.ochart ul{list-style:none;margin:0;padding-left:18px;border-left:1px solid var(--line)}
+.ochart>ul{border-left:0;padding-left:0}
+.ochart li{margin:6px 0}
+.onode{display:inline-flex;flex-direction:column;border:1px solid var(--line);border-radius:10px;padding:6px 10px;background:var(--panel)}
+.onode.founder{background:var(--paper)}
+.onode small{font-size:12px;color:var(--muted)}
+.plan-table tr.ms td{background:var(--paper);padding-top:10px}

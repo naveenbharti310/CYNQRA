@@ -48,7 +48,7 @@ TARGETS = {
 # SHA-256 of every download. A file not listed here is checked against the digest GitHub publishes for the
 # release asset, and its hash is printed so it can be pinned here.
 PINNED: dict[str, str] = {}
-APP_FILES = ["desktop.py", "live_check.py", "cynqra", "ui", "scenarios"]
+APP_FILES = ["desktop.py", "live_check.py", "workforce_demo.py", "cynqra", "ui", "scenarios"]
 VC_RUNTIME = ("msvcp140", "vcruntime140", "concrt140", "vcomp140", "libomp140")
 
 

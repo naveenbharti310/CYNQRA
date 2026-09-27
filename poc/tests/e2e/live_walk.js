@@ -37,6 +37,10 @@ function loadPlaywright() {
     steps.push(`objective structured, ${await page.$$eval(".field.inf", (e) => e.length)} inferred fields`);
     await shot("objective");
     await page.click("#confirm");
+    await page.waitForSelector("#approve-workforce:not([disabled])", { timeout: LONG });
+    steps.push(`workforce proposed: ${await page.$$eval(".wiz-right .tbl tbody tr", (r) => r.length)} roles`);
+    await shot("workforce");
+    await page.click("#approve-workforce");
     await page.waitForSelector("#approve-plan:not([disabled])", { timeout: LONG });
     steps.push(`plan proposed: ${await page.$$eval(".plan-table tbody tr", (r) => r.length)} tasks`);
     await shot("plan");
@@ -50,7 +54,7 @@ function loadPlaywright() {
     }
     await page.click("#approve-plan");
     await page.waitForSelector("nav.side", { timeout: 60000 });
-    steps.push("organization and plan approved, run started");
+    steps.push("workforce, roadmap and budget approved, run started");
     for (let i = 0; i < 60; i++) {
       await page.waitForFunction(() => /Waiting on you|Delivered and accepted|Stopped/.test(document.querySelector("header.top")?.textContent || ""),
         null, { timeout: LONG });

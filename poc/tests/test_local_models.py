@@ -87,7 +87,7 @@ class LocalServerTests(unittest.TestCase):
         try:
             os.environ.update({"CYNQRA_LOCAL_BASE_URL": p.base + "/v1", "CYNQRA_MODEL": "qwen3.6-35b-a3b",
                                "CYNQRA_THINK": "false", "CYNQRA_SEED": "42"})
-            data, usage = ModelSource()._call("Plan the work for the fixed organization", schema={"type": "object"})
+            data, usage = ModelSource()._call("Plan the work for this organization", schema={"type": "object"})
             body = p.requests[-1]["body"]
             self.assertEqual(p.requests[-1]["path"], "/v1/chat/completions")
             self.assertEqual(body["response_format"]["json_schema"]["schema"], {"type": "object"})
@@ -123,7 +123,7 @@ class LocalServerTests(unittest.TestCase):
             os.environ.update({"HF_TOKEN": "hf_test_not_real", "CYNQRA_HF_MODEL": "openai/gpt-oss-120b:cerebras",
                                "HF_ROUTER_URL": p.base + "/v1", "CYNQRA_EFFORT": "low"})
             self.assertEqual(model_adapter.resolve()["kind"], "hf")
-            data, usage = ModelSource()._call("Plan the work for the fixed organization", schema={"type": "object"})
+            data, usage = ModelSource()._call("Plan the work for this organization", schema={"type": "object"})
             r = p.requests[-1]
             self.assertEqual((r["path"], r["headers"]["authorization"]), ("/v1/chat/completions", "Bearer hf_test_not_real"))
             self.assertEqual(r["body"]["model"], "openai/gpt-oss-120b:cerebras")

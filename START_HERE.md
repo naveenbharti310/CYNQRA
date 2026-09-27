@@ -22,8 +22,10 @@ Cynqra is a system that takes a human objective and builds, runs and changes the
 organization needed to reach it. A founder says what they want. Cynqra assembles the
 workers, gives them authority, coordinates them, verifies their output, and reports
 what happened. The first product proves one narrow slice of that: a founder describes
-a small web application, a fixed four worker template builds it, and the founder
-approves only the decisions that genuinely need a human.
+a small web application, Cynqra synthesizes the organization it needs (for the demo: a CTO,
+a Project Manager and two engineers), and the founder approves the workforce, the roadmap
+and only the other decisions that genuinely need a human. Since 27 September the build
+follows Cynqra Product Flows and Architecture v1: see CYNQRA_PRODUCT_ALIGNMENT.md.
 
 The candidate tracker you will see throughout this package is NOT the product. It is
 the practice project the fake organization was pointed at, so we could watch the

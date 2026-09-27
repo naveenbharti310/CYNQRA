@@ -1,4 +1,6 @@
-"""The whole demo journey, end to end, through the engine (A1, A3, A4, A5, A7, A8, A11, A12, A13)."""
+"""The whole demo journey, end to end, through the engine, in the product definition's canonical flow:
+objective, requirements, synthesized workforce (gate), intelligence, roadmap and budget (gate), governed
+execution, verification, delivery (A1, A3, A4, A5, A7, A8, A11, A12, A13)."""
 from __future__ import annotations
 
 import json
@@ -41,24 +43,61 @@ class JourneyTests(unittest.TestCase):
     def test_founder_only_sees_what_needs_them(self):
         kinds = [d["kind"] for d in self.answered]
         self.assertEqual(kinds, ["decision", "review_merge", "deploy", "accept_delivery"])
-        self.assertEqual(self.e.metrics()["founder_interventions"], 6)
+        # submitting the objective, the workforce gate, the roadmap gate, and the four above
+        self.assertEqual(self.e.metrics()["founder_interventions"], 7)
         risks = {d["kind"]: d["risk"] for d in self.answered}
         self.assertEqual(risks["decision"], "MEDIUM")
         self.assertEqual(risks["review_merge"], "MEDIUM")
         self.assertEqual(risks["deploy"], "HIGH")
 
-    def test_objective_confirmed_and_versioned(self):  # A1
+    def test_objective_submitted_and_decomposed(self):  # A1, Stages 0 and 1
         o = self.e.objective()
-        self.assertEqual((o["status"], o["version"], o["confirmed_by"]), ("confirmed", 1, "founder"))
-        confirm = self.e.store.get("decision", "dec_confirm_objective")
-        self.assertEqual(confirm["outcome_label"], "approved")
+        self.assertEqual((o["status"], o["version"], o["project"]), ("submitted", 1, "Harbor Recruiting"))
+        req = self.e.requirements()
+        self.assertEqual([r["id"] for r in req["requirements"]][:2], ["r_01", "r_02"])
+        self.assertEqual(req["critical_path"], ["ws_01", "ws_02", "ws_03"])
+        self.assertFalse([d for d in self.e.store.all("decision") if d["kind"] == "confirm_objective"],
+                         "the founder specifies the outcome; there is no separate objective gate")
 
-    def test_exactly_the_fixed_template(self):  # A3
+    def test_workforce_synthesized_then_approved(self):  # A3, Stages 2 and 3
+        prop = self.e.proposal()
+        self.assertEqual({r["role"]: r["quantity"] for r in prop["roles"]}, {"CTO": 1, "PM": 1, "Engineer": 2})
+        self.assertTrue(all(r["why"] for r in prop["roles"]))
+        self.assertTrue(all(prop["coverage"].values()), "every requirement covered by a proposed role")
+        gate = [d for d in self.e.store.all("decision") if d["kind"] == "approve_workforce"][0]
+        self.assertEqual(gate["outcome_label"], "approved")
         ws = self.e.store.all("worker")
         self.assertEqual(sorted(w["id"] for w in ws), ["w_cto", "w_eng_a", "w_eng_b", "w_pm"])
+        self.assertEqual({w["id"]: w["reports_to"] for w in ws},
+                         {"w_cto": "founder", "w_pm": "w_cto", "w_eng_a": "w_pm", "w_eng_b": "w_pm"},
+                         "reporting lines generated from the roles present")
         org = self.e.store.get("organization", "org_1")
-        self.assertEqual(org["template"], "fixed_mvp_4")
-        self.assertEqual(org["status"], "active")
+        self.assertEqual((org["template"], org["status"]), ("synthesized", "active"))
+
+    def test_roadmap_and_budget_approved_separately(self):  # Stages 5, 6 and 7
+        plan = self.e.store.get("plan", "plan_1")
+        self.assertEqual([m["id"] for m in plan["milestones"]], ["m_1", "m_2", "m_3"])
+        self.assertEqual(plan["critical_path"], ["t_01", "t_02", "t_03", "t_04", "t_05", "t_06"])
+        self.assertTrue(plan["escalation_conditions"])
+        for t in self.e.tasks():
+            self.assertTrue(t["acceptance_criteria"] and t["verification_gate"] and t["accountable"], t["id"])
+        self.assertEqual(self.e.task("t_03")["accountable"], "w_pm")
+        f = self.e.store.get("forecast", "current")
+        self.assertEqual(set(f["layers"]), {"inference", "tools", "infrastructure", "verification", "reserve"})
+        self.assertEqual(f["units_total"], 75)
+        kinds = [d["kind"] for d in self.e.store.all("decision")][:2]
+        self.assertEqual(kinds, ["approve_workforce", "approve_roadmap"])
+
+    def test_final_report(self):  # section 8, the last screen
+        r = self.e.final_report()
+        self.assertIn("app.py", r["artifacts"])
+        self.assertTrue(r["live_url"])
+        self.assertEqual({c["worker_id"] for c in r["performance"]}, {"w_cto", "w_pm", "w_eng_a", "w_eng_b"})
+        eng = next(c for c in r["performance"] if c["worker_id"] == "w_eng_a")["overall"]
+        self.assertEqual((eng["quality"]["verifications"], eng["quality"]["acceptance_rate"]), (2, 0.5))
+        self.assertEqual(r["intelligence_changes"], [], "one scripted source: nothing to replace")
+        m = r["metrics"]
+        self.assertEqual((m["reworks"], m["defect_escapes"], m["false_rejections"]), (1, 0, 0))
 
     def test_graph_answers_owner_dependency_approver(self):  # A4
         self.assertEqual(self.e.graph("owns", "t_04")["owner"], "w_eng_b")

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from helpers import POC, TempDir, engine_to_running, fake_model_cmd, no_model_env, restore_env, run_journey
 
-from cynqra import deploy
+from cynqra import deploy, roles
 from cynqra.engine import Engine
 from cynqra.intelligence import IntelligenceError, ModelSource, validate_plan
 from cynqra.verification import run_unittests
@@ -64,13 +64,14 @@ class LiveModeTests(unittest.TestCase):  # A15
             {"id": "t_01", "workstream_id": "w", "kind": "code", "owner_worker_id": "w_eng_a", "title": "a", "risk_tier": "HIGH"},
             {"id": "t_02", "workstream_id": "w", "kind": "review_merge", "owner_worker_id": "w_cto", "title": "b", "dependencies": ["t_01"]},
             {"id": "t_03", "workstream_id": "w", "kind": "deploy", "owner_worker_id": "w_cto", "title": "c", "dependencies": ["t_02"]}]}
-        p = validate_plan(good)
+        fixture = roles.instantiate(roles.FIXTURE_M1)
+        p = validate_plan(good, fixture)
         self.assertEqual(p["tasks"][0]["risk_tier"], "LOW", "the model cannot set its own risk tier")
         bad_owner = {"tasks": [dict(good["tasks"][0], owner_worker_id="w_pm")] + good["tasks"][1:]}
         for bad in ({"tasks": []}, bad_owner, {"tasks": good["tasks"][:2]},
                     {"tasks": [dict(good["tasks"][0], dependencies=["t_09"])] + good["tasks"][1:]}):
             with self.assertRaises(IntelligenceError):
-                validate_plan(bad)
+                validate_plan(bad, fixture)
 
     def test_adapter_copy_matches_the_spike_adapter(self):
         spike = POC.parent / "02_harness" / "spikes" / "model_adapter.py"

@@ -45,15 +45,25 @@ def fake_model_cmd(fail: bool = False) -> str:
     return f'"{sys.executable}" "{FAKE_MODEL}"' + (" --fail" if fail else "")
 
 
+def approve(e: Engine, kind: str, action: str = "approve", **kw) -> dict:
+    d = [x for x in e.pending_decisions() if x["kind"] == kind][0]
+    return e.decide(d["id"], action, **kw)
+
+
+def engine_to_gates(e: Engine) -> Engine:
+    """The founder's two approvals of the canonical flow: the synthesized workforce, then the roadmap and budget."""
+    approve(e, "approve_workforce")
+    approve(e, "approve_roadmap")
+    return e
+
+
 def engine_to_running(folder: Path, cap: int = 120, mode: str = "demo") -> Engine:
     e = Engine(folder)
     e.create_company("Harbor Recruiting", mode)
     e.draft_objective(SCENARIO["messy"])
     e.set_guardrails(budget_cap=cap)
-    e.confirm_objective()
-    plan = [d for d in e.pending_decisions() if d["kind"] == "approve_plan"][0]
-    e.decide(plan["id"], "approve")
-    return e
+    e.submit_objective()
+    return engine_to_gates(e)
 
 
 def run_journey(e: Engine, answer: str = "approve", max_rounds: int = 20) -> list[dict]:

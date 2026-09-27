@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import unittest
 
-from helpers import SCENARIO, TempDir, no_model_env, restore_env, run_journey
+from helpers import SCENARIO, TempDir, engine_to_gates, no_model_env, restore_env, run_journey
 
 from cynqra.engine import Engine, EngineError
 from cynqra.intelligence import ScriptedSource
@@ -31,9 +31,8 @@ def start(folder, src, cap=120) -> Engine:
     e.create_company("Harbor Recruiting")
     e.draft_objective(SCENARIO["messy"])
     e.set_guardrails(budget_cap=cap)
-    e.confirm_objective()
-    e.decide(e.pending_decisions()[0]["id"], "approve")
-    return e
+    e.submit_objective()
+    return engine_to_gates(e)
 
 
 def approve_until(e: Engine, kind: str) -> dict:

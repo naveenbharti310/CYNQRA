@@ -1,4 +1,9 @@
-"""The workforce engine: which model each worker runs on, what each task may cost, and who takes over a failing task.
+"""The Intelligence Router: which model powers each worker, and what each task is expected to cost on it.
+
+Product definition, section 5: the Workforce Synthesizer decides which roles an objective needs (synthesis.py);
+this module decides which model or runtime powers each worker. The two are separate on purpose. There is no
+one-to-one relation between role and model: the same model can power many workers, and two workers with the same
+title can run on different models when their workloads differ (staff() scores each worker over its own work).
 
 A worker is a role with an identity, authority, tools and a budget; its model is an assignment that can change.
 Replacing a worker's model changes nothing else: the task system, the organization and the policy gateway see
@@ -21,13 +26,15 @@ if that does not fit, the founder decides.
 """
 from __future__ import annotations
 
+from . import roles
 from .registry import Registry
 
 ATTEMPTS = 3  # the engine's verification attempts before a task counts as failed (engine.MAX_ATTEMPTS)
 PRIOR = 2.0  # pseudo-samples: how strongly a kind's few outcomes are pulled toward the model's overall record
 EST_TOKENS = {"LOW": 12_000, "MEDIUM": 20_000, "HIGH": 20_000}  # S2_ESTIMATE.md, per task, when nothing is measured
+MIN_CONTEXT = 8192  # tokens: the longest prompt a worker is sent (contract, objective, files handed over) fits in this
 EST_WRITE_TPS = 8.0  # tokens/s for a model never measured on this machine, only to price its time before its first call
-ROLE_KINDS = {"CTO": ["review_merge", "deploy"], "PM": ["plan", "spec", "decision", "assign"], "Engineer": ["code"]}
+ROLE_KINDS = {name: roles.staffing_kinds(name) for name in roles.ROLES}
 KIND_RISK = {"plan": "LOW", "spec": "LOW", "decision": "MEDIUM", "assign": "LOW", "code": "LOW",
              "review_merge": "MEDIUM", "deploy": "HIGH", "objective": "LOW"}
 MAX_REPLACEMENTS = 2  # per task, before the founder decides
@@ -58,15 +65,32 @@ def estimate(reg: Registry, m: dict, kind: str, time_value_per_hour: float) -> d
     return {"model_id": m["id"], "model": m["name"], "kind": kind, "p_attempt": round(p, 3), "p_task": round(P, 3),
             "usd_per_attempt": round(c, 4), "seconds_per_attempt": round(t, 1), "expected_attempts": round(E, 2),
             "expected_usd": round(exp_cost, 4), "expected_minutes": round(exp_time / 60, 1),
+            "expected_tokens": int(E * (st_k["tokens_per_attempt"] or st_all["tokens_per_attempt"] or tokens_guess(reg, kind))),
             "score": round(score, 4), "basis": basis, "samples": st_k["attempts"]}
 
 
+def tokens_guess(reg: Registry, kind: str) -> float:
+    others = reg.outcomes(task_kind=kind)
+    return (sum(o["tokens"] for o in others) / len(others)) if others else EST_TOKENS[KIND_RISK.get(kind, "LOW")]
+
+
+def fits(m: dict, role_name: str | None) -> tuple[bool, str]:
+    """Capability fit from the model's facts: a known context window too small for the role's work is excluded.
+    An unknown fact excludes nothing; what a model can do is otherwise learned from outcomes, not assumed."""
+    need = MIN_CONTEXT
+    if m.get("context") and m["context"] < need:
+        return False, f"context {m['context']} tokens, the work needs {need}"
+    return True, ""
+
+
 def rank(reg: Registry, kinds: list[str], time_value_per_hour: float, budget_left: float | None = None,
-         exclude: set | None = None) -> list[dict]:
-    """Every available model, scored over a list of task kinds (a worker's work), best first."""
+         exclude: set | None = None, role_name: str | None = None) -> list[dict]:
+    """Every available model that fits the work, scored over a list of task kinds (a worker's work), best first."""
     rows = []
     for m in reg.available():
         if exclude and m["id"] in exclude:
+            continue
+        if not fits(m, role_name)[0]:
             continue
         per = [estimate(reg, m, k, time_value_per_hour) for k in kinds]
         row = {"model_id": m["id"], "model": m["name"], "runtime": m["runtime"],
@@ -87,9 +111,15 @@ class Workforce:
         self.reg = registry
 
     # --- settings -------------------------------------------------------------------------------------
+    DEFAULTS = {"budget_usd": 5.0, "time_value_per_hour": 10.0,
+                "compute_usd_per_hour": 0.0,    # this machine's time, for tools and verification; 0: not priced
+                "infra_usd_per_day": 0.0,       # hosting of the deployed product; 0: it runs on this machine
+                "reserve_min_pct": 0.15,        # the smallest contingency the Budget Engine accepts without a warning
+                "allow_workforce_override": False}  # governance: may the founder edit a proposed workforce?
+
     @staticmethod
     def settings(store) -> dict:
-        return store.get("workforce", "settings") or {"budget_usd": 5.0, "time_value_per_hour": 10.0}
+        return {**Workforce.DEFAULTS, **(store.get("workforce", "settings") or {})}
 
     @staticmethod
     def ledger(store) -> dict:
@@ -101,18 +131,22 @@ class Workforce:
 
     # --- staffing -------------------------------------------------------------------------------------
     def choose(self, store, kinds: list[str], budget_left: float | None = None,
-               exclude: set | None = None) -> tuple[dict | None, list[dict]]:
-        rows = rank(self.reg, kinds, self.settings(store)["time_value_per_hour"], budget_left, exclude)
+               exclude: set | None = None, role_name: str | None = None) -> tuple[dict | None, list[dict]]:
+        rows = rank(self.reg, kinds, self.settings(store)["time_value_per_hour"], budget_left, exclude, role_name)
         return (rows[0] if rows and rows[0]["fits_budget"] else None), rows
 
-    def staff(self, store, workers: list[dict]) -> dict[str, dict]:
-        """Give each worker the model with the lowest expected cost per verified task over its role's work."""
+    def staff(self, store, workers: list[dict], workload: dict[str, list[str]] | None = None) -> dict[str, dict]:
+        """Give each worker the model with the lowest expected cost per verified task over its work: its role's kinds
+        of work before there is a roadmap, the kinds of the tasks it owns once there is one."""
         out = {}
         for w in workers:
-            best, rows = self.choose(store, ROLE_KINDS.get(w["role"], ["code"]), self.settings(store)["budget_usd"])
+            kinds = (workload or {}).get(w["id"]) or ROLE_KINDS.get(w["role"], ["code"])
+            best, rows = self.choose(store, kinds, self.settings(store)["budget_usd"], role_name=w["role"])
+            if best is None and rows:  # nothing fits the budget: the best one anyway; the roadmap gate shows the overrun
+                best = rows[0]
             if best is None:
                 raise RuntimeError("no available model can staff the organization: register one in the model registry")
-            out[w["id"]] = {"model_id": best["model_id"], "model": best["model"], "candidates": rows}
+            out[w["id"]] = {"model_id": best["model_id"], "model": best["model"], "candidates": rows, "kinds": kinds}
         return out
 
     # --- budget ---------------------------------------------------------------------------------------

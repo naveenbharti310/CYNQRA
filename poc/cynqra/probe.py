@@ -15,6 +15,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from . import roles
 from .intelligence import OBJECTIVE_KEYS, IntelligenceError, ModelSource
 from .verification import failure_summary, run_unittests
 
@@ -34,52 +35,111 @@ CHECK_HANDOFF = {"acceptance_check": (
     "context_ref": "bench", "artifacts": []}
 
 
-def probe(reg, model_id: str, log=print) -> dict:
-    """Run both probes on one registered model and record every round as an outcome."""
-    m = reg.get(model_id)
-    run_id = f"probe_{int(time.time())}"
-    src = ModelSource(router=lambda worker: (model_id, reg.route(model_id)))
-    result = {"model_id": model_id, "model": m["name"], "objective": None, "code_rounds": [], "passed": False}
+ENGINEER = roles.prompt_text({"id": "w_eng_a", "role": "Engineer", "title": "Software Engineer"})
 
-    def outcome(kind, verified, usage, attempt, failure=""):
-        c = reg.record_call(model_id, role="probe", purpose=kind, task_kind=kind, usage=usage, run_id=run_id)
-        reg.record_outcome(model_id, role="probe", task_kind=kind, task_id=f"probe_{kind}", run_id=run_id,
-                           attempt=attempt, verified=verified, usd=c["usd"], seconds=c["seconds"],
-                           tokens=c["tokens_in"] + c["tokens_out"], failure=failure, source="probe")
 
-    try:
-        data, u = src.structure_objective(CHECK_OBJECTIVE)
+class _Run:
+    """One model's calibration or regression work: every round an outcome in the registry."""
+
+    def __init__(self, reg, model_id: str, source: str):
+        self.reg, self.model_id, self.source = reg, model_id, source
+        self.run_id = f"{source}_{int(time.time())}"
+        self.src = ModelSource(router=lambda worker: (model_id, reg.route(model_id)))
+        self.usd = 0.0
+
+    def outcome(self, kind, verified, usage, attempt, failure=""):
+        c = self.reg.record_call(self.model_id, role=self.source, purpose=kind, task_kind=kind, usage=usage,
+                                 run_id=self.run_id)
+        self.reg.record_outcome(self.model_id, role=self.source, task_kind=kind, task_id=f"{self.source}_{kind}",
+                                run_id=self.run_id, attempt=attempt, verified=verified, usd=c["usd"],
+                                seconds=c["seconds"], tokens=c["tokens_in"] + c["tokens_out"], failure=failure,
+                                source=self.source)
+        self.usd += c["usd"]
+        return c
+
+    def objective(self, log) -> tuple[bool, dict]:
+        data, u = self.src.structure_objective(CHECK_OBJECTIVE)
         empty = [k for k in OBJECTIVE_KEYS if not str(data.get(k) or "").strip()]
-        outcome("objective", not empty, u, 1, "empty fields: " + ", ".join(empty) if empty else "")
-        result["objective"] = {"filled": len(OBJECTIVE_KEYS) - len(empty), "seconds": u.get("latency_s")}
-        log(f"  {m['name']}: objective {len(OBJECTIVE_KEYS) - len(empty)} of {len(OBJECTIVE_KEYS)} fields")
-        objective = {k: str(data.get(k) or "") for k in OBJECTIVE_KEYS}
+        self.outcome("objective", not empty, u, 1, "empty fields: " + ", ".join(empty) if empty else "")
+        log(f"  objective {len(OBJECTIVE_KEYS) - len(empty)} of {len(OBJECTIVE_KEYS)} fields")
+        return not empty, {"filled": len(OBJECTIVE_KEYS) - len(empty), "seconds": u.get("latency_s"),
+                           "fields": {k: str(data.get(k) or "") for k in OBJECTIVE_KEYS}}
+
+    def code(self, objective: dict, log) -> tuple[bool, list]:
+        rounds = []
         work = Path(tempfile.mkdtemp(prefix="cynqra_probe_"))
         feedback, previous = "", {}
         try:
             for rnd in range(3):
-                out, u = src.work(CHECK_TASK, worker="w_eng_a", objective=objective, rules=[], handoff=CHECK_HANDOFF,
-                                  inbox={}, feedback=feedback, previous=previous, repo_files=[])
+                out, u = self.src.work(CHECK_TASK, worker="w_eng_a", objective=objective, rules=[],
+                                       handoff=CHECK_HANDOFF, inbox={}, feedback=feedback, previous=previous,
+                                       repo_files=[], persona=ENGINEER, answerers=["w_pm"])
                 for name, text in (out.get("files") or {}).items():
                     if isinstance(text, str) and name.endswith(".py") and "/" not in name:
                         (work / name).write_text(text, encoding="utf-8")
                 rep = run_unittests(work)
                 ok = rep["passed"] and not out.get("cut_off")
-                outcome("code", ok, u, rnd + 1, "" if ok else failure_summary(rep))
-                result["code_rounds"].append({"tests": rep["ran"], "failed": len(rep["failed"]), "passed": ok,
-                                              "seconds": u.get("latency_s")})
-                log(f"  {m['name']}: code round {rnd + 1}: {rep['ran']} tests, {len(rep['failed'])} failed")
+                self.outcome("code", ok, u, rnd + 1, "" if ok else failure_summary(rep))
+                rounds.append({"tests": rep["ran"], "failed": len(rep["failed"]), "passed": ok,
+                               "seconds": u.get("latency_s")})
+                log(f"  code round {rnd + 1}: {rep['ran']} tests, {len(rep['failed'])} failed")
                 if ok:
-                    result["passed"] = True
-                    break
+                    return True, rounds
                 previous = {p.name: p.read_text(encoding="utf-8") for p in sorted(work.glob("*.py"))}
                 feedback = failure_summary(rep) + "\n" + rep["output"][-1500:]
         finally:
             shutil.rmtree(work, ignore_errors=True)
+        return False, rounds
+
+
+def probe(reg, model_id: str, log=print) -> dict:
+    """Run both probes on one registered model and record every round as an outcome. The result also settles the
+    model's regression gate for its current version."""
+    m = reg.get(model_id)
+    run = _Run(reg, model_id, "probe")
+    result = {"model_id": model_id, "model": m["name"], "objective": None, "code_rounds": [], "passed": False}
+    say = lambda s: log(f"{m['name']}:{s}")  # noqa: E731
+    try:
+        ok_obj, result["objective"] = run.objective(say)
+        ok_code, result["code_rounds"] = run.code(result["objective"].pop("fields"), say)
+        result["passed"] = ok_code
+        reg.set_regression(model_id, ok_obj and ok_code,
+                           f"probe: objective {'filled' if ok_obj else 'incomplete'}, code "
+                           f"{'passed' if ok_code else 'failed'} in {len(result['code_rounds'])} round(s)")
     except IntelligenceError as exc:
-        reg.record_call(model_id, role="probe", purpose="error", task_kind="probe", usage=exc.usage, run_id=run_id,
+        reg.record_call(model_id, role="probe", purpose="error", task_kind="probe", usage=exc.usage, run_id=run.run_id,
                         error=str(exc))
         result["error"] = str(exc)
         log(f"  {m['name']}: model error: {exc}")
     result["performance"] = reg.profile(model_id)
     return result
+
+
+def regression_check(reg, model_id: str, kind: str, log=lambda s: None) -> dict:
+    """Before a model takes over a worker's task: evidence that it can do this kind of work now. Its own verified
+    record on the kind is enough (and a passed regression gate for its version); otherwise it does the calibration
+    work of that kind here, and the result is recorded like any other outcome."""
+    m = reg.get(model_id)
+    status = (m.get("regression") or {}).get("status")
+    version = m.get("version") or ""
+    done = [o for o in reg.outcomes(model_id, kind) if o["verified"] and (o.get("model_version") or "") == version]
+    if status == "failed":
+        return {"passed": False, "evidence": "its version failed the regression gate", "ran": False}
+    if done:
+        return {"passed": True, "evidence": f"{len(done)} verified {kind} attempt(s) on record for this version",
+                "ran": False}
+    run = _Run(reg, model_id, "regression")
+    try:
+        if kind == "code":
+            ok, rounds = run.code({"product": "Order tracker for a bakery"}, log)
+            evidence = f"calibration code task: {'passed' if ok else 'failed'} in {len(rounds)} round(s)"
+        else:
+            ok, info = run.objective(log)
+            evidence = f"calibration structured answer: {info['filled']} of {len(OBJECTIVE_KEYS)} fields"
+    except IntelligenceError as exc:
+        reg.record_call(model_id, role="regression", purpose="error", task_kind=kind, usage=exc.usage,
+                        run_id=run.run_id, error=str(exc))
+        return {"passed": False, "evidence": f"model error: {exc}", "ran": True, "usd": run.usd}
+    if status == "unverified" and kind == "code":
+        reg.set_regression(model_id, ok, evidence)
+    return {"passed": ok, "evidence": evidence, "ran": True, "usd": round(run.usd, 6)}

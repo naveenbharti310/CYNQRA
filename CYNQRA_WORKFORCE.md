@@ -195,11 +195,21 @@ On GitHub, a commit message with `[workforce]` runs both (`.github/workflows/cyn
 No response is mocked in the product or the demonstration. The unit tests (`poc/tests/test_workforce.py`) use a
 llama-server test double so they run in seconds; they are tests of the mechanism, not results.
 
-## 10. What is not built yet
+## 10. Since then (27 September): the product definition's flow
 
-- **Roles are still the fixed four.** Cynqra chooses the model for each role, not yet which roles an objective
-  needs (UX, QA, security...). The next step is a role catalog with authority per role, and a planning step that
-  proposes roles; the workforce engine already scores per role.
+The roles are no longer the fixed four: a role catalog (`roles.py`) and the Workforce Synthesizer choose the roles
+and quantities an objective needs, behind a founder gate; staffing is refined to each worker's actual workload;
+the Performance Engine and the Replacement Engine decide keep, reroute (the task moves to a peer of the same role)
+or replace, and a regression check comes before any new intelligence continues. CYNQRA_PRODUCT_ALIGNMENT.md has
+the whole account.
+
+**Measured.** The first `[workforce]` run on real models (27 September, commit 44a2327) stopped before it began:
+the app build did not package `workforce_demo.py` (`ModuleNotFoundError`). No model was run and there is no
+result. Fixed, and the demonstration now runs in the test suite against the llama-server test double; the real
+run is pending.
+
+## 11. What is not built yet
+
 - **Replacement changes the worker's model for all its tasks.** Choosing a different model per task for the same
   worker is a small change in `_route` once wanted.
 - **Workers answer in text, not native tool calls.** Their files and protocol objects come back as structured

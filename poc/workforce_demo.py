@@ -6,7 +6,8 @@
 Through the app's own HTTP API, as the window drives it:
  1. Register three real models (facts only: runtime, price, context; no scores).
  2. Probe each one on Cynqra's calibration work, so selection starts from measured outcomes.
- 3. Give Cynqra the objective and a dollar budget; confirm; approve the plan.
+ 3. Give Cynqra the objective and a dollar budget. Cynqra decomposes it into requirements and synthesizes the
+    organization; the founder approves the workforce, then the roadmap and the budget built on it.
  4. Show the workforce it staffed: every worker, its model, and the table behind each choice.
  5. Fault: cap the replies of the model staffed as Engineer A, so its real output cannot fit its code.
  6. Run. Cynqra detects the failure, replaces the model, the successor inherits the work, the budget moves,
@@ -74,6 +75,13 @@ def run(args) -> int:
             api("/api/objective/fields", {"fields": {k: "none stated" for k in missing}})
         api("/api/objective/guardrails", {"budget_cap": 5000, "budget_usd": args.budget_usd, "time_value_per_hour": 10})
         api("/api/objective/confirm", {})
+        st = api("/api/state")
+        prop = st["proposal"]
+        rep["workforce_proposal"] = {"roles": prop["roles"], "summary": prop["summary"]}
+        say("proposed workforce: " + ", ".join(f"{r['role']} x{r['quantity']}" for r in prop["roles"]))
+        gate = [x for x in st["decisions"]["pending"] if x["kind"] == "approve_workforce"][0]
+        api(f"/api/decisions/{gate['id']}", {"action": "approve"})
+        rep["decisions"].append({"kind": "approve_workforce"})
         # 4. staffing
         st = api("/api/state")
         wf = st["workforce"]
@@ -84,8 +92,10 @@ def run(args) -> int:
             say(f"staffed {w['worker']:<8} ({w['role']}) -> {w['model']}   "
                 + "  ".join(f"{c['model']}: P {c['p_task']}, ${c['expected_usd']}, {c['expected_minutes']} min"
                             for c in w["candidates"]))
-        plan = [x for x in st["decisions"]["pending"] if x["kind"] == "approve_plan"][0]
+        rep["forecast"] = {k: st["forecast"][k] for k in ("cap_usd", "subtotal_usd", "reserve_usd", "layers", "warnings")}
+        plan = [x for x in st["decisions"]["pending"] if x["kind"] == "approve_roadmap"][0]
         api(f"/api/decisions/{plan['id']}", {"action": "approve"})
+        rep["decisions"].append({"kind": "approve_roadmap"})
         L = api("/api/state")["workforce"]["ledger"]
         say(f"budget ${args.budget_usd}: allocated {sum(L['allocated'].values()):.4f} to {len(L['allocated'])} tasks, "
             f"reserve {L['reserve']:.4f}")
@@ -140,6 +150,9 @@ def run(args) -> int:
                                   "available": m["available"], "performance": m["performance"]} for m in view["registry"]],
                        tasks=[{k: t.get(k) for k in ("id", "kind", "owner_worker_id", "title", "status", "attempts",
                                                      "replacements")} for t in e.tasks()])
+            fin = e.final_report()
+            rep.update(economics=fin["economics"], performance=fin["performance"], evaluations=fin["evaluations"],
+                       metrics=fin["metrics"])
             moved = [r for r in rep["replacements"] if r["from"] == faulted]
             if phase == "accepted":
                 health = live_check.health(e.live_url())

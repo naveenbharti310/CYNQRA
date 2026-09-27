@@ -236,7 +236,7 @@ class OpenAIWireTests(ProviderBase):
         os.environ["ANTHROPIC_API_KEY"] = "test-key-not-real"
         src = ModelSource()
         self.assertEqual(src.label, "gpt-4o-mini", "OpenAI is used first when both keys are present")
-        data, usage = src._call("Plan the work for the fixed organization")
+        data, usage = src._call("Plan the work for this organization")
         self.assertIn("tasks", data)
         self.assertFalse(usage["estimated"])
         r = self.p.requests[0]

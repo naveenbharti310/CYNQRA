@@ -108,7 +108,9 @@ class PolicyTests(unittest.TestCase):  # A13
     def test_graph_query(self):
         q = policy.who_may("merge_to_main")
         self.assertEqual(q["approves"], "founder")
-        self.assertEqual(q["proposes"], ["CTO", "Engineer"])
+        self.assertEqual(q["proposes"], ["BackendEngineer", "CTO", "DataScientist", "Engineer", "FrontendEngineer"],
+                         "every role in the catalog that writes code proposes its merge; none executes it")
+        self.assertEqual(q["executes"], [])
         self.assertIn("prohibited", policy.who_may("external_message")["approves"])
         self.assertEqual(policy.who_may("write_file")["approves"], "no approval needed at LOW")
 

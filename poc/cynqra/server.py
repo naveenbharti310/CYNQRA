@@ -4,8 +4,8 @@ GET  /api/state                     everything the UI shows
 POST /api/company                   {name, mode}
 POST /api/objective/draft           {messy}
 POST /api/objective/fields          {fields}
-POST /api/objective/guardrails      {budget_cap}
-POST /api/objective/confirm
+POST /api/objective/guardrails      {budget_cap, budget_usd, time_value_per_hour, constraints, governance}
+POST /api/objective/confirm         submit the objective: requirements, then the proposed workforce
 POST /api/decisions/<id>            {action: approve|reject|request_evidence, note, edited}
 POST /api/run/step
 POST /api/run/auto                  {on, delay}
@@ -105,7 +105,8 @@ class App:
     def decide(self, decision_id: str, action: str, note: str, edited) -> dict:
         d = self.engine.decide(decision_id, action, note, edited)
         if action == "approve":
-            self.last_step = ({"did": "plan approved"} if d["kind"] == "approve_plan"
+            gates = {"approve_workforce": "workforce approved", "approve_roadmap": "roadmap approved"}
+            self.last_step = ({"did": gates[d["kind"]]} if d["kind"] in gates
                               else {"did": "approved", "decision": d["id"], "kind": d["kind"]})
         return d
 
@@ -259,7 +260,8 @@ def make_server(app: App, port: int = 8750) -> ThreadingHTTPServer:
                 "/api/objective/draft": lambda: e.draft_objective(body.get("messy", "")),
                 "/api/objective/fields": lambda: e.edit_objective(body.get("fields") or {}),
                 "/api/objective/guardrails": lambda: e.set_guardrails(body.get("budget_cap"), body.get("risk_tolerance"),
-                                                                      body.get("budget_usd"), body.get("time_value_per_hour")),
+                                                                      body.get("budget_usd"), body.get("time_value_per_hour"),
+                                                                      body.get("constraints"), body.get("governance")),
                 "/api/models": lambda: app.models_call(None, "register", body),
                 "/api/objective/confirm": e.confirm_objective,
                 "/api/run/step": app.step,

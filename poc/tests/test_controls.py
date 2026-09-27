@@ -44,7 +44,7 @@ class GatewayTests(Base):  # A6
     def test_approval_must_match(self):
         r = self.e.gateway("w_cto", "t_05", "merge_to_main", target="main")
         self.assertEqual(r["status"], "requires_approval")
-        r = self.e.gateway("w_cto", "t_05", "merge_to_main", target="main", approval="dec_confirm_objective")
+        r = self.e.gateway("w_cto", "t_05", "merge_to_main", target="main", approval="dec_approve_workforce")
         self.assertEqual(r["status"], "requires_approval", "an approval for another action does not count")
 
     def test_every_gateway_call_is_audited(self):
@@ -151,7 +151,8 @@ class KillSwitchTests(Base):  # A14
         self.e.kill_switch(False)
         run_journey(self.e)
         self.assertEqual(self.e.meta["phase"], "accepted")
-        self.assertEqual(self.e.metrics()["founder_interventions"], 8, "6 decisions plus the switch on and off")
+        self.assertEqual(self.e.metrics()["founder_interventions"], 9,
+                         "the submission, 6 decisions, and the switch on and off")
 
 
 class ObjectiveTests(Base):  # A2
@@ -171,14 +172,17 @@ class ObjectiveTests(Base):  # A2
         o = self.e.draft_objective("A cafe order board")
         self.assertIn("Demo mode only knows", o["notice"])
 
-    def test_confirm_needs_every_field(self):
+    def test_a_field_the_brief_leaves_out_does_not_block(self):
+        """The founder states the outcome; Cynqra decomposes it. A field the brief does not state is recorded as
+        such and the flow goes on to the workforce gate."""
         self.e.draft_objective(SCENARIO["messy"])
         o = self.e.objective()
         o["structured"]["priorities"] = ""
         o["missing_fields"] = ["priorities"]
         self.e.store.put("objective", "obj_1", o)
-        with self.assertRaises(EngineError):
-            self.e.confirm_objective()
+        self.e.submit_objective()
+        self.assertEqual(self.e.objective()["structured"]["priorities"], "not stated in the brief")
+        self.assertEqual(self.e.meta["phase"], "workforce")
 
     def test_empty_objective_refused_and_phase_rules(self):
         with self.assertRaises(EngineError):

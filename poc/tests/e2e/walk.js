@@ -32,15 +32,25 @@ function loadPlaywright() {
     await shot("01_objective");
     await page.fill("#f_priorities", "Seeing who is stuck first, then adding candidates");
     await page.fill("#cap", "150");
+    await page.fill("#usd", "7.5");
+    await page.fill("#c_deadline", "two weeks");
     await page.click("#confirm");
-    await page.waitForSelector("#approve-plan");
+    await page.waitForSelector("#approve-workforce");
     const st = await page.evaluate(async () => (await (await fetch("/api/state")).json()));
     if (st.budget.cap !== 150) errors.push(`budget cap edit was lost: ${st.budget.cap}`);
+    if (st.workforce.settings.budget_usd !== 7.5) errors.push(`dollar budget was lost: ${st.workforce.settings.budget_usd}`);
+    if ((st.objective.founder_constraints || {}).deadline !== "two weeks") errors.push("constraint was lost");
     if (st.objective.structured.priorities !== "Seeing who is stuck first, then adding candidates") errors.push("objective edit was lost");
     if (st.meta.mode !== "demo") errors.push(`mode is ${st.meta.mode}, expected demo`);
-    steps.push("founder edits to a field and the budget cap were kept");
-    steps.push("plan proposed");
-    await shot("02_plan");
+    steps.push("founder edits to a field, the budget and a constraint were kept");
+    const roles = await page.$$eval(".wiz-right .tbl tbody tr", (r) => r.length);
+    if (roles !== 3) errors.push(`expected 3 proposed roles, saw ${roles}`);
+    steps.push("workforce proposed");
+    await shot("02_workforce");
+    await page.click("#approve-workforce");
+    await page.waitForSelector("#approve-plan");
+    steps.push("roadmap and budget proposed");
+    await shot("03_roadmap");
     await page.click("#approve-plan");
     for (let i = 0; i < 8; i++) {
       await page.waitForFunction(() => /Waiting on you|Delivered/.test(document.querySelector("header.top")?.textContent || ""), null, { timeout: 90000 });
@@ -50,12 +60,12 @@ function loadPlaywright() {
       await page.waitForSelector('button[data-decide="approve"]');
       const title = await page.textContent(".dcard h2");
       steps.push("founder approved: " + title.trim());
-      await shot(`03_decision_${i}`);
+      await shot(`04_decision_${i}`);
       await page.click('button[data-decide="approve"]');
       await page.waitForTimeout(600);
     }
     let replay = "";
-    for (const v of ["company", "organization", "work", "evolution", "audit", "delivery"]) {
+    for (const v of ["company", "organization", "workforce", "work", "evolution", "audit", "delivery"]) {
       await page.click(`button[data-view="${v}"]`);
       await page.waitForTimeout(500);
       if (v === "audit") {
@@ -63,7 +73,7 @@ function loadPlaywright() {
         replay = await page.textContent(".replay");
         steps.push("replay checked in the audit view");
       }
-      await shot(`04_${v}`);
+      await shot(`05_${v}`);
     }
     await page.click('button[data-view="work"]');
     await page.waitForTimeout(800);

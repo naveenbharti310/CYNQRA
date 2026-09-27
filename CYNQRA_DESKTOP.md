@@ -1,6 +1,7 @@
 # Cynqra desktop app
 
-Cynqra as an app on your laptop. Download it, install it, open it. A CTO, a PM and two engineers
+Cynqra as an app on your laptop. Download it, install it, open it. Cynqra turns your objective into
+requirements and proposes the workforce it needs; once you approve it and its roadmap, the workers
 plan, write real code, run real tests, fix their own failures, merge and deploy a working web app
 on your laptop. You make the founder's decisions in the app. The intelligence is an open-weight
 model that runs on your laptop: no account, no API key, and after the first download nothing
@@ -74,16 +75,19 @@ model, Cynqra falls back to the processor by itself.
 ## 3. Use it
 
 1. **Objective.** Say what you want built, in a sentence or two. Cynqra's model structures it into
-   seven fields; check the ones marked Inferred, edit anything, set the budget, and confirm.
-2. **Organization and plan.** The CTO proposes the plan for the fixed four-worker organization.
-   Approve it, or ask for another.
-3. **The organization works.** The Work view shows each task moving, the protocol messages between
+   seven fields; check the ones marked Inferred, edit anything, set the budget and any constraints,
+   and submit. Cynqra decomposes it into requirements.
+2. **Workforce.** Cynqra proposes the organization from its role catalog, with the reason for every
+   role. Approve it, or reject it with feedback and it is revised.
+3. **Roadmap and budget.** Milestones, tasks with owners and acceptance criteria, the model for each
+   worker, and the budget in layers. Approve it, or ask for another.
+4. **The organization works.** The Work view shows each task moving, the protocol messages between
    workers, and, at the top, what the model is doing right now (reading a prompt, or how many tokens
    it has written). Engineers run their own tests and fix failures before handing over; the
    Verification Service runs every test again.
-4. **Your decisions.** When something needs you (a product rule, the merge, the production deploy,
+5. **Your decisions.** When something needs you (a product rule, the merge, the production deploy,
    accepting delivery), a card appears under Decisions: approve, reject with a reason, or edit.
-5. **The product is live.** Delivery shows its address on your laptop. Open it and use it. Download
+6. **The product is live.** Delivery shows its address on your laptop. Open it and use it. Download
    the export bundle for the code, the documents, the decisions and the event log.
 
 **Model** (bottom left) switches or stops the model. **Quit** stops the model and the deployed
