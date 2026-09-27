@@ -155,8 +155,8 @@ function wizard() {
   return `<div class="wiz">${top}<div class="wiz-body">
     <div class="wiz-left">
       ${steps(0)}
-      <h1 class="hero">Tell Cynqra the outcome you want.</h1>
-      <p class="lede">You give the outcome, the budget and any constraints, not the team. Cynqra works out the requirements, the organization that delivers them, the intelligence for each worker, the roadmap and the budget, and asks you at two gates.</p>
+      <h1 class="hero">Tell Cynqra the company you want to build.</h1>
+      <p class="lede">You are the CEO. Describe the company and its product, a budget and any constraints; you do not name the team. Cynqra assembles the founding team it needs, from CTO and CFO to market, legal and security experts, gives each member the intelligence best suited to its work, and they work at the same time, handing over and asking each other as a real team does. You approve the team, then the roadmap and budget, and decide only what only a CEO should.</p>
       ${modeChoice}
       <label class="lbl" for="messy">Your objective</label>
       <textarea class="big" id="messy">${esc(obj ? obj.statement : scen ? scen.messy : "")}</textarea>
@@ -214,9 +214,10 @@ function workforceStep() {
   const cost = prop.cost_by_role || {};
   const roles = (prop.roles || []).map((r) => {
     const cat = (st.catalog || []).find((c) => c.role === r.role) || {};
-    return `<tr><td><b>${esc(cat.title || r.role)}</b></td><td class="mono">${esc(r.quantity)}</td><td class="small">${esc(r.why)}</td>
-      <td class="mono small">${esc((r.requirement_ids || []).join(", "))}</td><td class="mono small">${cost[r.role] === undefined ? "n/a" : usd(cost[r.role])}</td>
-      ${allowOverride() ? `<td><input type="number" min="0" max="${esc(cat.max || 1)}" id="q_${esc(r.role)}" data-role="${esc(r.role)}" data-keep="no" value="${esc(r.quantity)}" style="width:60px" aria-label="Quantity"></td>` : ""}</tr>`;
+    const name = r.title || cat.title || r.role, key = r.title || r.role, fid = r.field ? "spec_" + r.field.replace(/[^a-z0-9]+/gi, "_") : r.role;
+    return `<tr><td><b>${esc(name)}</b>${r.added_by === "platform" ? ` <span class="pill teal">added by Cynqra</span>` : ""}</td><td class="mono">${esc(r.quantity)}</td><td class="small">${esc(r.why)}</td>
+      <td class="mono small">${esc((r.requirement_ids || []).join(", "))}</td><td class="mono small">${cost[key] === undefined ? "n/a" : usd(cost[key])}</td>
+      ${allowOverride() ? `<td><input type="number" min="0" max="${esc(r.field ? 1 : cat.max || 1)}" id="q_${esc(fid)}" data-role="${esc(r.role)}" data-field="${esc(r.field || "")}" data-title="${esc(r.title || "")}" data-keep="no" value="${esc(r.quantity)}" style="width:60px" aria-label="Quantity"></td>` : ""}</tr>`;
   }).join("");
   const ws = req ? req.workstreams.map((w) => `<span class="pill grey">${esc(w.id)} ${esc(w.name)}</span>`).join(" ") : "";
   return `<div class="wiz-body">
@@ -593,6 +594,16 @@ function scorecards() {
     <th>Latency / retries</th><th>Cost per verified</th><th>Benchmark</th><th>Regression</th><th>Escalations / rejections</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 
+function companyPack(f) {
+  const p = f.company_pack;
+  if (!p) return "";
+  const docs = (p.documents || []).map((d) => `<div class="kv"><span>${esc(d.title)}<br><span class="small muted">${esc(d.author)}${d.types.length ? " · " + esc(d.types.join(", ")) : ""}</span></span><span style="color:${d.verified ? "var(--green)" : "var(--muted)"};font-weight:600">${d.verified ? "verified" : "not verified"}</span></div>`).join("") || `<p class="small muted">No documents in this project.</p>`;
+  const dec = (p.ceo_decisions || []).map((d) => `<div class="small">${esc(d.kind.replace(/_/g, " "))}: ${esc(d.problem)}${d.outcome ? ` <b>${esc(d.outcome)}</b>` : ""}</div>`).join("") || `<p class="small muted">None.</p>`;
+  return `<div class="card stack"><div class="between"><h2 style="font-size:17px">Company Pack</h2><span class="pill teal">${p.ceo_interventions} CEO decision${p.ceo_interventions === 1 ? "" : "s"}</span></div>
+    <p class="small muted" style="margin:0">What your founding team hands you: every document, who wrote it and whether it passed its check; the decisions you made; and how many questions the team settled among itself (${p.settled_by_the_team}).</p>
+    ${docs}<h3 style="font-size:14px;margin:6px 0 0">Your decisions</h3>${dec}</div>`;
+}
+
 function finalReport() {
   const f = S.st.final;
   if (!f) return "";
@@ -818,6 +829,7 @@ function vDelivery() {
     <div class="row small" style="gap:28px;flex-wrap:wrap"><span><span class="muted">URL</span> ${st.live_url ? `<a href="${esc(st.live_url)}" target="_blank" rel="noopener" class="mono" id="live-link">${esc(st.live_url.replace("http://", ""))}</a>` : "not live yet"}</span>
       <span><span class="muted">Health</span> ${esc(health)}</span><span><span class="muted">Smoke</span> ${esc(smoke)}</span>
       <span><span class="muted">Approved by</span> ${esc(dep && dep.approved_by ? dep.approved_by : "not yet (D-21)")}</span></div></div>
+    ${S.st.final ? companyPack(S.st.final) : ""}
     ${finalReport()}
     <div class="two"><div class="card stack"><h2 style="font-size:17px">Export bundle</h2>
       ${cats.map(([l]) => `<div class="kv"><span>${l}</span><span style="color:${ready ? "var(--green)" : "var(--muted)"};font-weight:600">${ready ? "included" : "after delivery"}</span></div>`).join("")}
@@ -858,8 +870,8 @@ function bind() {
   });
   on("approve-workforce", (ev) => {
     const id = ev.currentTarget.dataset.id, roles = [];
-    $$("[data-role]").forEach((i) => { if (Number(i.value) > 0) roles.push({ role: i.dataset.role, quantity: Number(i.value), why: "founder override" }); });
-    const prop = S.st.proposal || {}, same = roles.length === (prop.roles || []).length && roles.every((r) => (prop.roles.find((p) => p.role === r.role) || {}).quantity === r.quantity);
+    $$("[data-role]").forEach((i) => { if (Number(i.value) > 0) roles.push({ role: i.dataset.role, quantity: Number(i.value), why: "founder override", ...(i.dataset.field ? { field: i.dataset.field, title: i.dataset.title } : {}) }); });
+    const prop = S.st.proposal || {}, same = roles.length === (prop.roles || []).length && roles.every((r) => (prop.roles.find((p) => p.role === r.role && (p.field || "") === (r.field || "")) || {}).quantity === r.quantity);
     act(() => api(`/api/decisions/${id}`, { action: "approve", edited: roles.length && !same ? { roles } : null }));
   });
   on("revise-workforce", (ev) => { const id = ev.currentTarget.dataset.id, note = ($("#wf_note") || {}).value || "Revise the workforce";

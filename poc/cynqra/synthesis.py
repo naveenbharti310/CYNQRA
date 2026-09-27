@@ -38,7 +38,7 @@ PIPELINE = [("code", "writes the product's code"), ("review_merge", "reviews and
 def _gaps(merged: dict, reqs: dict) -> list[tuple[str, set[str], str]]:
     """What the proposed roles leave open, each with the catalog roles that would close it: a requirement area no
     proposed role covers, a pipeline task type no role owns, nobody to assign work."""
-    present = [roles.role(n) for n in merged]
+    present = [roles.role(m["role"]) for m in merged.values()]
     gaps = []
     for rid, r in reqs.items():
         if not any(r["area"] in p["areas"] for p in present):
@@ -46,7 +46,7 @@ def _gaps(merged: dict, reqs: dict) -> list[tuple[str, set[str], str]]:
     for kind, what in PIPELINE:
         if not any(kind in p["owns"] for p in present):
             gaps.append((f"{what} ({kind})", {n for n, r in roles.ROLES.items() if kind in r["owns"]}, ""))
-    if not any(n in roles.ASSIGNERS for n in merged):
+    if not any(m["role"] in roles.ASSIGNERS for m in merged.values()):
         gaps.append(("assigns the work", set(roles.ASSIGNERS), ""))
     return gaps
 
@@ -63,9 +63,16 @@ def complete(merged: dict, reqs: dict) -> None:
         closes = [g for g in gaps if name in g[1]]
         if not closes:  # nothing in the catalog closes what is left (an area no role covers)
             raise IntelligenceError(f"no role in the catalog {gaps[0][0]}")
-        merged[name] = {"role": name, "quantity": 1, "added_by": "platform",
-                        "why": "Added by Cynqra: the organization needs a role that " + "; ".join(g[0] for g in closes)
-                               + ".", "requirement_ids": [g[2] for g in closes if g[2]]}
+        why = "Added by Cynqra: the organization needs a role that " + "; ".join(g[0] for g in closes) + "."
+        rids = [g[2] for g in closes if g[2]]
+        if name == "Specialist":  # the field is the uncovered requirement's own
+            text = reqs[rids[0]]["text"] if rids else "the company's field"
+            field = " ".join(text.split()[:6]).rstrip(".,;:")
+            merged[f"Specialist:{roles.field_slug(field)}"] = {
+                "role": name, "field": field, "title": f"Specialist: {field}", "quantity": 1, "added_by": "platform",
+                "why": why, "requirement_ids": rids}
+            continue
+        merged[name] = {"role": name, "quantity": 1, "added_by": "platform", "why": why, "requirement_ids": rids}
 
 
 def validate_workforce(prop: dict, pkg: dict, close_gaps: bool = True) -> dict:
@@ -84,14 +91,24 @@ def validate_workforce(prop: dict, pkg: dict, close_gaps: bool = True) -> dict:
         if name not in roles.ROLES:
             raise IntelligenceError(f"{name!r} is not in the role catalog")
         q = as_int(r.get("quantity"), 1) or 1
-        m = merged.setdefault(name, {"role": name, "quantity": 0, "why": "", "requirement_ids": []})
+        if name == "Specialist":  # one worker per field the objective needs
+            field = str(r.get("field") or "").strip()
+            if not field:
+                raise IntelligenceError("a Specialist needs its field, such as food safety or maritime law")
+            title = str(r.get("title") or "").strip() or f"{field.title()} Specialist"
+            m = merged.setdefault(f"Specialist:{roles.field_slug(field)}", {
+                "role": name, "field": field, "title": title[:60], "quantity": 0, "why": "", "requirement_ids": []})
+            q = 1 - m["quantity"]
+        else:
+            m = merged.setdefault(name, {"role": name, "quantity": 0, "why": "", "requirement_ids": []})
         m["quantity"] += q
         m["why"] = (m["why"] + " " + str(r.get("why") or "").strip()).strip()
         m["requirement_ids"] += [x for x in _slug_list(r.get("requirement_ids")) if x not in m["requirement_ids"]]
     for m in merged.values():
         cap = roles.role(m["role"])["max"]
-        if m["quantity"] > cap:
-            raise IntelligenceError(f"{m['role']}: {m['quantity']} proposed, the catalog allows at most {cap}")
+        n = sum(x["quantity"] for x in merged.values() if x["role"] == m["role"])
+        if n > cap:
+            raise IntelligenceError(f"{m['role']}: {n} proposed, the catalog allows at most {cap}")
         if not m["why"]:
             raise IntelligenceError(f"{m['role']}: say why the role is needed")
     reqs = {r["id"]: r for r in pkg["requirements"]}
@@ -128,15 +145,15 @@ def cost_by_role(run, prop: dict) -> dict:
     for r in prop["roles"]:
         best, _ = router.choose(run.registry, s, roles.staffing_kinds(r["role"]))
         if best is not None:
-            out[r["role"]] = round(best["expected_usd"] * r["quantity"], 4)
+            out[r.get("title") or r["role"]] = round(best["expected_usd"] * r["quantity"], 4)
     return out
 
 
 def evidence(prop: dict, requirements: dict) -> list[str]:
     lines = []
     for r in prop["roles"]:
-        cost = (prop.get("cost_by_role") or {}).get(r["role"])
-        lines.append(f"{roles.role(r['role'])['title']} x{r['quantity']}: {r['why']} Covers "
+        cost = (prop.get("cost_by_role") or {}).get(r.get("title") or r["role"])
+        lines.append(f"{r.get('title') or roles.role(r['role'])['title']} x{r['quantity']}: {r['why']} Covers "
                      f"{', '.join(r['requirement_ids']) or 'no listed requirement'}."
                      + (f" Expected ${cost:.4f} on the best available model." if cost is not None else ""))
     n = len(requirements["requirements"])

@@ -6,7 +6,7 @@ worker bindings) replaced the model registry. Linux, Python
 
 ## Result
 
-234 tests, 234 passed, 0 failed, 0 skipped. Run time about 240 seconds.
+237 tests, 237 passed, 0 failed, 0 skipped. Run time about 240 seconds.
 
 | Module | Tests | What it proves |
 | --- | --- | --- |

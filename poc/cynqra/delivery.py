@@ -13,7 +13,7 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-from . import budget, performance, policy
+from . import budget, performance, policy, roles
 from .db import IST, digest, now
 
 ESCALATIONS_PER_DAY = 5  # D-29
@@ -113,7 +113,27 @@ def final_report(run) -> dict:
             "economics": budget.actual(run.store, forecast), "forecast": forecast,
             "performance": performance.all_cards(run.store, run.registry),
             "intelligence_changes": run.store.all("replacement"), "evaluations": run.store.all("evaluation"),
-            "metrics": metrics(run)}
+            "company_pack": company_pack(run), "metrics": metrics(run)}
+
+
+def company_pack(run) -> dict:
+    """What the founding team hands the CEO: every document, who wrote it and how it was verified; the decisions the
+    CEO made and the ones the team settled; and how few times the CEO was needed."""
+    docs = []
+    for t in run.tasks():
+        if t["kind"] != "document":
+            continue
+        w = run.worker(t["owner_worker_id"]) or {}
+        docs.append({"task": t["id"], "title": t["title"], "author": w.get("title", t["owner_worker_id"]),
+                     "types": [roles.DOC_TYPES[d]["title"] for d in t.get("documents") or [] if d in roles.DOC_TYPES],
+                     "files": [o.get("file") for o in t.get("outputs") or [] if isinstance(o, dict)],
+                     "verified": t["status"] == "VERIFIED"})
+    decided = [d for d in run.store.all("decision") if d["status"] != "pending"]
+    return {"documents": docs,
+            "ceo_decisions": [{"kind": d["kind"], "problem": d["problem"][:200], "outcome": d.get("outcome_label")}
+                              for d in decided],
+            "settled_by_the_team": len([b for b in run.store.all("blocker_cleared") if not b["founder_involved"]]),
+            "ceo_interventions": run.count("intervention")}
 
 
 def replay(run, task_id: str) -> dict:

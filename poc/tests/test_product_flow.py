@@ -104,6 +104,67 @@ class CatalogAndSynthesisTests(unittest.TestCase):
             validate_workforce(json.loads(json.dumps(SECTION3_ORG)), {"requirements": [
                 {"id": "r_99", "area": "astrology", "text": "read the stars"}]})
 
+    def test_a_company_gets_its_founding_team(self):
+        # the founder is the CEO and describes a company (here, one example: an AI-agent governance platform): the
+        # foundation it calls for (market, money, law) is covered by the experts whose field it is
+        req = validate_requirements({"requirements": [
+            {"area": "product", "text": "An AI-agent governance platform for mid-size companies"},
+            {"area": "market", "text": "Who buys it and against whom it competes"},
+            {"area": "finance", "text": "Pricing, costs and the funding the first year needs"},
+            {"area": "legal", "text": "The regulations an AI governance product falls under"},
+            {"area": "security", "text": "Customers' agent logs are protected"}], "workstreams": []})
+        org = {"roles": [{"role": "CTO", "quantity": 1, "why": "architecture", "requirement_ids": []},
+                         {"role": "Engineer", "quantity": 1, "why": "builds it", "requirement_ids": []}]}
+        prop = validate_workforce(org, req)
+        present = {r["role"] for r in prop["roles"]}
+        self.assertTrue({"CFO", "MarketAnalyst", "LegalAdvisor"} <= present, present)
+        self.assertTrue(all(prop["coverage"].values()))
+        self.assertIn("confirm", roles.doc_rules("risk_compliance"), "a non-expert founder is told what to confirm")
+        self.assertIn("source", roles.doc_rules("market_analysis"))
+        self.assertEqual(roles.role("CEO")["title"], "Business Lead", "the founder is the CEO")
+
+    def test_the_team_follows_the_objective_with_specialists_in_its_field(self):
+        # a different company gets a different team: its field's experts are named from the objective
+        req = validate_requirements({"requirements": [
+            {"area": "product", "text": "Online ordering for a chain of bakeries"},
+            {"area": "functional", "text": "Customers order cakes for pickup"},
+            {"area": "domain", "text": "Allergen labelling and food hygiene rules for each item"},
+            {"area": "domain", "text": "Cold-chain handling of cream cakes between shops"}], "workstreams": []})
+        org = {"roles": [
+            {"role": "PM", "quantity": 1, "why": "runs the work", "requirement_ids": ["r_01"]},
+            {"role": "CTO", "quantity": 1, "why": "architecture", "requirement_ids": []},
+            {"role": "Engineer", "quantity": 1, "why": "builds ordering", "requirement_ids": ["r_02"]},
+            {"role": "Specialist", "quantity": 1, "field": "food safety", "title": "Food Safety Specialist",
+             "why": "allergens and hygiene", "requirement_ids": ["r_03"]}]}
+        prop = validate_workforce(org, req)
+        ws = {w["id"]: w for w in prop["workers"]}
+        self.assertEqual(ws["w_spec_food_safety"]["title"], "Food Safety Specialist")
+        self.assertEqual(ws["w_spec_food_safety"]["field"], "food safety")
+        self.assertNotIn("CFO", {w["role"] for w in prop["workers"]}, "no role the objective does not need")
+        self.assertIn("Your field: food safety", roles.prompt_text(ws["w_spec_food_safety"]))
+        two = json.loads(json.dumps(org))
+        two["roles"].append({"role": "Specialist", "quantity": 1, "field": "cold-chain logistics",
+                             "why": "cream cakes between shops", "requirement_ids": ["r_04"]})
+        prop = validate_workforce(two, req)
+        self.assertEqual(sorted(w["id"] for w in prop["workers"] if w["role"] == "Specialist"),
+                         ["w_spec_cold_chain_logistics", "w_spec_food_safety"], "one worker per field")
+        with self.assertRaises(IntelligenceError):  # a Specialist without its field is no one in particular
+            validate_workforce({"roles": [{"role": "Specialist", "quantity": 1, "why": "x"}]}, req)
+
+    def test_a_field_nobody_proposed_gets_its_specialist(self):
+        req = validate_requirements({"requirements": [
+            {"area": "product", "text": "A booking app for dive schools"},
+            {"area": "domain", "text": "Diver certification levels and dive safety limits"}], "workstreams": []})
+        org = {"roles": [{"role": "PM", "quantity": 1, "why": "runs the work", "requirement_ids": ["r_01"]},
+                         {"role": "CTO", "quantity": 1, "why": "architecture", "requirement_ids": []},
+                         {"role": "Engineer", "quantity": 1, "why": "builds it", "requirement_ids": []}]}
+        prop = validate_workforce(org, req)
+        spec = [r for r in prop["roles"] if r["role"] == "Specialist"]
+        self.assertEqual(len(spec), 1)
+        self.assertEqual((spec[0]["added_by"], spec[0]["requirement_ids"]), ("platform", ["r_02"]))
+        self.assertIn("Diver certification", spec[0]["field"])
+        self.assertTrue(all(prop["coverage"].values()))
+
     def test_authority_comes_from_the_catalog(self):
         self.assertEqual(policy.MATRIX, roles.matrix())
         self.assertEqual(policy.evaluate(role="DevOps", action_type="deploy_production")["decision"], "REQUIRE_APPROVAL")

@@ -123,7 +123,8 @@ SCHEMAS = {
         "summary": S,
         "roles": {"type": "array", "items": {"type": "object", "properties": {
             "role": {"type": "string", "enum": list(roles.ROLES)}, "quantity": {"type": "integer"}, "why": S,
-            "requirement_ids": LIST}, "required": ["role", "quantity", "why", "requirement_ids"]}}}},
+            "requirement_ids": LIST, "field": S, "title": S},
+            "required": ["role", "quantity", "why", "requirement_ids"]}}}},
     "handoff": {"type": "object", "properties": {"artifacts": LIST, "context_ref": S, "acceptance_check": S},
                 "required": ["artifacts", "context_ref", "acceptance_check"]},
     "proposal": {"type": "object", "properties": {
@@ -431,10 +432,15 @@ class ModelSource:
         prompt = (self._head("You are Cynqra's Objective Intelligence.", objective, []) +
                   "Decompose the objective into requirements. Cover, where the objective calls for them: product "
                   "outcomes and success criteria, functional and non-functional requirements, AI/ML and data "
-                  "requirements, design, security, QA, DevOps and deployment. Each requirement has an area, one of "
+                  "requirements, design, security, QA, DevOps and deployment. When the founder wants to build a "
+                  "company or a business, its foundation is implied too: the market and competitors (market), costs, "
+                  "pricing and funding (finance), the regulations and legal risks that apply (legal), and the "
+                  "business direction (business), as far as this company calls for them. Expertise particular to "
+                  "this company's field that no general role holds is its own requirement (domain). Each "
+                  "requirement has an area, one of "
                   f"{', '.join(roles.AREAS)}, a sentence, and how it will be verified. Group the requirements into "
-                  "engineering workstreams and say which workstreams depend on which. Add nothing the founder did "
-                  "not state or clearly imply.\n"
+                  "workstreams and say which workstreams depend on which. Add nothing the founder did not state or "
+                  "clearly imply.\n"
                   'Return JSON: {"outcomes": ["..."], "requirements": [{"id": "r_01", "area", "text", '
                   '"verification"}], "workstreams": [{"id", "name", "requirement_ids", "depends_on"}]}'
                   + self._refused(feedback))
@@ -449,7 +455,9 @@ class ModelSource:
                   "Synthesize the workforce for this objective from the role catalog: which roles, how many of each, "
                   "and why each is required. Propose the smallest organization that covers every requirement; do not "
                   "add a role the requirements do not need. Merges into main need a CTO, and someone must assign "
-                  "work and propose the deploy.\n"
+                  "work and propose the deploy. The team depends entirely on this objective: for expertise particular "
+                  "to its field that no role holds, propose a Specialist with its field and title (one per field, "
+                  'such as {"role": "Specialist", "field": "food safety", "title": "Food Safety Specialist"}).\n'
                   f"Role catalog:\n{cat}\nRequirements:\n{reqs}\n"
                   + (f"The founder rejected the previous proposal: {note}\n" if note else "") +
                   'Return JSON: {"summary": "...", "roles": [{"role", "quantity", "why", "requirement_ids"}]}'

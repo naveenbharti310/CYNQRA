@@ -98,6 +98,13 @@ class JourneyTests(unittest.TestCase):
         self.assertEqual({c["worker_id"] for c in r["performance"]}, {"w_cto", "w_pm", "w_eng_a", "w_eng_b"})
         eng = next(c for c in r["performance"] if c["worker_id"] == "w_eng_a")["overall"]
         self.assertEqual((eng["quality"]["verifications"], eng["quality"]["acceptance_rate"]), (2, 0.5))
+        pack = r["company_pack"]  # what the founding team hands the CEO
+        self.assertEqual([d["task"] for d in pack["documents"]], ["t_01"])
+        self.assertTrue(pack["documents"][0]["verified"])
+        self.assertIn("Product specification", pack["documents"][0]["types"])
+        self.assertGreaterEqual(len(pack["ceo_decisions"]), 4, "the gates, the rule, the merge, the deploy")
+        self.assertGreaterEqual(pack["settled_by_the_team"], 1, "a Blocker cleared without the CEO")
+        self.assertGreater(pack["ceo_interventions"], 0)
         self.assertEqual(r["intelligence_changes"], [], "one scripted source: nothing to replace")
         m = r["metrics"]
         self.assertEqual((m["reworks"], m["defect_escapes"], m["false_rejections"]), (1, 0, 0))
