@@ -53,6 +53,10 @@ class FakeProvider:
                                             "content": [{"type": "text", "text": '{"product": "half'}],
                                             "stop_reason": "max_tokens",
                                             "usage": {"input_tokens": 5, "output_tokens": 16000}})
+                if outer.mode == "length":  # an OpenAI-compatible local server at its max_tokens
+                    return self._send(200, {"choices": [{"finish_reason": "length", "message": {
+                        "role": "assistant", "content": "=== FILE: a.py ===\nx = 1\n=== END FILE ===\n=== FILE: b.py ===\ny ="}}],
+                        "usage": {"prompt_tokens": 50, "completion_tokens": 6144}})
                 if body.get("model") == RETIRED:
                     return self._send(404, {"type": "error", "error": {"type": "not_found_error", "message": f"model: {RETIRED}"}})
                 if outer.mode == "prose" or (outer.mode == "prose_once" and len(outer.requests) == 1):

@@ -245,6 +245,21 @@ defects from other sides:
   run did not complete", the misread output, until the job's time limit stopped it at 358 minutes.
 Version 0.1.1 fixes both; its whole journeys rerun on Windows and Linux to measure the change.
 
+Version 0.1.1, the same three journeys:
+- gpt-oss 20B on Linux: **passed in 50 minutes**: 10 model calls, 17,310 tokens in and 10,819 out, all
+  six tasks verified at their first check, deployed, healthy, product tests pass on rerun. On 0.1.0 the
+  same journey had not finished after six hours.
+- Qwen3.6 35B-A3B 2-bit on Windows: t_01 to t_03 verified (the data layer at its first check, where
+  0.1.0 needed a loop); then every reply for t_04 ran past the model's 6,144-token output limit and was
+  thrown away whole, four times, 19 minutes each. On Linux the same happened on t_03's third reply.
+  A cut-off reply was an error, so "try again" asked for the same whole reply again.
+
+Version 0.1.2 fixes that at its root. A worker's reply carries only the files it writes or changes; the
+other files are kept (a file can be removed with "delete"), so a rework rewrites one file instead of
+all of them, and every reply is shorter. A reply cut off at the output limit keeps the files it finished;
+the one being written is dropped and the worker is asked for only the rest. Four cut-offs in a row are
+escalated to the founder. Local models are told the size of their reply.
+
 Unrun here: a GPU (GitHub's standard machines have none), so the Vulkan path is exercised only
 up to device detection and the fallback to the processor; Gatekeeper and SmartScreen prompts, which
 appear only for a file downloaded by a browser.

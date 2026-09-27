@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from pathlib import Path
 
@@ -57,7 +58,7 @@ FENCED = re.compile(r"^```[\w+-]*[ \t]*\n(?P<body>.*?)\n```[ \t]*$", re.S | re.M
 NAME = re.compile(r"(?<![\w/.-])(?P<name>[\w-]+(?:/[\w-]+)*\.(?:py|md|html|css|js|json|txt|toml|cfg|ini|yaml|yml))\b")
 FILES_LAYOUT = ("Return your answer in exactly this layout and nothing else. First one JSON object on its own:\n"
                 '{"result": "done", "summary": "...", "acceptance_check": "..."}\n'
-                "Then every file, each one exactly like this:\n"
+                "Then each file you write, exactly like this:\n"
                 "=== FILE: name.ext ===\n"
                 "the complete file content, exactly as it should be saved\n"
                 "=== END FILE ===\n"
@@ -143,6 +144,14 @@ def _file_blocks(text: str) -> dict[str, str]:
         if named and body.strip():
             files[named.group("name")] = body.rstrip() + "\n"
     return files
+
+
+def _cut_file(text: str) -> str:
+    """The file a reply cut off at the output limit was writing: its last file block, when no END line closes it."""
+    heads = list(FILE_HEAD.finditer(text or ""))
+    if heads and not FILE_END.search(text, heads[-1].end()):
+        return heads[-1].group("name").strip()
+    return ""
 
 
 def _int(value, default: int) -> int:
@@ -319,13 +328,21 @@ class ModelSource:
         key = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
         repeats = self.answered.get(key, 0)
         out = model_adapter.complete(prompt, max_tokens=max_tokens, want_json=not files, schema=schema,
-                                     temperature=round(min(0.3 * repeats, 0.9), 1) if repeats else None)
+                                     temperature=round(min(0.3 * repeats, 0.9), 1) if repeats else None, partial=files)
         if out.get("error"):
             raise IntelligenceError(out["error"])
         self.answered[key] = repeats + 1
         self.last_text = out["text"]
         data = parse(out["text"])
-        no_files = files and isinstance(data, dict) and data.get("result") != "blocked" and not data.get("files")
+        if files and out.get("truncated"):
+            # Cut off at the output limit: the files finished before the cut are kept, the one being written is
+            # dropped, and the engine asks for the rest instead of the whole reply again.
+            data = dict(data) if isinstance(data, dict) else {"result": "done"}
+            cut = _cut_file(out["text"])
+            data["files"] = {k: v for k, v in (data.get("files") or {}).items() if k != cut}
+            data["cut_off"] = cut or "a file"
+        no_files = files and isinstance(data, dict) and data.get("result") != "blocked" and not data.get("files") \
+            and "cut_off" not in data
         if not isinstance(data, dict) or no_files:
             again = ("\n\nYour reply had no files in the required layout. " + FILES_LAYOUT) if files else \
                 "\n\nReply with only one JSON object."
@@ -422,9 +439,10 @@ class ModelSource:
             extra += "\nAnswers to your Blockers:\n" + "\n".join(a.get("acceptance_check", "") for a in answers)
         if feedback:
             extra += "\nYour last attempt failed a check. Fix it:\n" + feedback
-            if previous:
-                extra += ("\nYour previous files, to fix rather than rewrite from nothing:\n"
-                          + "".join(f"=== FILE: {k} ===\n{v.rstrip()}\n=== END FILE ===\n" for k, v in previous.items()))
+        if previous:
+            extra += ("\nYour files so far. They are kept as they are: send only the files you change or add, each one "
+                      'complete. To remove a file, add "delete": ["name"] to the JSON object.\n'
+                      + "".join(f"=== FILE: {k} ===\n{v.rstrip()}\n=== END FILE ===\n" for k, v in previous.items()))
         kind = task["kind"]
         if kind in ("spec", "code"):
             shape = None
@@ -432,6 +450,10 @@ class ModelSource:
             shape = ('{"result": "proposal", "problem": "...", "recommendation": "...", "evidence_refs": [], '
                      '"cost": "...", "confidence": "low, medium or high", "what_would_change_this": "..."}')
         repo = f"Files already in the repository: {json.dumps(repo_files or [])}\n" if kind == "code" else ""
+        limit = _int(os.environ.get("CYNQRA_NUM_PREDICT"), 0) if shape is None else 0
+        if limit:  # a local model's reply is capped; a longer one is cut off, and the files it finished are kept
+            extra += (f"\nA reply holds at most about {limit} tokens. If the work needs more, send the most important "
+                      "files first and keep each file short; you will be asked for the rest.")
         prompt = (ROLE_TEXT.get(worker, "") + "\n" + self._ctx(objective, rules) + "\n" + DELIVERY_CONTRACT + "\n\n"
                   f"Task {task['id']}: {task['title']}. Expected output: {task['expected_output']}.\n"
                   f"Handoff: {json.dumps({k: handoff.get(k) for k in ('acceptance_check', 'context_ref', 'artifacts')})}\n"

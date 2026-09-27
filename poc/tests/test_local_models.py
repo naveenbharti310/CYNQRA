@@ -98,6 +98,22 @@ class LocalServerTests(unittest.TestCase):
             p.close()
             restore_env(saved)
 
+    def test_a_cut_off_local_reply_is_returned_only_to_a_caller_that_can_use_part_of_it(self):
+        from test_adapter import FakeProvider
+        saved = no_model_env()
+        p = FakeProvider()
+        p.mode = "length"
+        try:
+            os.environ.update({"CYNQRA_LOCAL_BASE_URL": p.base + "/v1", "CYNQRA_MODEL": "qwen3.6-35b-a3b-q2"})
+            self.assertIn("truncated", model_adapter.complete("write it")["error"])
+            out = model_adapter.complete("write it", partial=True)
+            self.assertIsNone(out["error"])
+            self.assertTrue(out["truncated"])
+            self.assertEqual((out["tokens_out"], out["text"][-3:]), (6144, "y ="))
+        finally:
+            p.close()
+            restore_env(saved)
+
     def test_every_schema_is_closed(self):
         from cynqra.intelligence import SCHEMAS
         def objects(x):
@@ -213,6 +229,35 @@ class FileBlockTests(unittest.TestCase):
         self.assertEqual(temps, [("same", None), ("same", 0.3), ("other", None), ("same", 0.6), ("same", 0.9),
                                  ("same", 0.9), ("fails", None), ("fails", None)])
 
+    def test_a_cut_off_reply_drops_only_the_file_being_written(self):
+        from cynqra import intelligence
+        seen = {}
+        text = ('{"result": "done", "summary": "store and tests"}\n=== FILE: store.py ===\ndef add(x):\n    return x\n'
+                "=== END FILE ===\n=== FILE: test_store.py ===\nimport unittest\nclass T(unittest.Te")
+
+        def fake(prompt, **kw):
+            seen.update(kw)
+            return {"text": text, "tokens_in": 900, "tokens_out": 6144, "estimated": False, "error": None,
+                    "truncated": True}
+        saved = intelligence.model_adapter.complete
+        intelligence.model_adapter.complete = fake
+        os.environ["CYNQRA_LOCAL_BASE_URL"] = "http://127.0.0.1:9/v1"
+        os.environ["CYNQRA_NUM_PREDICT"] = "6144"
+        try:
+            data, usage = ModelSource()._call("write the store", files=True)
+            with self.assertRaises(intelligence.IntelligenceError):  # a JSON reply cannot be used in part
+                fake_json = {"text": '{"a": ', "tokens_in": 1, "tokens_out": 1, "estimated": False,
+                             "error": "RuntimeError: reply truncated at max_tokens"}
+                intelligence.model_adapter.complete = lambda prompt, **kw: fake_json
+                ModelSource()._call("plan it", schema={"type": "object"})
+        finally:
+            intelligence.model_adapter.complete = saved
+            os.environ.pop("CYNQRA_NUM_PREDICT", None)
+        self.assertTrue(seen["partial"])
+        self.assertEqual(data["files"], {"store.py": "def add(x):\n    return x\n"})
+        self.assertEqual(data["cut_off"], "test_store.py")
+        self.assertEqual(usage["tokens_out"], 6144)
+
     def test_json_before_code_with_braces_still_parses(self):
         self.assertEqual(_parse_json('Sure.\n{"a": 1}\n=== FILE: x.py ===\nd = {1: 2}\n=== END FILE ==='), {"a": 1})
 
@@ -224,7 +269,7 @@ class JourneyTests(Base):
         self.assertEqual(e.meta["phase"], "accepted")
         self.assertEqual([t["status"] for t in e.tasks()], ["VERIFIED"] * 6)
         chats = [r for r in self.o.requests if r["path"] == "/api/chat"]
-        work = [r["body"] for r in chats if "Then every file, each one exactly like this" in r["body"]["messages"][0]["content"]]
+        work = [r["body"] for r in chats if "Then each file you write, exactly like this" in r["body"]["messages"][0]["content"]]
         self.assertTrue(work and all("format" not in b for b in work), "file replies are not forced into JSON mode")
         others = [r["body"] for r in chats if r["body"] not in work]
         self.assertTrue(others and all(isinstance(b.get("format"), dict) and b["format"].get("required") for b in others),
@@ -235,6 +280,52 @@ class JourneyTests(Base):
         self.assertIn(False, [c["passed"] for c in checks], "the engineer caught its own failing test")
         self.assertEqual(e.metrics()["fixed_by_workers_own_checks"], 1)
         self.assertFalse(any(c["estimated"] for c in e.store.all("call")))
+        e.close()
+
+    def test_a_reply_cut_off_at_the_output_limit_keeps_its_finished_files(self):
+        # 0.1.1 on GitHub's machines: the 2-bit model's code replies passed its 6,144-token limit, and the whole
+        # reply was thrown away four times running. Now the files finished before the cut are saved and only the
+        # rest is asked for; the follow-up here sends only the file that was cut, so the journey passes only if the
+        # engine kept the others.
+        self.o.mode = "cut"
+        e = engine_to_running(self.tmp.path, mode="live")
+        run_journey(e)
+        self.assertEqual(e.meta["phase"], "accepted")
+        self.assertEqual([t["status"] for t in e.tasks()], ["VERIFIED"] * 6)
+        cuts = [x["payload"] for x in e.store.events() if x["event_type"] == "task.reply_cut_off"]
+        self.assertTrue(cuts and all(c["saved"] and c["file"] not in c["saved"] for c in cuts), cuts)
+        asks = [r["body"]["messages"][0]["content"] for r in self.o.requests
+                if "was cut off while writing" in r["body"]["messages"][-1]["content"]]
+        self.assertEqual(len(asks), len(cuts))
+        self.assertIn("These files were saved: ", asks[0])
+        self.assertIn("They are kept as they are: send only the files you change", asks[0])
+        e.close()
+
+    def test_replies_that_keep_overflowing_are_escalated_not_retried_without_end(self):
+        from cynqra import engine as engine_mod
+        src = ModelSource()
+        real = src.work
+
+        def always_cut(task, **kw):
+            data, usage = real(task, **kw)
+            if task["kind"] == "code":
+                data = dict(data, files={}, cut_off="app.py")
+            return data, usage
+        e = engine_to_running(self.tmp.path, mode="live")
+        e.intel.work = always_cut
+        for _ in range(10):  # approve the founder decisions before the first code task, up to its escalation
+            e.run_until_idle()
+            esc = [d for d in e.pending_decisions() if d["kind"] == "escalation"]
+            if esc or not e.pending_decisions():
+                break
+            e.decide(e.pending_decisions()[0]["id"], "approve")
+        self.assertEqual(len(esc), 1)
+        self.assertIn(f"{engine_mod.MAX_CUT_OFFS + 1} replies in a row were longer than the model's output limit",
+                      esc[0]["problem"])
+        cuts = [x for x in e.store.events() if x["event_type"] == "task.reply_cut_off"]
+        self.assertEqual(len(cuts), engine_mod.MAX_CUT_OFFS)
+        e.decide(esc[0]["id"], "approve")
+        self.assertEqual(e.task(esc[0]["task_id"])["cut_offs"], 0, "an approved retry starts counting again")
         e.close()
 
     def test_a_syntax_error_is_named_back_to_the_engineer(self):

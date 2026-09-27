@@ -14,11 +14,17 @@ fits a laptop, in the size your memory holds (20.6 GB for 32 GB and up, 12.3 GB 
 
 The full guide, with what to test and troubleshooting: [CYNQRA_DESKTOP.md](https://github.com/naveenbharti310/Passway/blob/cynqra/CYNQRA_DESKTOP.md)
 
-**Measured on GitHub's machines** (16 GB, 4 processor threads, no GPU; Qwen3.6 35B-A3B 2-bit): a whole
-Cynqra run on Windows, from the founder's sentence to a deployed, healthy bakery order app whose 17 tests
-pass, took 24 model calls and about 4 hours. Most of that was one task going round in circles because
-the verifier misread the tests' output; 0.1.1 fixes that (below). A current laptop is two to four times
-faster, and a Mac or a graphics card faster still.
+**Measured on GitHub's machines** (16 GB, 4 processor threads, no GPU), a whole Cynqra run for a bakery
+order app, from the founder's sentence to a deployed, healthy product whose tests pass:
+- gpt-oss 20B on 0.1.1: passed in **50 minutes**, 10 model calls, every task verified at its first check.
+- Qwen3.6 35B-A3B 2-bit on 0.1.0: passed in 4 hours on Windows, most of it one task going round in
+  circles; 0.1.1 fixed that loop. On 0.1.1 its code replies then outgrew the 2-bit model's output limit
+  and were thrown away whole; 0.1.2 keeps the finished files and asks only for the rest.
+A current laptop is two to four times faster than these machines, and a Mac or a graphics card faster still.
+
+**0.1.2:** an engineer's reply carries only the files it writes or changes, and the other files are kept,
+so fixing one test no longer means rewriting every file; a reply cut off at the model's output limit keeps
+the files it finished and asks for the rest.
 
 **0.1.1:** the verifier reads test results even when the app under test logs requests, and names the test
 that hung or crashed; a rework that repeats an earlier attempt exactly is answered with some temperature

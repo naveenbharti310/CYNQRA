@@ -485,24 +485,33 @@ def check_model(args) -> int:
                 break
             files = {k: v for k, v in (out.get("files") or {}).items() if isinstance(v, str) and k.endswith(".py")
                      and "/" not in k}
-            for p in work.glob("*.py"):
-                p.unlink()
+            for name in out.get("delete") or []:  # as in the engine: a reply carries only the files it changes
+                if isinstance(name, str) and "/" not in name and (work / name).is_file():
+                    (work / name).unlink()
             for name, text in files.items():
                 (work / name).write_text(text, encoding="utf-8")
+            files = {p.name: p.read_text(encoding="utf-8") for p in sorted(work.glob("*.py"))}
             rep = run_unittests(work)
             calls.append(u)
             if not files:  # show exactly what the model wrote, so a format problem is visible, not guessed at
                 raw = getattr(src, "last_text", "")
                 result.setdefault("unreadable_replies", []).append(raw[:6000])
                 print("  the reply had no readable files; it began:\n" + "\n".join("    | " + ln for ln in raw[:1500].splitlines()))
-            print(f"  code round {rnd + 1}: {sorted(files)}; {rep['ran']} tests, {len(rep['failed'])} failed; "
+            cut = out.get("cut_off")
+            print(f"  code round {rnd + 1}: {sorted(files)}" + (f" (reply cut off while writing {cut})" if cut else "")
+                  + f"; {rep['ran']} tests, {len(rep['failed'])} failed; "
                   f"{u['tokens_in']} tokens in, {u['tokens_out']} out, {u['latency_s']:.0f} s{speed(u)}", flush=True)
-            if rep["passed"]:
+            if rep["passed"] and not cut:
                 passed = True
                 break
             previous = files
-            feedback = ("Your reply contained no files. Every file must be in the === FILE: name === layout."
-                        if not files else failure_summary(rep) + "\n" + rep["output"][-1500:])
+            if cut:
+                feedback = (f"Your reply was longer than the output limit and was cut off while writing {cut}. Send "
+                            "only the files still missing or unfinished, each one complete and short.")
+            elif not files:
+                feedback = "Your reply contained no files. Every file must be in the === FILE: name === layout."
+            else:
+                feedback = failure_summary(rep) + "\n" + rep["output"][-1500:]
         shutil.rmtree(work, ignore_errors=True)
         ok = complete and passed
         secs = sum(c["latency_s"] for c in calls)
@@ -570,7 +579,8 @@ def e2e(args) -> int:
                 if ev["seq"] > seen:
                     seen = ev["seq"]
                     if ev["event_type"] in ("task.verified", "verification.completed", "task.blocked", "action.denied",
-                                            "decision.created", "deployment.verified", "worker.self_checked", "task.failed"):
+                                            "decision.created", "deployment.verified", "worker.self_checked", "task.failed",
+                                            "task.reply_cut_off"):
                         p = ev.get("payload") or {}
                         extra = p.get("verdict") or p.get("kind") or p.get("passed") or p.get("reason") or ""
                         print(f"  {time.time() - t0:7.0f}s  {ev['event_type']:<24} {ev['aggregate_id']:<22} {str(extra)[:80]}",

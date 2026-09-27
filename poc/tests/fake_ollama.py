@@ -37,6 +37,7 @@ class FakeOllama:
         self.version = version
         self.models = list(models)
         self.mode = mode
+        self.cut_tasks: set[str] = set()
         outer = self
 
         class H(BaseHTTPRequestHandler):
@@ -80,6 +81,13 @@ class FakeOllama:
                     text = fake_model.answer(prompt)
                     if "=== FILE:" in prompt:
                         text = as_blocks(text)
+                    cut = outer.cut_reply(prompt, text) if outer.mode == "cut" else None
+                    if cut:
+                        return self._send(200, {"model": body["model"], "message": {"role": "assistant", "content": cut},
+                                                "done": True, "done_reason": "length",
+                                                "prompt_eval_count": max(1, len(prompt) // 4), "eval_count": 8192})
+                    if outer.mode == "cut" and "was cut off while writing" in prompt:
+                        text = outer.only_the_cut_file(prompt, text)
                 return self._send(200, {"model": body["model"], "message": {"role": "assistant", "content": text},
                                         "done": True, "done_reason": "stop",
                                         "prompt_eval_count": max(1, len(prompt) // 4),
@@ -88,6 +96,25 @@ class FakeOllama:
         self.srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
         self.host = f"http://127.0.0.1:{self.srv.server_address[1]}"
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    def cut_reply(self, prompt: str, text: str) -> str | None:
+        """mode "cut": the first code reply of each task stops halfway through its last file, like a local model at
+        its output limit. The follow-up is answered with only the file that was cut, as the engine asks."""
+        task = re.search(r"Task (t_\d+):", prompt)
+        heads = list(re.finditer(r"^=== FILE: (.+?) ===$", text, re.M))
+        if not task or len(heads) < 2 or task.group(1) in self.cut_tasks or "was cut off while writing" in prompt:
+            return None
+        self.cut_tasks.add(task.group(1))
+        last = heads[-1]
+        body = text[last.end():].split("=== END FILE ===")[0]
+        return text[:last.end()] + body[: len(body) // 2]
+
+    @staticmethod
+    def only_the_cut_file(prompt: str, text: str) -> str:
+        name = re.search(r"cut off while writing (\S+?), which", prompt).group(1)
+        header = text.split("=== FILE:")[0]
+        block = re.search(r"=== FILE: " + re.escape(name) + r" ===\n.*?=== END FILE ===\n", text, re.S)
+        return header + (block.group(0) if block else "")
 
     def close(self):
         self.srv.shutdown()

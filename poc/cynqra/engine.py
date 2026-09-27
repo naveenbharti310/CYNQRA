@@ -36,6 +36,7 @@ UNIT_COST = {"write_file": 1, "read_artifact": 0, "run_tests": 2, "merge_to_main
 ALLOWED_EXT = {".py", ".md", ".html", ".json", ".txt", ".css", ".js"}
 ESCALATIONS_PER_DAY = 5  # D-29
 MAX_ATTEMPTS = 3
+MAX_CUT_OFFS = 3  # replies in a row cut off at the model's output limit before a task is escalated
 TASK_STATES = ["PLANNED", "ASSIGNED", "IN_PROGRESS", "BLOCKED", "REVIEW", "REWORK", "AWAITING_FOUNDER",
                "APPROVED", "VERIFIED", "FAILED"]
 
@@ -633,13 +634,18 @@ class Engine:
             return {"did": "blocked", "task": t["id"]}
         if kind in ("spec", "code"):
             files = result.get("files")
-            if not isinstance(files, dict) or not files:
+            cut = result.get("cut_off")
+            if not isinstance(files, dict) or (not files and not cut):
                 raise ProtocolError("a done result needs files: an object of file name to full file content")
             bad = [k for k, v in files.items() if not isinstance(v, str)]
             if bad:
                 raise ProtocolError(f"file content must be text: {', '.join(map(str, bad))}")
-            shutil.rmtree(out)
-            out.mkdir()
+            # A reply carries the files it writes or changes; the worker's other files stay as they were, so a
+            # rework rewrites one file instead of all of them.
+            for name in result.get("delete") or []:
+                target = (out / str(name)).resolve()
+                if out.resolve() in target.parents and target.is_file():
+                    target.unlink()
             written = []
             for name, text in files.items():
                 g = self.gateway(owner, t["id"], "write_file", target=str(name), content=text)
@@ -653,6 +659,11 @@ class Engine:
                         return self._escalate(t, f"{t['id']}: writes kept being refused ({g['policy']['reason']})")
                     return {"did": "write_refused", "task": t["id"]}
                 written.append(g["result"])
+            if cut:
+                return self._cut_off(t, cut, sorted(files))
+            t["cut_offs"] = 0
+            written = [{"file": p.relative_to(out).as_posix(), "hash": digest(p.read_bytes()), "bytes": p.stat().st_size}
+                       for p in sorted(out.rglob("*")) if p.is_file()]  # the whole result: kept files and new ones
             if kind == "code" and t.get("self_checks_used", 0) < self._self_checks():
                 check = self._self_check(t, out)
                 if not check["passed"]:
@@ -670,6 +681,22 @@ class Engine:
             return {"did": "completed", "task": t["id"]}
         # proposals: decision, review_merge, deploy
         return self._propose(t, result)
+
+    def _cut_off(self, t: dict, cut: str, saved: list[str]) -> dict:
+        """The reply stopped at the model's output limit. The files it finished are saved; the worker is asked for
+        the rest. Replies that keep overflowing are escalated rather than retried without end."""
+        t["cut_offs"] = t.get("cut_offs", 0) + 1
+        if t["cut_offs"] > MAX_CUT_OFFS:
+            return self._escalate(t, f"{t['id']}: {MAX_CUT_OFFS + 1} replies in a row were longer than the model's "
+                                     "output limit")
+        t.update({"status": "REWORK", "feedback": (
+            f"Your last reply was longer than the model's output limit and was cut off while writing {cut}, which was "
+            "not saved. " + (f"These files were saved: {', '.join(saved)}. " if saved else "No file was finished. ")
+            + "Send only the files still missing or unfinished, each one complete and short.")})
+        self._save_task(t)
+        self.event("task.reply_cut_off", "task", t["id"], {"file": cut, "saved": saved, "round": t["cut_offs"]},
+                   actor=t["owner_worker_id"], actor_type="worker", correlation_id=t["id"])
+        return {"did": "cut_off", "task": t["id"], "saved": saved}
 
     def _self_checks(self) -> int:
         """How many times an engineer may test and fix its own work before handing it over.
@@ -955,7 +982,7 @@ class Engine:
             back = t.get("failed_from")
             if back not in ("PLANNED", "BLOCKED"):
                 back = "REWORK" if t["kind"] in ("spec", "code") else "ASSIGNED"
-            t.update({"status": back, "attempts": 0})
+            t.update({"status": back, "attempts": 0, "cut_offs": 0})
             self._save_task(t)
         else:
             self._set_meta(phase="stopped", notice=f"Run stopped by the founder at {t['id']}.")

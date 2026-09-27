@@ -69,6 +69,11 @@ answer, and a timeout after CYNQRA_TIMEOUT must not become three. llama-server
 answers an unparseable finished reply with HTTP 500 ("does not match the
 expected ... format") and an overlong prompt with HTTP 400
 exceed_context_size_error; both now read as what they are.
+
+27 Sep 2026, fifth pass: a caller that can use part of a reply passes
+partial=True. A local reply cut off at max_tokens then comes back with
+truncated=True instead of as an error: an engineer's files that were
+complete before the cut are kept, and only the rest is asked for again.
 """
 from __future__ import annotations
 
@@ -232,7 +237,7 @@ def _local_timeout() -> float:
 
 
 def _ollama(prompt: str, model: str, max_tokens: int, want_json: bool, schema: dict | None = None,
-            temperature: float | None = None) -> dict:
+            temperature: float | None = None, partial: bool = False) -> dict:
     num_ctx = int(os.environ.get("CYNQRA_NUM_CTX") or 32768)
     answer = int(os.environ.get("CYNQRA_NUM_PREDICT") or 0) or max(max_tokens, 8192)
     if len(prompt) // 4 + answer > num_ctx:  # four characters a token is a floor, so this only refuses sure failures
@@ -263,18 +268,19 @@ def _ollama(prompt: str, model: str, max_tokens: int, want_json: bool, schema: d
         if "HTTP 400" in str(exc) and "context length" in str(exc):
             raise RuntimeError(f"the prompt is longer than num_ctx={num_ctx}; raise CYNQRA_NUM_CTX") from exc
         raise
-    if data.get("done_reason") == "length":
+    cut = data.get("done_reason") == "length"
+    if cut and not partial:
         raise RuntimeError(f"reply truncated at num_predict={answer} or num_ctx={num_ctx}")
     msg = data.get("message") or {}
     text = msg.get("content") or ""
     if not text.strip():
         raise RuntimeError("the model returned no answer" + (" (only thinking)" if msg.get("thinking") else ""))
     return {"text": text, "tokens_in": int(data.get("prompt_eval_count") or 0),
-            "tokens_out": int(data.get("eval_count") or 0), "estimated": False}
+            "tokens_out": int(data.get("eval_count") or 0), "estimated": False, "truncated": cut}
 
 
 def _local_openai(prompt: str, model: str, max_tokens: int, want_json: bool = False, schema: dict | None = None,
-                  temperature: float | None = None) -> dict:
+                  temperature: float | None = None, partial: bool = False) -> dict:
     """LM Studio or llama-server. Their context size is set when the server loads the model (-c 32768)."""
     base = os.environ["CYNQRA_LOCAL_BASE_URL"].rstrip("/")
     headers = {"Content-Type": "application/json"}
@@ -309,11 +315,12 @@ def _local_openai(prompt: str, model: str, max_tokens: int, want_json: bool = Fa
             raise RuntimeError(f"the model server at {base} is not running") from exc
         raise
     choice = data["choices"][0]
-    if choice.get("finish_reason") == "length":
+    cut = choice.get("finish_reason") == "length"
+    if cut and not partial:
         raise RuntimeError("reply truncated at max_tokens")
     usage = data.get("usage") or {}
     out = {"text": choice["message"].get("content") or "", "tokens_in": int(usage.get("prompt_tokens") or 0),
-           "tokens_out": int(usage.get("completion_tokens") or 0), "estimated": False}
+           "tokens_out": int(usage.get("completion_tokens") or 0), "estimated": False, "truncated": cut}
     t = data.get("timings") or {}  # llama-server's own measurement of this call
     if t.get("predicted_per_second"):
         out["speed"] = {"read_tps": round(float(t.get("prompt_per_second") or 0), 1),
@@ -340,13 +347,14 @@ def _cmd(prompt: str) -> dict:
 
 
 def complete(prompt: str, max_tokens: int = 1500, want_json: bool = False, schema: dict | None = None,
-             temperature: float | None = None) -> dict:
+             temperature: float | None = None, partial: bool = False) -> dict:
     """Returns text, tokens_in, tokens_out, estimated, latency_s, error.
 
     max_tokens defaults to 1500, the S1 setting. S2 passes a larger value
     because workers return code and tests inside one protocol object.
     want_json asks a local Ollama model for constrained JSON output, shaped by
-    schema when one is given.
+    schema when one is given. partial=True returns a local reply cut off at
+    max_tokens, marked truncated=True, instead of an error.
     """
     model = resolve()
     if model is None:
@@ -357,9 +365,9 @@ def complete(prompt: str, max_tokens: int = 1500, want_json: bool = False, schem
         if model["kind"] == "cmd":
             out = _cmd(prompt)
         elif model["kind"] == "ollama":
-            out = _ollama(prompt, model["label"], max_tokens, want_json, schema, temperature)
+            out = _ollama(prompt, model["label"], max_tokens, want_json, schema, temperature, partial)
         elif model["kind"] == "local":
-            out = _local_openai(prompt, model["label"], max_tokens, want_json, schema, temperature)
+            out = _local_openai(prompt, model["label"], max_tokens, want_json, schema, temperature, partial)
         elif model["kind"] == "openai":
             out = _openai(prompt, model["label"], max_tokens)
         else:

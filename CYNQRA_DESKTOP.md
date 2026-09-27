@@ -91,9 +91,9 @@ product. Closing the window does the same. **New run** archives the run and star
 
 How long a run takes depends on the laptop. On a processor alone a step takes minutes, and a whole
 run of one to two dozen model calls takes from under an hour (35B-A3B on a fast machine, or any Mac)
-to a few hours (a 16 GB laptop without a GPU). Measured: on GitHub's 16 GB Windows machine, which has 4
-slow processor threads and no GPU, a whole bakery run with the 2-bit model passed in 24 model calls
-and 4 hours 8 minutes, three of them spent on one task's rework loop that version 0.1.1 fixes.
+to a few hours (a 16 GB laptop without a GPU). Measured on GitHub's 16 GB machines, which have 4 slow
+processor threads and no GPU: a whole bakery run with gpt-oss 20B passed in 50 minutes (10 model calls);
+with the Qwen3.6 2-bit model one passed in 4 hours, three of them spent in a rework loop fixed since.
 
 ## Where things are
 
