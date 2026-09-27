@@ -162,7 +162,7 @@ class OpenAICompatibleAdapter(ProviderAdapter):
                      "local": False, "modalities": ["text"], "json_schema": True, "tools": True}
             if hf and listing:
                 try:
-                    facts.update(self._hf(ref, listing))
+                    facts.update(self._hf(ref, listing, (conn.get("_served_by") or {}).get(ref)))
                 except SupplyError as exc:  # listed, or named, but no provider serves it now: not offered
                     unavailable.append(str(exc))
                     continue
@@ -179,9 +179,11 @@ class OpenAICompatibleAdapter(ProviderAdapter):
         return out
 
     @staticmethod
-    def _hf(ref: str, listing: dict) -> dict:
-        """Hugging Face's router lists each model's live providers with their price and context: the one named after
-        ':' in ref, else the cheapest live one that supports structured output."""
+    def _hf(ref: str, listing: dict, keep: str | None = None) -> dict:
+        """Hugging Face's router is an aggregator: it lists each model's live providers (the companies serving it)
+        with their price and context. The one named after ':' in ref; else the one already serving it (keep), while
+        it is live, so the measured record stays that company's; else the cheapest live one with structured output.
+        The call names it (route), so what is measured and billed is what was chosen."""
         base, _, want = ref.partition(":")
         entry = listing.get(base)
         if entry is None:
@@ -189,12 +191,15 @@ class OpenAICompatibleAdapter(ProviderAdapter):
         live = [p for p in entry.get("providers") or [] if p.get("status") == "live"]
         if want:
             live = [p for p in live if p.get("provider") == want]
+        elif keep and any(p.get("provider") == keep for p in live):
+            live = [p for p in live if p.get("provider") == keep]
         if not live:
             raise SupplyError(f"{ref}: no live provider")
         p = min(live, key=lambda p: (not p.get("supports_structured_output"),
                                      (p.get("pricing") or {}).get("input", 1e9)))
         pr = p.get("pricing") or {}
-        return {"name": ref, "provider": p.get("provider") or "", "context": int(p.get("context_length") or 0),
+        return {"name": ref, "provider": p.get("provider") or "", "served_by": p.get("provider") or "",
+                "context": int(p.get("context_length") or 0),
                 "price_in": float(pr.get("input") or WORST_PRICE[0]), "price_out": float(pr.get("output") or WORST_PRICE[1]),
                 "json_schema": bool(p.get("supports_structured_output")), "tools": bool(p.get("supports_tools"))}
 
@@ -202,6 +207,9 @@ class OpenAICompatibleAdapter(ProviderAdapter):
         ep, flavor = conn.get("endpoint") or "", self.flavor(conn)
         r = {"label": entry["ref"], "local": False, **_settings(conn)}
         if flavor == "hf":
+            sb = entry.get("served_by")
+            if sb and ":" not in entry["ref"]:  # pinned to the company whose price and record Cynqra holds
+                r["label"] = f"{entry['ref']}:{sb}"
             r.update({"kind": "hf", "HF_TOKEN": secret, **({"HF_ROUTER_URL": ep} if ep else {})})
             _hosted(r, conn)
         elif flavor == "openai":

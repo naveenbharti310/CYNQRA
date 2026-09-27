@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 from . import roles
+from .intelligence_layer.registry import served_version
 from .intelligence import OBJECTIVE_KEYS, IntelligenceError, ModelSource
 from .testrunner import failure_summary, run_unittests
 
@@ -164,7 +165,7 @@ def regression_check(supply, model_id: str, kind: str, log=lambda s: None) -> di
     if m["runtime"] == "scripted":
         return {"passed": False, "evidence": "the scripted demo can only replay its own scenario", "ran": False}
     status = (m.get("regression") or {}).get("status")
-    version = m.get("version") or ""
+    version = served_version(m)
     done = [o for o in reg.outcomes(model_id, kind) if o["verified"] and (o.get("model_version") or "") == version]
     if status == "failed":
         return {"passed": False, "evidence": "its version failed the regression gate", "ran": False}

@@ -6,7 +6,7 @@ worker bindings) replaced the model registry. Linux, Python
 
 ## Result
 
-231 tests, 231 passed, 0 failed, 0 skipped. Run time about 240 seconds.
+232 tests, 232 passed, 0 failed, 0 skipped. Run time about 240 seconds.
 
 | Module | Tests | What it proves |
 | --- | --- | --- |
@@ -21,7 +21,7 @@ worker bindings) replaced the model registry. Linux, Python
 | test_adapter | 15 | The Anthropic and OpenAI wire formats against a local fake provider, retired models, a provider outage going to the Replacement Engine, JSON retries, and live_check.py with the Budget Engine's breaker as its spend cap |
 | test_local_models | 21 | Local servers (Ollama, llama.cpp), Hugging Face providers, file blocks, cut-off replies, blank objective fields inferred in one follow-up, the environment model priced at its list price |
 | test_desktop | 25 | The desktop app: model download and runtime, the app's API, the self-test, --e2e and --check-model (the registry's probe) against the test double, the workforce demonstration |
-| test_intelligence_supply | 16 | The locked V1 decisions and their ten demonstrations: OpenAI-compatible, Anthropic and local connections discovered and registered; the key only in the secrets layer and resolved per call; Bedrock planned, not connectable; a new adapter plugged in with nothing else changed; workers holding no intelligence, several sharing one, different workers on different intelligence by evidence; a run through the gateway, metered; a better intelligence detected and the worker rebound with its identity kept; a new version regression-checked; the fallback preferred; every decision an audit event; a catalogue model no provider serves skipped, not fatal; a hosted call giving up after ten minutes; the demonstration picking the newest served model of each family |
+| test_intelligence_supply | 17 | The locked V1 decisions and their ten demonstrations: OpenAI-compatible, Anthropic and local connections discovered and registered; the key only in the secrets layer and resolved per call; Bedrock planned, not connectable; a new adapter plugged in with nothing else changed; workers holding no intelligence, several sharing one, different workers on different intelligence by evidence; a run through the gateway, metered; a better intelligence detected and the worker rebound with its identity kept; a new version regression-checked; the fallback preferred; every decision an audit event; a catalogue model no provider serves skipped, not fatal; a hosted call giving up after ten minutes; the demonstration picking the newest served model of each family; the company serving a Hugging Face model pinned on every call, kept while live, and a change of it treated as a new version |
 | test_server | 6 | HTTP API: provider connections (connect, update, fault, remove, a key never shown, Bedrock refused); the UI served, path traversal blocked, the full journey over HTTP, bad requests are 400, auto run and archive; and the browser test, the whole journey clicked through the real UI in Chromium |
 
 ## Coverage

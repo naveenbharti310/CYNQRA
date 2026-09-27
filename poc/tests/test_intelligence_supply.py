@@ -296,6 +296,36 @@ class CatalogueTests(unittest.TestCase):
         with self.assertRaises(SupplyError):
             self.hf(models=["org/not-served-now"])
 
+    def test_the_serving_company_is_pinned_kept_and_its_change_is_a_new_version(self):
+        from cynqra.intelligence_layer import VersionChanged
+        live = lambda name, price: {"provider": name, "status": "live", "context_length": 65536,  # noqa: E731
+                                    "supports_structured_output": True, "pricing": {"input": price, "output": price * 4}}
+        self.LISTING = {"data": [{"id": "org/two", "providers": [live("p1", 0.3), live("p2", 0.5)]}]}
+        cid = self.hf()["connection"]["id"]
+        m = self.supply.registry.get("org-two")
+        self.assertEqual((m["served_by"], m["price_in"]), ("p1", 0.3), "the cheapest company with structured output")
+        conn = self.supply.connections.get(cid)
+        route = self.supply.adapters["openai_compatible"].route(conn, None, m)
+        self.assertEqual(route["label"], "org/two:p1", "the call names the company whose price and record Cynqra holds")
+        pin = "@p1"
+        self.assertEqual(m["regression"]["version"], pin)
+        self.supply.registry.record_outcome("org-two", role="Engineer", task_kind="code", task_id="t1", run_id="r",
+                                            attempt=1, verified=True, usd=0.01, seconds=5, tokens=900)
+        self.LISTING = {"data": [{"id": "org/two", "providers": [live("p1", 0.3), live("p3", 0.1)]}]}
+        self.supply.discover(cid)
+        self.assertEqual(self.supply.registry.get("org-two")["served_by"], "p1",
+                         "a cheaper company appearing does not move a model its record was measured on")
+        self.LISTING = {"data": [{"id": "org/two", "providers": [dict(live("p1", 0.3), status="offline"),
+                                                               live("p3", 0.1)]}]}
+        self.supply.discover(cid)
+        m = self.supply.registry.get("org-two")
+        self.assertEqual((m["served_by"], m["regression"]["status"], m["regression"]["previous_version"]),
+                         ("p3", "unverified", pin), "another company serving it is a new version, checked again")
+        self.assertEqual(self.supply.registry.stats("org-two")["attempts"], 0, "p1's record is not p3's")
+        self.assertEqual(self.supply.registry.profile("org-two")["by_version"], {pin: {"attempts": 1, "verified": 1}})
+        with self.assertRaises(VersionChanged):  # a worker bound on p1 continues only after its regression check
+            self.supply.gateway.invoke("org-two", {"prompt": "x"}, pinned_version=pin)
+
     def test_the_demonstration_picks_the_newest_served_model_of_each_family(self):
         import workforce_demo
         picks, missing = workforce_demo.pick_hosted(["moonshotai/Kimi-K3", "moonshotai/Kimi-K3-Instruct-FP8",

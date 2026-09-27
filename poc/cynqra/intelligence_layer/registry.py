@@ -29,7 +29,16 @@ DOWN_AFTER_ERRORS = 2  # consecutive failed calls before an intelligence counts 
 DOWN_FOR_S = 600
 FACTS = ("name", "provider", "ref", "runtime", "version", "context", "tools", "json_schema", "modalities", "mcp",
          "local", "price_in", "price_out", "compute_usd_per_hour", "license", "commercial_use", "params", "hardware",
-         "size_gb", "predict", "think")
+         "size_gb", "predict", "think", "served_by")
+
+
+def served_version(m: dict) -> str:
+    """What was actually measured and what a binding pins: the model's version and, for intelligence reached through
+    an aggregator (Hugging Face's router), the company serving it. The same model served by another company can
+    differ in speed, price and quantization, so a change of either is a change of version: a worker continues on it
+    only after its regression check, and its evidence is kept apart."""
+    v, sb = str(m.get("version") or ""), str(m.get("served_by") or "")
+    return f"{v}@{sb}" if sb else v
 
 
 class RegistryError(SupplyError):
@@ -77,10 +86,10 @@ class IntelligenceRegistry:
             for k in ("price_in", "price_out", "compute_usd_per_hour"):
                 m[k] = float(m[k] or 0)
             m["context"] = int(m["context"] or 0)
-            same = old is not None and str(old.get("version") or "") == str(m["version"])
+            same = old is not None and served_version(old) == served_version(m)
             regression = (old or {}).get("regression") if same and (old or {}).get("regression") else {
-                "status": "unverified", "version": m["version"], "at": now(),
-                "previous_version": (old or {}).get("version") if old and not same else None}
+                "status": "unverified", "version": served_version(m), "at": now(),
+                "previous_version": served_version(old) if old and not same else None}
             if m.get("runtime") == "scripted":  # a replay of a prepared script has no version to check
                 regression = {"status": "not applicable", "version": "", "at": now(), "previous_version": None}
             m.update({"status": "active", "status_note": "", "fault": (old or {}).get("fault") or {},
@@ -89,7 +98,9 @@ class IntelligenceRegistry:
             self.store.put("intelligence", mid, m)
             if old is None or not same:
                 self._audit("intelligence.registered", mid, {"model": m["name"], "provider": m["provider"],
-                            "connection_id": connection_id, "version": m["version"], "source": source})
+                            "connection_id": connection_id, "version": m["version"], "source": source,
+                            "served_by": m.get("served_by") or "",
+                            "previous": served_version(old) if old else None})
             return m
 
     def _new_id(self, name: str, connection_id: str) -> str:
@@ -165,7 +176,7 @@ class IntelligenceRegistry:
             c = {"id": f"c_{self._n('call') + 1:06d}", "model_id": model_id, "role": role, "purpose": purpose,
                  "task_kind": task_kind, "run_id": run_id, "tokens_in": tin, "tokens_out": tout,
                  "seconds": round(secs, 1), "usd": self.cost(m, tin, tout, secs), "write_tps": usage.get("write_tps"),
-                 "error": error[:300], "at": now()}
+                 "error": error[:300], "served_by": m.get("served_by") or "", "at": now()}
             self.store.put("call", c["id"], c)
             h = m.get("health") or {"errors": 0, "down_until": 0}
             h["errors"] = h.get("errors", 0) + 1 if error else 0
@@ -180,7 +191,7 @@ class IntelligenceRegistry:
                        source: str = "project") -> dict:
         """One verification of one attempt at a task: the unit Cynqra learns from."""
         with self.lock:
-            version = (self.store.get("intelligence", model_id) or {}).get("version") or ""
+            version = served_version(self.store.get("intelligence", model_id) or {})
             o = {"id": f"o_{self._n('outcome') + 1:06d}", "model_id": model_id, "model_version": version,
                  "role": role, "task_kind": task_kind, "task_id": task_id, "run_id": run_id, "attempt": attempt,
                  "verified": bool(verified), "first_pass": bool(verified and attempt == 1), "usd": round(usd, 6),
@@ -192,11 +203,11 @@ class IntelligenceRegistry:
     def set_regression(self, model_id: str, passed: bool, evidence: str) -> dict:
         with self.lock:
             m = self.get(model_id)
-            m["regression"] = {"status": "passed" if passed else "failed", "version": m.get("version") or "",
+            m["regression"] = {"status": "passed" if passed else "failed", "version": served_version(m),
                                "at": now(), "evidence": evidence[:300]}
             self.store.put("intelligence", model_id, m)
             self._audit("intelligence.regression_checked", model_id, {"passed": passed, "evidence": evidence[:200],
-                        "version": m.get("version") or ""})
+                        "version": served_version(m)})
             return m
 
     def _n(self, kind: str) -> int:
@@ -212,12 +223,16 @@ class IntelligenceRegistry:
     def stats(self, model_id: str, task_kind: str | None = None) -> dict:
         """Measured performance: attempts verified, first-pass rate, cost and time per attempt, speed, reliability."""
         outs = self.outcomes(model_id, task_kind)
+        calls = self.calls(model_id)
+        sb = (self.store.get("intelligence", model_id) or {}).get("served_by")
+        if sb:  # evidence belongs to the company that served it: another company's record is not this one's
+            outs = [o for o in outs if str(o.get("model_version") or "").endswith("@" + sb)]
+            calls = [c for c in calls if c.get("served_by") == sb]
         n = len(outs)
         ok = sum(1 for o in outs if o["verified"])
         tasks = {(o["run_id"], o["task_id"]) for o in outs}
         first = sum(1 for o in outs if o["first_pass"])
         firsts = {(o["run_id"], o["task_id"]) for o in outs if o["attempt"] == 1}
-        calls = self.calls(model_id)
         tps = [c["write_tps"] for c in calls if c.get("write_tps")]
         errors = sum(1 for c in calls if c.get("error"))
         return {"attempts": n, "verified": ok, "tasks": len(tasks),

@@ -66,6 +66,8 @@ class IntelligenceSupply:
     def discover(self, connection_id: str) -> list[dict]:
         conn = self.connections.get(connection_id)
         adapter = self.adapters[conn["type"]]
+        conn["_served_by"] = {m["ref"]: m.get("served_by") for m in self.registry.models()
+                              if m["connection_id"] == connection_id and m.get("served_by")}
         try:
             found = adapter.discover(conn, self.credentials.resolve(conn["credential_id"]))
         except SupplyError as exc:

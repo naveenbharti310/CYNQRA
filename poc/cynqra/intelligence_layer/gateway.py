@@ -29,6 +29,7 @@ from collections import deque
 
 from .. import model_adapter
 from .contracts import REQUEST_KEYS, SupplyError
+from .registry import served_version
 
 
 class VersionChanged(SupplyError):
@@ -52,8 +53,8 @@ class IntelligenceGateway:
             return self._failed(entry, f"{entry['name']} is retired: {entry.get('status_note') or 'retired'}")
         if (entry.get("regression") or {}).get("status") == "failed":
             return self._failed(entry, f"{entry['name']} failed its regression check")
-        if pinned_version is not None and str(entry.get("version") or "") != str(pinned_version):
-            raise VersionChanged(model_id, pinned_version, entry.get("version") or "")
+        if pinned_version is not None and served_version(entry) != str(pinned_version):
+            raise VersionChanged(model_id, pinned_version, served_version(entry))
         conn = self.connections.find_id(entry.get("connection_id"))
         if conn is None:
             return self._failed(entry, "its provider connection was removed")

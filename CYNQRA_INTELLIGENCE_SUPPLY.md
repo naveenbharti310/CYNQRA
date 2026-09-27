@@ -79,6 +79,30 @@ the next.
 | `local` | `LocalInferenceAdapter`: the desktop app's llama-server (downloads and swaps models), Ollama, a self-hosted server, a model command | none or API key | the app's catalog, or the models named |
 | `bedrock` | not built. It is planned, listed as planned, and refused if connected. It is one adapter added to `adapters.py`, with IAM as a credential method | | |
 
+### Hugging Face is an aggregator, not a provider
+
+Hugging Face Inference Providers is one OpenAI-compatible router (`https://router.huggingface.co/v1`) in front of
+partner companies that actually run the models (DeepInfra, Together, Fireworks, Groq, Cerebras, Nebius, Novita and
+others); Hugging Face runs a few small models itself (HF Inference, mostly CPU). A Hugging Face token authenticates
+the call, and Hugging Face bills the account at the partner's price (PRO includes $2 of credit a month), unless a
+partner's own key is stored in Hugging Face, in which case the partner bills. Sources: the Inference Providers
+[overview](https://huggingface.co/docs/inference-providers/index),
+[pricing and billing](https://huggingface.co/docs/inference-providers/pricing) and
+[chat completion](https://huggingface.co/docs/inference-providers/en/tasks/chat-completion) pages, checked 27
+September 2026.
+
+So in Cynqra Hugging Face is one provider connection (type `openai_compatible`, flavor `hf`) whose credential is
+the Hugging Face token, and every model registered through it records `served_by`, the company serving it:
+
+- discovery takes the cheapest live company that supports structured output, and keeps the one already serving a
+  model while it is live, so a model's record is not moved by a cheaper newcomer;
+- every call names it (`Qwen/Qwen3.8-27B:deepinfra`), so what is metered and billed is what was chosen;
+- the same model served by another company is a new version (`served_version`: `<version>@<company>`): its record
+  starts apart, and a worker bound to it continues only after its regression check.
+
+A Hugging Face subscription is a monthly credit, not unlimited access; Cynqra's dollar budget and its "no credit
+left" failure (a provider error, reported, never worked around) are what keep a project inside it.
+
 A new provider type is a subclass of `ProviderAdapter` with four methods: `normalize`, `discover`, `route`,
 `reachable`. Workers, bindings, the registry and the Router do not change
 (`test_a_new_adapter_plugs_in_without_touching_workers_registry_or_router`).

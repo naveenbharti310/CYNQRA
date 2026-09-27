@@ -4,7 +4,7 @@
 in the Cynqra build follows it. This file records what the code omitted (the document requires it, the code
 did not have it) and what it committed (the code did something the document rules out), what was changed for
 each, and where. Everything below is in `poc/` and covered by tests (`poc/tests/test_product_flow.py`,
-`test_journey.py`, `test_workforce.py`, and the rest of the suite: 231 tests).
+`test_journey.py`, `test_workforce.py`, and the rest of the suite: 232 tests).
 
 A second pass the same day rebuilt the core instead of patching it: the orchestrator was split into engines behind
 an explicit run contract, every run is staffed through the registry (the demo too), US dollars became the only

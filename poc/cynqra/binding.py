@@ -16,6 +16,7 @@ workforce.
 from __future__ import annotations
 
 from .db import now
+from .intelligence_layer.registry import served_version
 
 SYSTEM = "system"
 
@@ -36,13 +37,13 @@ def bind(run, worker_id: str, entry: dict, *, reason: str, by: str, candidates: 
          task_id: str | None = None) -> dict:
     """Bind a worker to an intelligence (a registry entry), pinning its current version."""
     old = current(run.store, worker_id)
-    if old and old["intelligence_id"] == entry["id"] and old.get("version") == (entry.get("version") or ""):
+    if old and old["intelligence_id"] == entry["id"] and old.get("version") == served_version(entry):
         return old
     history = list((old or {}).get("history") or [])
     if old:
         history.append({k: old[k] for k in ("intelligence_id", "intelligence", "version", "reason", "by", "bound_at")})
     b = {"worker_id": worker_id, "intelligence_id": entry["id"], "intelligence": entry["name"],
-         "version": entry.get("version") or "", "reason": reason[:400], "by": by,
+         "version": served_version(entry), "reason": reason[:400], "by": by,
          "candidates": candidates if candidates is not None else (old or {}).get("candidates", []),
          "bound_at": now(), "history": history}
     run.store.put("binding", worker_id, b)
