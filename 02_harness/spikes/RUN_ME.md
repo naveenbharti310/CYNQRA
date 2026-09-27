@@ -26,8 +26,10 @@ S1 and S2 can run on an open-weight model through the Cynqra desktop app's own
 llama-server, downloaded once from Hugging Face. Same runners, corpus, tasks,
 estimate and bars; token counts are measured by llama-server.
 
-  python spikes/run_local.py s1 qwen3.6-35b-a3b-q2 --app ../poc
-  python spikes/run_local.py s2 gpt-oss-20b --app ../poc
+  python spikes/run_local.py s1 qwen3.6-35b-a3b-q2 --app <Cynqra>/app
+  python spikes/run_local.py s2 gpt-oss-20b --app <Cynqra>/app
+
+<Cynqra> is an installed or staged Cynqra app (desktop/build.py --stage-only).
 
 On GitHub, a commit message containing [spikes] runs both spikes on both
 models (.github/workflows/cynqra-spikes.yml). A cost result belongs to the

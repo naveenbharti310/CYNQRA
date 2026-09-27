@@ -35,9 +35,10 @@ jobs:
         run: |
           set +e
           cd 02_harness
-          ../dist/stage/linux-x64/Cynqra/python/bin/python3 -X utf8 spikes/run_local.py ${{ matrix.spike }} ${{ matrix.model }} --app ../poc
+          ../dist/stage/linux-x64/Cynqra/python/bin/python3 -X utf8 spikes/run_local.py ${{ matrix.spike }} ${{ matrix.model }} --app ../dist/stage/linux-x64/Cynqra/app
           code=$?
           echo "exit code $code (0 met the bar, 1 scored and missed, 2 refused, 3 a model call failed: unrun)"
+          if [ ! -f spikes/${{ matrix.spike }}/${{ matrix.spike }}_report.json ]; then echo "::error::no ${{ matrix.spike }}_report.json: nothing was scored"; exit 3; fi
           [ $code -le 1 ] || exit $code
       - name: Report
         if: always()

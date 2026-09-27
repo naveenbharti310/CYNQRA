@@ -8,8 +8,8 @@ against its published SHA-256), points model_adapter at it with the app's reques
 (temperature 0, seed 42, thinking off or low), and runs the spike's own runner, whose exit code
 it returns. Token counts come from llama-server, so they are measured, not estimated.
 
-    python spikes/run_local.py s1 qwen3.6-35b-a3b-q2 --app ../poc
-    python spikes/run_local.py s2 gpt-oss-20b --app ../poc
+    python spikes/run_local.py s1 qwen3.6-35b-a3b-q2 --app <installed app>/app
+    python spikes/run_local.py s2 gpt-oss-20b --app <installed app>/app
 
 A cost result belongs to the model and machine that produced it (S2 RULINGS R5). This file
 prints both and writes them to local_run.json beside the spike's report.
@@ -48,7 +48,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("spike", choices=["s1", "s2"])
     ap.add_argument("model", help="a model id from the desktop app's catalog, e.g. qwen3.6-35b-a3b-q2")
-    ap.add_argument("--app", required=True, help="the folder holding the app's desktop.py (poc/, or an installed app/)")
+    ap.add_argument("--app", required=True, help="an installed or staged app's app/ folder, beside its llama/ (poc/ has no llama-server)")
     ap.add_argument("--data", default=str(HERE / "local_model_data"), help="where the model file and server log go")
     args = ap.parse_args()
 
@@ -56,12 +56,20 @@ def main() -> int:
     from desktop import Desktop, prepare_model  # noqa: E402
     from cynqra.runtime import BY_ID  # noqa: E402
 
-    desk = Desktop(Path(args.data))
+    try:
+        desk = Desktop(Path(args.data))
+    except Exception as exc:  # noqa: BLE001 - the spike is unrun, never failed, when no model could start
+        print(f"UNRUN: the app could not start: {exc}")
+        return 3
     info = {"spike": args.spike.upper(), "model_id": args.model, "model": BY_ID[args.model]["name"],
             "file": BY_ID[args.model].get("file"), "server": "llama.cpp llama-server, the desktop app's build",
             "machine": machine(), "started_at": datetime.now(IST).isoformat(timespec="seconds")}
     try:
-        prepare_model(desk, args.model, "off")
+        try:
+            prepare_model(desk, args.model, "off")
+        except Exception as exc:  # noqa: BLE001 - no model means an unrun spike (exit 3), not a missed bar (exit 1)
+            print(f"UNRUN: the model did not start: {exc}")
+            return 3
         info["settings"] = {k: os.environ.get(k) for k in ("CYNQRA_MODEL", "CYNQRA_NUM_PREDICT", "CYNQRA_THINK",
                                                             "CYNQRA_TEMPERATURE", "CYNQRA_SEED")}
         print(json.dumps(info, indent=1), flush=True)
