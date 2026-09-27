@@ -1,0 +1,82 @@
+# Cynqra on the strongest open models Hugging Face Inference Providers serves, on fast hosted hardware.
+# Needs the repository secret HF_TOKEN (a Hugging Face token allowed to make calls to Inference Providers);
+# without it the run stops at the first step and says so. The catalog step picks the contenders from the
+# router's live list; each one then runs S1, S2 and a whole Cynqra journey, under spend caps. The runners,
+# corpus, tasks, S2 estimate and bars are unchanged. Runs when a commit message on cynqra contains [hf].
+name: cynqra-hf
+
+on:
+  push:
+    branches: [cynqra]
+
+permissions:
+  contents: read
+
+jobs:
+  catalog:
+    if: contains(github.event.head_commit.message, '[hf]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Hugging Face token present
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "::error::No HF_TOKEN secret. Add it under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+      - name: Which models the router serves now, and the contenders
+        id: pick
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: python3 .github/scripts/hf_catalog.py
+
+  run:
+    needs: catalog
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.catalog.outputs.matrix) }}
+    name: ${{ matrix.model }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      CYNQRA_HF_MODEL: ${{ matrix.model }}
+      CYNQRA_PRICE_PER_M: ${{ matrix.price }}
+      CYNQRA_EFFORT: low
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - name: S1, objective to structure (bar 8 of 10)
+        run: |
+          set +e
+          cd 02_harness && python3 spikes/s1/run_s1.py; code=$?
+          echo "S1 exit $code (0 met the bar, 1 scored and missed, 3 unrun)"; cat spikes/s1/s1_report.json spikes/s1/s1_unrun.json 2>/dev/null
+          [ $code -le 1 ]
+      - name: S2, coordination cost against the locked estimate
+        if: always()
+        run: |
+          set +e
+          cd 02_harness && python3 spikes/s2/run_s2.py; code=$?
+          echo "S2 exit $code (0 met the bar, 1 scored and missed, 3 unrun)"; cat spikes/s2/s2_report.json spikes/s2/s2_unrun.json 2>/dev/null
+          [ $code -le 1 ]
+      - name: A whole Cynqra journey (founder decisions approved, product deployed and tested)
+        if: always()
+        run: python3 poc/live_check.py --max-usd 1.50 --keep
+      - name: Journey report
+        if: always()
+        run: cat poc/live_reports/live_*.md 2>/dev/null | head -80 || echo "no report"
+      - name: Collect
+        if: always()
+        run: |
+          mkdir -p out && cp -f 02_harness/spikes/s1/*.json 02_harness/spikes/s2/*.json out/ 2>/dev/null
+          cp -rf poc/live_reports out/ 2>/dev/null; true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hf-${{ strategy.job-index }}
+          path: out/

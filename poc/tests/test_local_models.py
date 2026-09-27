@@ -114,6 +114,38 @@ class LocalServerTests(unittest.TestCase):
             p.close()
             restore_env(saved)
 
+    def test_hugging_face_inference_providers(self):
+        from test_adapter import FakeProvider
+        import live_check
+        saved = no_model_env()
+        p = FakeProvider()
+        try:
+            os.environ.update({"HF_TOKEN": "hf_test_not_real", "CYNQRA_HF_MODEL": "openai/gpt-oss-120b:cerebras",
+                               "HF_ROUTER_URL": p.base + "/v1", "CYNQRA_EFFORT": "low"})
+            self.assertEqual(model_adapter.resolve()["kind"], "hf")
+            data, usage = ModelSource()._call("Plan the work for the fixed organization", schema={"type": "object"})
+            r = p.requests[-1]
+            self.assertEqual((r["path"], r["headers"]["authorization"]), ("/v1/chat/completions", "Bearer hf_test_not_real"))
+            self.assertEqual(r["body"]["model"], "openai/gpt-oss-120b:cerebras")
+            self.assertEqual(r["body"]["response_format"]["json_schema"]["schema"], {"type": "object"})
+            self.assertEqual((r["body"]["reasoning_effort"], r["body"]["temperature"]), ("low", 0.0))
+            self.assertGreaterEqual(r["body"]["max_tokens"], 16000, "room for reasoning before the answer")
+            self.assertNotIn("chat_template_kwargs", r["body"], "llama-server only")
+            self.assertIn("tasks", data)
+            self.assertFalse(usage["estimated"])
+            self.assertIsNone(model_adapter.resolve().get("local"), "paid calls, so spend is counted")
+            os.environ["CYNQRA_PRICE_PER_M"] = "0.25,0.69"
+            self.assertEqual(live_check.price("openai/gpt-oss-120b:cerebras"), (0.25, 0.69))
+            p.mode = "hf_401"
+            self.assertIn("refused the token", model_adapter.complete("x")["error"])
+            p.mode = "hf_402"
+            self.assertIn("no inference credit left", model_adapter.complete("x")["error"])
+            os.environ["CYNQRA_LOCAL_BASE_URL"] = "http://127.0.0.1:9/v1"
+            self.assertEqual(model_adapter.resolve()["kind"], "local", "a model on this machine comes first")
+        finally:
+            p.close()
+            restore_env(saved)
+
     def test_every_schema_is_closed(self):
         from cynqra.intelligence import SCHEMAS
         def objects(x):

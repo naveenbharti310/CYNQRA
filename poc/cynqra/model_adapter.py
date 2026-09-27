@@ -74,6 +74,14 @@ exceed_context_size_error; both now read as what they are.
 partial=True. A local reply cut off at max_tokens then comes back with
 truncated=True instead of as an error: an engineer's files that were
 complete before the cut are kept, and only the rest is asked for again.
+
+27 Sep 2026, sixth pass: Hugging Face Inference Providers. HF_TOKEN and
+CYNQRA_HF_MODEL (a model id, optionally with a provider suffix such as
+openai/gpt-oss-120b:cerebras) send calls to the router's OpenAI-compatible
+endpoint (HF_ROUTER_URL, default https://router.huggingface.co/v1). These
+are paid calls on someone else's hardware: token counts are the provider's
+own, rate limits and server errors are retried, a JSON Schema is sent as
+response_format, and a refused token or spent credit reads as what it is.
 """
 from __future__ import annotations
 
@@ -102,6 +110,8 @@ def resolve() -> dict | None:
     if os.environ.get("CYNQRA_LOCAL_BASE_URL"):
         return {"kind": "local", "label": os.environ.get("CYNQRA_MODEL", "local-model"), "tokens": "measured",
                 "local": True}
+    if os.environ.get("HF_TOKEN") and os.environ.get("CYNQRA_HF_MODEL"):
+        return {"kind": "hf", "label": os.environ["CYNQRA_HF_MODEL"], "tokens": "measured"}
     if os.environ.get("OPENAI_API_KEY"):
         return {
             "kind": "openai",
@@ -328,6 +338,42 @@ def _local_openai(prompt: str, model: str, max_tokens: int, want_json: bool = Fa
     return out
 
 
+def _hf(prompt: str, model: str, max_tokens: int, want_json: bool = False, schema: dict | None = None,
+        temperature: float | None = None, partial: bool = False) -> dict:
+    """Hugging Face Inference Providers: the router's OpenAI-compatible chat completions."""
+    base = (os.environ.get("HF_ROUTER_URL") or "https://router.huggingface.co/v1").rstrip("/")
+    payload: dict = {"model": model, "messages": [{"role": "user", "content": prompt}], "stream": False,
+                     # reasoning models spend part of max_tokens thinking, so the floor leaves room for the answer
+                     "max_tokens": max(max_tokens, int(os.environ.get("CYNQRA_NUM_PREDICT") or 16000)),
+                     "temperature": temperature if temperature is not None else float(os.environ.get("CYNQRA_TEMPERATURE") or 0)}
+    if want_json and schema:
+        payload["response_format"] = {"type": "json_schema",
+                                      "json_schema": {"name": "result", "strict": True, "schema": schema}}
+    if (os.environ.get("CYNQRA_EFFORT") or "").lower() in ("low", "medium", "high"):
+        payload["reasoning_effort"] = os.environ["CYNQRA_EFFORT"].lower()
+    headers = {"Authorization": f"Bearer {os.environ['HF_TOKEN']}", "Content-Type": "application/json"}
+    try:
+        data = _post(base + "/chat/completions", payload, headers)
+    except RuntimeError as exc:
+        text = str(exc)
+        if "HTTP 401" in text or "HTTP 403" in text:
+            raise RuntimeError("Hugging Face refused the token: it needs the permission to make calls to Inference "
+                               "Providers") from exc
+        if "HTTP 402" in text:
+            raise RuntimeError("the Hugging Face account has no inference credit left") from exc
+        raise
+    choice = data["choices"][0]
+    cut = choice.get("finish_reason") == "length"
+    if cut and not partial:
+        raise RuntimeError(f"reply truncated at max_tokens={payload['max_tokens']}")
+    usage = data.get("usage") or {}
+    text = choice["message"].get("content") or ""
+    if not text.strip() and not cut:
+        raise RuntimeError("the model returned no answer")
+    return {"text": text, "tokens_in": int(usage.get("prompt_tokens") or 0),
+            "tokens_out": int(usage.get("completion_tokens") or 0), "estimated": False, "truncated": cut}
+
+
 def _cmd(prompt: str) -> dict:
     cmd = os.environ["CYNQRA_S1_MODEL_CMD"]
     proc = subprocess.run(
@@ -359,7 +405,7 @@ def complete(prompt: str, max_tokens: int = 1500, want_json: bool = False, schem
     model = resolve()
     if model is None:
         raise RuntimeError("No model. Set CYNQRA_OLLAMA_MODEL (a local Ollama model), CYNQRA_LOCAL_BASE_URL, "
-                           "CYNQRA_S1_MODEL_CMD, OPENAI_API_KEY or ANTHROPIC_API_KEY.")
+                           "HF_TOKEN with CYNQRA_HF_MODEL, CYNQRA_S1_MODEL_CMD, OPENAI_API_KEY or ANTHROPIC_API_KEY.")
     start = time.time()
     try:
         if model["kind"] == "cmd":
@@ -368,6 +414,8 @@ def complete(prompt: str, max_tokens: int = 1500, want_json: bool = False, schem
             out = _ollama(prompt, model["label"], max_tokens, want_json, schema, temperature, partial)
         elif model["kind"] == "local":
             out = _local_openai(prompt, model["label"], max_tokens, want_json, schema, temperature, partial)
+        elif model["kind"] == "hf":
+            out = _hf(prompt, model["label"], max_tokens, want_json, schema, temperature, partial)
         elif model["kind"] == "openai":
             out = _openai(prompt, model["label"], max_tokens)
         else:

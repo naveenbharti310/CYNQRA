@@ -67,7 +67,14 @@ UNRUN_MARKERS = ("HTTP 4", "HTTP 5", "network error", "No model", "refused (cate
 
 
 def price(model: str) -> tuple[float, float]:
-    return PRICES.get(model, WORST)
+    """A model not in the table (a Hugging Face provider's, say) can be priced with CYNQRA_PRICE_PER_M="in,out"."""
+    if model in PRICES:
+        return PRICES[model]
+    try:
+        pin, pout = (float(x) for x in os.environ["CYNQRA_PRICE_PER_M"].split(","))
+        return pin, pout
+    except (KeyError, ValueError):
+        return WORST
 
 
 def spend(calls: list[dict]) -> float:

@@ -53,6 +53,10 @@ class FakeProvider:
                                             "content": [{"type": "text", "text": '{"product": "half'}],
                                             "stop_reason": "max_tokens",
                                             "usage": {"input_tokens": 5, "output_tokens": 16000}})
+                if outer.mode == "hf_401":
+                    return self._send(401, {"error": "Invalid credentials in Authorization header"})
+                if outer.mode == "hf_402":
+                    return self._send(402, {"error": "You have exceeded your monthly included credits"})
                 if outer.mode == "length":  # an OpenAI-compatible local server at its max_tokens
                     return self._send(200, {"choices": [{"finish_reason": "length", "message": {
                         "role": "assistant", "content": "=== FILE: a.py ===\nx = 1\n=== END FILE ===\n=== FILE: b.py ===\ny ="}}],

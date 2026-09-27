@@ -33,6 +33,13 @@ On GitHub, a commit message containing [spikes] runs both spikes on both
 models (.github/workflows/cynqra-spikes.yml). A cost result belongs to the
 model and machine that produced it; local_run.json records both.
 
+On a hosted open model: Hugging Face Inference Providers
+With HF_TOKEN and CYNQRA_HF_MODEL (for example openai/gpt-oss-120b:cerebras)
+set, both runners call the router's OpenAI-compatible endpoint. Paid calls;
+the provider's own token counts. On GitHub, the repository secret HF_TOKEN
+and a commit message containing [hf] run S1, S2 and a whole Cynqra journey
+on the strongest models the router serves (.github/workflows/cynqra-hf.yml).
+
 Exit codes
 0 met the bar. 1 scored and missed the bar. 2 refused, nothing to score with.
 3 a model call failed, nothing scored, the spike is unrun. 4 wiring test only.
