@@ -243,6 +243,23 @@ labelled "Added by Cynqra" with what it closes, for the founder to see at the wo
 edit is still refused, not completed behind them. Tests in `test_product_flow.py`. The Hugging Face job did not
 run: the repository has no `HF_TOKEN` secret.
 
+The fourth (commit 00dbc80, run 36329120801, the intelligence supply and the platform closing catalog gaps)
+passed Stage 2 for the first time: the synthesized workforce (CTO, PM, one Engineer) was accepted on the first
+proposal, and staffing bound all three workers to gpt-oss 20B from the probes' evidence (P(verified) 0.94 for
+the CTO and PM, 0.91 for the Engineer; Qwen3.5 9B next at the same chance but half the speed; Qwen3.5 4B, which
+left 1 test failing after three code rounds, was not a candidate). It then stopped at the fault step: the
+demonstration faulted worker `w_eng_a`, which exists only when two engineers are proposed. Fixed in e8cbd92 (the
+first worker who writes code is faulted) and run again by hand (Actions, route `local`).
+
+The first Hugging Face run (run 36330088065, the `HF_TOKEN` secret added that afternoon) connected the router and
+probed three models: GLM-4.7 filled the objective in 1 s and passed the code work first time (12 tests, 8 s,
+$0.004); Kimi K2.5 likewise (26 tests, 60 s, $0.008); Qwen3.5-35B-A3B filled the objective but spent 16,000
+tokens reasoning in each of three code rounds and was cut off every time ($0.054). The project then stopped: "the
+Hugging Face account has no inference credit left". The second (run 36333387287, commit 5988b5a) discovered the
+router's whole catalogue (137 chat models) and found the newest of every family served: Kimi K3, GLM-5.2,
+DeepSeek V4.1 Flash, Qwen3.8 27B and Qwen3.5-35B-A3B. Every probe stopped on the same missing credit, reported
+as such; nothing was invented.
+
 The same commit's desktop build on Windows (run 36315283319) passed install, self-test, window, Start-menu
 launch, uninstall and reinstall into a folder with spaces and accents. Its real-model check did not pass:
 Qwen3.6 35B-A3B at 2 bits filled the objective (7 of 7), but left the same 2 of 14 tests failing in all three
