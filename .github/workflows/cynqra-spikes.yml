@@ -1,5 +1,5 @@
 # S1 and S2, scored on open-weight models on GitHub's 16 GB Linux machine (4 threads, no GPU), with no
-# API key. The runners, corpus, tasks, locked estimate and bars in 02_harness/spikes are unchanged;
+# API key. The runners, corpus, tasks, locked estimate and bars in archive/02_harness/spikes are unchanged;
 # spikes/run_local.py only gives them the desktop app's own llama-server. Every report is printed to the
 # log and kept as an artifact. Runs when a commit message on the cynqra branch contains [spikes].
 name: cynqra-spikes
@@ -30,12 +30,12 @@ jobs:
       - name: Build the app (Linux), for its Python and llama-server
         run: python3 desktop/build.py --target linux-x64 --stage-only
       - name: Harness tests (no model)
-        run: cd 02_harness && python3 spikes/test_spikes.py
+        run: cd archive/02_harness && python3 spikes/test_spikes.py
       - name: Score the spike
         run: |
           set +e
-          cd 02_harness
-          ../dist/stage/linux-x64/Cynqra/python/bin/python3 -X utf8 spikes/run_local.py ${{ matrix.spike }} ${{ matrix.model }} --app ../dist/stage/linux-x64/Cynqra/app
+          cd archive/02_harness
+          ../../dist/stage/linux-x64/Cynqra/python/bin/python3 -X utf8 spikes/run_local.py ${{ matrix.spike }} ${{ matrix.model }} --app ../../dist/stage/linux-x64/Cynqra/app
           code=$?
           echo "exit code $code (0 met the bar, 1 scored and missed, 2 refused, 3 a model call failed: unrun)"
           if [ ! -f spikes/${{ matrix.spike }}/${{ matrix.spike }}_report.json ]; then echo "::error::no ${{ matrix.spike }}_report.json: nothing was scored"; exit 3; fi
@@ -43,7 +43,7 @@ jobs:
       - name: Report
         if: always()
         run: |
-          cd 02_harness/spikes/${{ matrix.spike }}
+          cd archive/02_harness/spikes/${{ matrix.spike }}
           for f in local_run.json ${{ matrix.spike }}_report.json ${{ matrix.spike }}_unrun.json; do
             [ -f "$f" ] && { echo "==== $f"; cat "$f"; }
           done

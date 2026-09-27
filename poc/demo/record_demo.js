@@ -299,7 +299,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await D("card", `<div class="dc-wrap" style="width:1240px"><span class="dc-word in" style="font-size:72px">Cynqra</span>
     <span class="dc-line in" style="animation-delay:.2s">From one sentence to a <i>live, tested, exportable product</i>.</span>
     <div class="dc-tiles">${tiles}</div>
-    <span class="dc-foot in" style="animation-delay:1.6s">Proof of concept. Not gate evidence: S1, S2 and S3 v2 still decide Milestone 2. Run it yourself with RUN_POC.bat. Live mode needs an API key.</span></div>`, true);
+    <span class="dc-foot in" style="animation-delay:1.6s">Proof of concept. Not gate evidence: S1, S2 and S3 v2 still decide Milestone 2. Run it yourself: see README.md.</span></div>`, true);
   await sleep(400);
   await D("countUp");
   await sleep(8200);

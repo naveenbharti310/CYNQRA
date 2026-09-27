@@ -1,6 +1,6 @@
 """Protocol objects: Handoff, Blocker, Escalation, Approval (Book 2 section 7, MVP subset).
 
-Same templates as 02_harness/protocols, with the envelope fields break b_006 asked
+Same templates as archive/02_harness/protocols, with the envelope fields break b_006 asked
 for. Routing fields are always set by the platform, never taken from model text.
 """
 from __future__ import annotations

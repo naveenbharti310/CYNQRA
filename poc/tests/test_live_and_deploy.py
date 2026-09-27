@@ -99,7 +99,7 @@ class LiveModeTests(unittest.TestCase):  # A15
                 planner.validate_plan(bad, fixture)
 
     def test_adapter_copy_matches_the_spike_adapter(self):
-        spike = POC.parent / "02_harness" / "spikes" / "model_adapter.py"
+        spike = POC.parent / "archive" / "02_harness" / "spikes" / "model_adapter.py"
         if not spike.exists():
             self.skipTest("POC shipped without the harness")
         self.assertTrue(filecmp.cmp(spike, POC / "cynqra" / "model_adapter.py", shallow=False))

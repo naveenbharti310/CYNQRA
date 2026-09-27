@@ -1,7 +1,7 @@
 """Policy and authority: the canonical policy.evaluate contract of the Book 2 addendum.
 
 Rows come from the working text of D-27 (risk rubric) and D-28 (authority matrix) in
-poc/POC_SPEC.md, pending re-ratification under D-34. D-17 (founder reviews every MEDIUM
+archive/old_docs/POC_SPEC.md, pending re-ratification under D-34. D-17 (founder reviews every MEDIUM
 action) and D-21 (founder approves every production deploy) are enforced here.
 Default is DENY: an action type or role not listed is refused.
 """

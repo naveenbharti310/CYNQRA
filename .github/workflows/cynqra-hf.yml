@@ -54,14 +54,14 @@ jobs:
       - name: S1, objective to structure (bar 8 of 10)
         run: |
           set +e
-          cd 02_harness && python3 spikes/s1/run_s1.py; code=$?
+          cd archive/02_harness && python3 spikes/s1/run_s1.py; code=$?
           echo "S1 exit $code (0 met the bar, 1 scored and missed, 3 unrun)"; cat spikes/s1/s1_report.json spikes/s1/s1_unrun.json 2>/dev/null
           [ $code -le 1 ]
       - name: S2, coordination cost against the locked estimate
         if: always()
         run: |
           set +e
-          cd 02_harness && python3 spikes/s2/run_s2.py; code=$?
+          cd archive/02_harness && python3 spikes/s2/run_s2.py; code=$?
           echo "S2 exit $code (0 met the bar, 1 scored and missed, 3 unrun)"; cat spikes/s2/s2_report.json spikes/s2/s2_unrun.json 2>/dev/null
           [ $code -le 1 ]
       - name: A whole Cynqra journey (founder decisions approved, product deployed and tested)
@@ -73,7 +73,7 @@ jobs:
       - name: Collect
         if: always()
         run: |
-          mkdir -p out && cp -f 02_harness/spikes/s1/*.json 02_harness/spikes/s2/*.json out/ 2>/dev/null
+          mkdir -p out && cp -f archive/02_harness/spikes/s1/*.json archive/02_harness/spikes/s2/*.json out/ 2>/dev/null
           cp -rf poc/live_reports out/ 2>/dev/null; true
       - uses: actions/upload-artifact@v4
         if: always()
