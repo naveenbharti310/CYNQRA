@@ -20,7 +20,7 @@ from . import deploy, policy
 from .db import IST, Store, digest, now
 from .intelligence import IntelligenceError, make
 from .protocol import ProtocolError, build
-from .verification import lint_documents, run_unittests
+from .verification import failure_summary, lint_documents, run_unittests
 
 OBJECTIVE_FIELDS = ["product", "target_customer", "primary_outcome", "business_outcome",
                     "success_criteria", "constraints", "priorities"]
@@ -716,8 +716,7 @@ class Engine:
             why = "the test run was refused: " + g["policy"]["reason"]
         elif not passed:
             report = run_unittests(folder)
-            why = ("failing tests: " + (", ".join(report["failed"]) or "no test_*.py at the repository root")
-                   + "\n" + report["output"][-1500:])
+            why = failure_summary(report) + "\n" + report["output"][-1500:]
         elif (out / "app.py").exists():
             contract = deploy.contract_check(folder, self._smoke_checks(folder))
             if not contract["ok"]:
@@ -852,9 +851,7 @@ class Engine:
             test_ids = [x["id"] for x in report["tests"]]
             checks = {"ran": report["ran"], "failed": report["failed"], "prior_tests_rerun": True}
             if not passed:
-                why = ", ".join(report["failed"]) or ("no test_*.py at the repository root" if not report["ran"]
-                                                      else "the test run did not complete")
-                feedback = "Failing tests: " + why + "\n" + report["output"][-1500:]
+                feedback = failure_summary(report) + "\n" + report["output"][-1500:]
             else:
                 feedback = ""
             method = "automated tests, prior tests rerun"

@@ -187,6 +187,32 @@ class FileBlockTests(unittest.TestCase):
         self.assertEqual(data["missing_fields"], [])
         self.assertEqual((usage["tokens_in"], usage["tokens_out"]), (200, 100))
 
+    def test_a_prompt_sent_again_gets_temperature_so_the_reply_can_change(self):
+        # temperature 0 and a fixed seed give the same reply to the same prompt; the Windows journey's rework loop sent
+        # one prompt eight times and got the same failing code each time.
+        from cynqra import intelligence
+        temps = []
+
+        def fake(prompt, **kw):
+            temps.append((prompt, kw.get("temperature")))
+            if prompt == "fails":
+                return {"text": "", "tokens_in": 0, "tokens_out": 0, "estimated": False, "error": "server gone"}
+            return {"text": '{"ok": 1}', "tokens_in": 10, "tokens_out": 5, "estimated": False, "error": None}
+        saved = intelligence.model_adapter.complete
+        intelligence.model_adapter.complete = fake
+        os.environ["CYNQRA_LOCAL_BASE_URL"] = "http://127.0.0.1:9/v1"
+        try:
+            src = ModelSource()
+            for prompt in ("same", "same", "other", "same", "same", "same"):
+                src._call(prompt)
+            for _ in range(2):
+                with self.assertRaises(intelligence.IntelligenceError):
+                    src._call("fails")
+        finally:
+            intelligence.model_adapter.complete = saved
+        self.assertEqual(temps, [("same", None), ("same", 0.3), ("other", None), ("same", 0.6), ("same", 0.9),
+                                 ("same", 0.9), ("fails", None), ("fails", None)])
+
     def test_json_before_code_with_braces_still_parses(self):
         self.assertEqual(_parse_json('Sure.\n{"a": 1}\n=== FILE: x.py ===\nd = {1: 2}\n=== END FILE ==='), {"a": 1})
 

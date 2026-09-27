@@ -14,5 +14,16 @@ fits a laptop, in the size your memory holds (20.6 GB for 32 GB and up, 12.3 GB 
 
 The full guide, with what to test and troubleshooting: [CYNQRA_DESKTOP.md](https://github.com/naveenbharti310/Passway/blob/cynqra/CYNQRA_DESKTOP.md)
 
+**Measured on GitHub's machines** (16 GB, 4 processor threads, no GPU; Qwen3.6 35B-A3B 2-bit): a whole
+Cynqra run on Windows, from the founder's sentence to a deployed, healthy bakery order app whose 17 tests
+pass, took 24 model calls and about 4 hours. Most of that was one task going round in circles because
+the verifier misread the tests' output; 0.1.1 fixes that (below). A current laptop is two to four times
+faster, and a Mac or a graphics card faster still.
+
+**0.1.1:** the verifier reads test results even when the app under test logs requests, and names the test
+that hung or crashed; a rework that repeats an earlier attempt exactly is answered with some temperature
+instead of the same failing code; engineers are told how to test a server without hanging; an objective
+field the model leaves empty is inferred in one short follow-up for the founder to check.
+
 Every file here was built by GitHub Actions from the `cynqra` branch, installed on a fresh Windows,
 macOS and Linux machine, self-tested, and run with a real open model before it was published.

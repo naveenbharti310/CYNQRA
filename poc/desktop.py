@@ -453,7 +453,7 @@ def check_model(args) -> int:
     passes its own tests (fixing it from the failures for up to three rounds)."""
     from cynqra.engine import OBJECTIVE_FIELDS
     from cynqra.intelligence import IntelligenceError, ModelSource
-    from cynqra.verification import run_unittests
+    from cynqra.verification import failure_summary, run_unittests
     desk = Desktop(Path(args.data) if args.data else data_dir())
     ok = False
     result = {"model": args.check_model, "platform": platform.platform(), "ram_gb": desk.runtime.ram_gb, "passed": False}
@@ -502,7 +502,7 @@ def check_model(args) -> int:
                 break
             previous = files
             feedback = ("Your reply contained no files. Every file must be in the === FILE: name === layout."
-                        if not files else "Failing tests: " + (", ".join(rep["failed"]) or "none ran") + "\n" + rep["output"][-1500:])
+                        if not files else failure_summary(rep) + "\n" + rep["output"][-1500:])
         shutil.rmtree(work, ignore_errors=True)
         ok = complete and passed
         secs = sum(c["latency_s"] for c in calls)

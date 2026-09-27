@@ -7,6 +7,7 @@ ModelSource     live mode. Every call goes through model_adapter (ADR-4), the sa
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -279,8 +280,9 @@ DELIVERY_CONTRACT = ("Delivery contract. The product is a Python 3.10 standard l
                      "`if __name__ == \"__main__\":`, on 127.0.0.1 and the port in the PORT environment variable. "
                      "It answers GET /health with 200 and GET / with 200 and the product's web page. It keeps its "
                      "data in the JSON file named by the DATA_FILE environment variable. Tests are unittest files "
-                     "named test_*.py at the repository root; they must not need the network, and a test that "
-                     "starts a server uses port 0. Every test in the repository is rerun with "
+                     "named test_*.py at the repository root; they must not need the network. A test that starts a "
+                     "server uses port 0, runs serve_forever() in a daemon thread, gives every request a timeout, "
+                     "and shuts the server down when it is done. Every test in the repository is rerun with "
                      "`python -m unittest discover` on each change. File names are paths relative to the "
                      "repository root; Markdown documents are filed under docs/.")
 
@@ -296,6 +298,7 @@ class ModelSource:
                                     "or ANTHROPIC_API_KEY or OPENAI_API_KEY.")
         self.label = resolved["label"]
         self.last_text = ""  # the last raw reply, kept to show what a model wrote when it could not be read
+        self.answered: dict[str, int] = {}  # prompt digest -> replies already received for exactly that prompt
         self.prompt_v2 = (HERE / "objective_prompt.txt").read_text(encoding="utf-8")
 
     def _call(self, prompt: str, max_tokens: int = 4000, files: bool = False, schema: dict | None = None) -> tuple[dict, dict]:
@@ -310,9 +313,16 @@ class ModelSource:
                     data["files"] = blocks
             return data
 
-        out = model_adapter.complete(prompt, max_tokens=max_tokens, want_json=not files, schema=schema)
+        # A local model gives the same reply to the same prompt (temperature 0, fixed seed). A rework whose feedback and
+        # previous files are exactly those of an attempt already answered would get the same failing reply again, so a
+        # repeated prompt is sent with some temperature: 0.3 the second time, 0.6 the third, then 0.9.
+        key = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+        repeats = self.answered.get(key, 0)
+        out = model_adapter.complete(prompt, max_tokens=max_tokens, want_json=not files, schema=schema,
+                                     temperature=round(min(0.3 * repeats, 0.9), 1) if repeats else None)
         if out.get("error"):
             raise IntelligenceError(out["error"])
+        self.answered[key] = repeats + 1
         self.last_text = out["text"]
         data = parse(out["text"])
         no_files = files and isinstance(data, dict) and data.get("result") != "blocked" and not data.get("files")

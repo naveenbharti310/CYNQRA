@@ -11,7 +11,7 @@ from helpers import POC, TempDir  # noqa: F401  (sets sys.path)
 from cynqra import policy
 from cynqra.db import Store, digest
 from cynqra.protocol import ProtocolError, build
-from cynqra.verification import clean_env, lint_documents, run_unittests
+from cynqra.verification import clean_env, failure_summary, lint_documents, run_unittests
 
 FILES = POC / "scenarios" / "candidate_tracker" / "files"
 
@@ -159,6 +159,80 @@ class VerificationHelperTests(unittest.TestCase):  # A8
         r = run_unittests(self.tmp.path)
         self.assertFalse(r["passed"])
         self.assertEqual(r["ran"], 0)
+
+    def test_results_are_read_through_the_request_log_of_a_server_under_test(self):
+        # http.server logs each request to stderr in the middle of unittest's "name (id) ... ok" line. The first
+        # real Windows journey lost a named failure this way and told the engineer only "did not complete".
+        (self.tmp.path / "test_web.py").write_text(
+            "import threading, unittest\n"
+            "from http.client import HTTPConnection\n"
+            "from http.server import BaseHTTPRequestHandler, HTTPServer\n"
+            "class H(BaseHTTPRequestHandler):\n"
+            "    def do_GET(self):\n"
+            "        self.send_response(200 if self.path == '/health' else 500)\n"
+            "        self.end_headers()\n"
+            "class T(unittest.TestCase):\n"
+            "    @classmethod\n"
+            "    def setUpClass(cls):\n"
+            "        cls.s = HTTPServer(('127.0.0.1', 0), H)\n"
+            "        threading.Thread(target=cls.s.serve_forever, daemon=True).start()\n"
+            "    @classmethod\n"
+            "    def tearDownClass(cls):\n"
+            "        cls.s.shutdown()\n"
+            "    def get(self, path):\n"
+            "        c = HTTPConnection('127.0.0.1', self.s.server_address[1], timeout=5)\n"
+            "        c.request('GET', path)\n"
+            "        return c.getresponse().status\n"
+            "    def test_health(self):\n"
+            "        self.assertEqual(self.get('/health'), 200)\n"
+            "    def test_orders(self):\n"
+            "        \"\"\"The order list answers.\"\"\"\n"
+            "        self.assertEqual(self.get('/orders'), 200)\n", encoding="utf-8")
+        r = run_unittests(self.tmp.path)
+        self.assertIn('"GET /health HTTP/1.1" 200', r["output"])
+        self.assertEqual([(x["id"], x["status"]) for x in r["tests"]],
+                         [("test_web.test_health", "ok"), ("test_web.test_orders", "FAIL")])
+        self.assertEqual(r["failed"], ["test_web.test_orders"])
+        self.assertEqual(failure_summary(r), "Failing tests: test_web.test_orders.")
+
+    def test_a_test_that_hangs_is_named_with_what_usually_causes_it(self):
+        (self.tmp.path / "test_wait.py").write_text(
+            "import time, unittest\n"
+            "class T(unittest.TestCase):\n"
+            "    def test_a(self):\n"
+            "        pass\n"
+            "    def test_b_server(self):\n"
+            "        time.sleep(60)\n", encoding="utf-8")
+        r = run_unittests(self.tmp.path, timeout=3)
+        self.assertFalse(r["passed"])
+        self.assertIn("did not finish within 3 s and were stopped while test_wait.test_b_server was running", r["problem"])
+        self.assertIn("daemon thread", r["problem"])
+        self.assertEqual(failure_summary(r), r["problem"])
+
+    def test_a_test_process_that_dies_is_named(self):
+        (self.tmp.path / "test_exit.py").write_text(
+            "import os, unittest\n"
+            "class T(unittest.TestCase):\n"
+            "    def test_a(self):\n"
+            "        pass\n"
+            "    def test_b(self):\n"
+            "        os._exit(3)\n", encoding="utf-8")
+        r = run_unittests(self.tmp.path)
+        self.assertFalse(r["passed"])
+        self.assertIn("ended during test_exit.test_b (exit code 3)", failure_summary(r))
+
+    def test_failure_summary_for_class_fixtures_and_missing_tests(self):
+        (self.tmp.path / "test_fix.py").write_text(
+            "import unittest\n"
+            "class T(unittest.TestCase):\n"
+            "    @classmethod\n"
+            "    def setUpClass(cls):\n"
+            "        raise OSError('address already in use')\n"
+            "    def test_a(self):\n"
+            "        pass\n", encoding="utf-8")
+        self.assertEqual(failure_summary(run_unittests(self.tmp.path)), "Failing tests: test_fix.setUpClass.")
+        (self.tmp.path / "test_fix.py").unlink()
+        self.assertEqual(failure_summary(run_unittests(self.tmp.path)), "There is no test_*.py at the repository root.")
 
     def test_workers_never_see_keys(self):
         os.environ["ANTHROPIC_API_KEY"] = "sk-test-should-not-leak"

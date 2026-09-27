@@ -214,6 +214,27 @@ with 5 GB of the 16 held by another process; the 3-bit file passed after one fix
 speed; gpt-oss 20B passed first time, reading 17 and writing 9.1; the smallest 2-bit file failed.
 The recommended model now follows memory: Qwen3.6 35B-A3B at 4, 3 and 2 bits for 32, 24 and 16 GB.
 
+A whole journey on Windows (`desktop.py --e2e`, through the installed app's own API, every founder
+decision approved automatically), Qwen3.6 35B-A3B 2-bit on the processor of GitHub's 16 GB, 4-thread
+Windows machine, for the bakery objective: **passed**. Accepted, deployed, healthy, and the product's
+17 tests pass on rerun; 6 of 6 tasks verified; 24 model calls, 89,668 tokens in and 58,586 out, reading
+10 to 22 and writing 5 to 7 tokens/s; 248 minutes. Report: `live_20260927_010657` in the run's artifact.
+
+That run also showed where the time went: 14 of the 24 calls, about three hours, were one task (the
+HTTP server and its tests), and two verifier defects kept that engineer going round in circles:
+- http.server logs every request to stderr, in the middle of unittest's `name (id) ... ok` line. The
+  parser then found no results at all, so a plainly named failure (`FAIL: test_orders`, with its
+  traceback) reached the engineer as "the test run did not complete". Results are now read through
+  interleaved output, and failing tests are also taken from unittest's own FAIL and ERROR summary.
+  A run that hangs now names the test that was running and what usually causes it (a server not in a
+  daemon thread, a request with no timeout); a process that dies names the test it died in. Before,
+  a hang reached the engineer as "timed out after 120s" and, with no results, as "no test_*.py".
+- The local model runs at temperature 0 with a fixed seed, so a rework whose feedback and previous
+  files matched an earlier attempt got the same failing reply: eight calls had identical token counts.
+  A prompt sent again now gets temperature 0.3, then 0.6, then 0.9.
+- The delivery contract now tells engineers how a test starts a server: port 0, serve_forever() in a
+  daemon thread, a timeout on every request, and shut down when done.
+
 Unrun here: a GPU (GitHub's standard machines have none), so the Vulkan path is exercised only
-up to device detection and the fallback to the processor; Gatekeeper and SmartScreen prompts, which appear only for a file downloaded by a
-browser. Whole end-to-end runs with a real model on Windows and Linux are in progress.
+up to device detection and the fallback to the processor; Gatekeeper and SmartScreen prompts, which
+appear only for a file downloaded by a browser.
