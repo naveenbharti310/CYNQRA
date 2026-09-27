@@ -26,6 +26,10 @@ class OverrideRefused(PermissionError):
     pass
 
 
+def roles_for_area(area: str) -> list[str]:
+    return [n for n, r in roles.ROLES.items() if area in r["areas"]]
+
+
 def validate_workforce(prop: dict, pkg: dict) -> dict:
     """Stage 2's proposal, checked by the platform against the role catalog and the requirements:
     known roles within their limits; every requirement covered by a proposed role whose areas include it; and the
@@ -65,7 +69,8 @@ def validate_workforce(prop: dict, pkg: dict) -> dict:
         if not coverage[rid]:
             fit = [m for m in merged.values() if r["area"] in roles.role(m["role"])["areas"]]
             if not fit:
-                raise IntelligenceError(f"{rid} ({r['area']}: {r['text'][:80]}) is covered by no proposed role")
+                raise IntelligenceError(f"{rid} ({r['area']}: {r['text'][:80]}) is covered by no proposed role; add a "
+                                        f"role that covers {r['area']}: {', '.join(roles_for_area(r['area']))}")
             fit[0]["requirement_ids"].append(rid)
             coverage[rid].append(fit[0]["role"])
     workers = roles.instantiate(list(merged.values()))
@@ -73,9 +78,10 @@ def validate_workforce(prop: dict, pkg: dict) -> dict:
              ("deploy", "propose the production deploy")]
     for kind, what in needs:
         if not roles.owners_of(kind, workers):
-            raise IntelligenceError(f"no proposed role can {what} ({kind}); the catalog says who can")
+            raise IntelligenceError(f"no proposed role can {what} ({kind}); add one of: "
+                                    f"{', '.join(n for n, r in roles.ROLES.items() if kind in r['owns'])}")
     if roles.assigner(workers) is None:
-        raise IntelligenceError("no proposed role can assign work (a Project Manager, CTO or CEO)")
+        raise IntelligenceError(f"no proposed role can assign work; add one of: {', '.join(roles.ASSIGNERS)}")
     return {"summary": str(prop.get("summary") or "").strip(), "roles": list(merged.values()), "coverage": coverage,
             "workers": workers}
 

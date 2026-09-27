@@ -5,7 +5,7 @@ Run on 27 September 2026, after the core was rebuilt into engines behind the run
 
 ## Result
 
-213 tests, 213 passed, 0 failed, 0 skipped. Run time about 220 seconds.
+214 tests, 214 passed, 0 failed, 0 skipped. Run time about 220 seconds.
 
 | Module | Tests | What it proves |
 | --- | --- | --- |
@@ -13,7 +13,7 @@ Run on 27 September 2026, after the core was rebuilt into engines behind the run
 | test_journey | 25 | Both demos end to end. Candidate tracker: accepted and live, the workforce synthesized then approved, the roadmap and budget as a second gate, twelve fields per task including its dollar budget, a Blocker cleared without the founder, a defect caught before verified, a prohibited email denied, every task replays, the scripted source staffed and metered through the registry, the orchestrator implementing the run contract. Restaurant forecast: nine workers, fourteen tasks, the backtest rejecting the first forecast, eight documents and the decided rule in the repository, a deploy proposed by DevOps |
 | test_controls | 23 | Gateway: workspace rules, audit, a credential never written. Decisions: every field, edit, reject, request evidence, the D-29 escalation budget. Budget in dollars: machine time priced, warnings at 50, 80 and 95, the breaker, a refused cap raise leaving the decision open, raising the cap resuming the run, bad budgets refused. Kill switch, objective change (D-30), a run surviving a restart |
 | test_failure_paths | 13 | Three invalid replies go to the Replacement Engine and then the founder; three failed verifications likewise, with the failing test named and nothing integrated; retries recover; refused writes; a failing release candidate is not merged; a failed live smoke test rolls back; rejected delivery; a refused breaker stops the run |
-| test_product_flow | 15 | Requirements, workforce and plan validators; section 3's twelve-worker organization; authority from the catalog; the workforce gate (reject revises, edits only under governance and checked first); the roadmap gate; the Budget Engine's layers and charges; performance thresholds; both scenarios passing the validators a model's answers do |
+| test_product_flow | 16 | Requirements, workforce and plan validators; section 3's twelve-worker organization; authority from the catalog; the workforce gate (reject revises, edits only under governance and checked first); the roadmap gate; the Budget Engine's layers and charges; performance thresholds; both scenarios passing the validators a model's answers do |
 | test_workforce | 10 | Three models behind llama-server test doubles: registry facts, selection from measured outcomes, staffing and metering, an offline model detected and replaced, a task rerouted to a peer, the dollar breaker, keep or replace on evidence, the regression gate, a successor inheriting the work |
 | test_real_model_paths | 19 | Model ids renumbered, money never taken from the model, a refused plan retried once with the reason, replies without files, nested files, a broken delivery contract, bad assignments, escalations returning to the failed stage, a slow model not blocking the screen or the kill switch, outages resuming, the HTTP API's decision trail |
 | test_live_and_deploy | 12 | Live mode needs a model and writes nothing without one; the environment's model registered and staffed; a failing model with no alternative goes to the founder and recovers; a reopened run whose model is gone still opens; the deployment service with rollback; both demo products' own tests |

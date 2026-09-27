@@ -215,8 +215,20 @@ the whole account.
 
 **Measured.** The first `[workforce]` run on real models (27 September, commit 44a2327) stopped before it began:
 the app build did not package `workforce_demo.py` (`ModuleNotFoundError`). No model was run and there is no
-result. Fixed, and the demonstration now runs in the test suite against the llama-server test double; the real
-run is pending.
+result. Fixed, and the demonstration now runs in the test suite against the llama-server test double.
+
+The second (27 September, commit 7bcd244, run 36310111670, a 4-thread CPU runner, bakery objective) ran the
+probes: Qwen3.5 9B and gpt-oss 20B each filled 7 of 7 objective fields and passed the code work in one round
+(14 and 16 tests, 295 s and 180 s); Qwen3.5 4B filled the objective but failed the code work in all three
+rounds (one test failing each time). It then stopped at Stage 2: the synthesized workforce was refused twice
+with "r_01 (product: …) is covered by no proposed role". The check was right; the refusal did not say how to
+fix it. Refusals now name the roles that close the gap ("add a role that covers product: CEO, CPO, PM"), with a
+test, and the demonstration was pushed again.
+
+The desktop app's 0.1.2 end-to-end run on Windows (run 36296951000, the earlier fixed-organization flow, a CPU
+runner) passed with Qwen3.6 35B-A3B at 2 bits: accepted, live, healthy, the product's tests passing on rerun;
+20 model calls, 73,262 tokens in and 41,322 out, 195.5 minutes, the web app task reworked twice before it
+verified.
 
 ## 11. What is not built yet
 

@@ -84,6 +84,20 @@ class CatalogAndSynthesisTests(unittest.TestCase):
         bad(lambda o: o.update(roles=[r for r in o["roles"] if r["role"] not in ("DataScientist",)]))  # ai_ml uncovered
         bad(lambda o: o["roles"][1].update(why=""))
 
+    def test_a_refusal_tells_the_model_how_to_fix_it(self):
+        # the first real-model [workforce] run (27 Sep, run 36310111670) proposed no role covering a product
+        # requirement, twice; the refusal named the gap but not the roles that close it
+        org = json.loads(json.dumps(SECTION3_ORG))
+        org["roles"] = [r for r in org["roles"] if r["role"] not in ("CEO", "CPO", "PM")]
+        with self.assertRaises(IntelligenceError) as ctx:
+            validate_workforce(org, self.req)
+        self.assertIn("add a role that covers product: CEO, CPO, PM", str(ctx.exception))
+        org = json.loads(json.dumps(SECTION3_ORG))
+        org["roles"] = [r for r in org["roles"] if r["role"] not in ("CTO",)]
+        with self.assertRaises(IntelligenceError) as ctx:
+            validate_workforce(org, self.req)
+        self.assertIn("add one of: CTO", str(ctx.exception))
+
     def test_authority_comes_from_the_catalog(self):
         self.assertEqual(policy.MATRIX, roles.matrix())
         self.assertEqual(policy.evaluate(role="DevOps", action_type="deploy_production")["decision"], "REQUIRE_APPROVAL")
