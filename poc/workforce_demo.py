@@ -10,7 +10,7 @@ Through the app's own HTTP API, as the window drives it:
  3. Give Cynqra the objective and a dollar budget. Cynqra decomposes it into requirements and synthesizes the
     organization; the founder approves the workforce, then the roadmap and the budget built on it.
  4. Show the workforce it staffed: every worker, its model, and the table behind each choice.
- 5. Fault: cap the replies of the model staffed as Engineer A, so its real output cannot fit its code.
+ 5. Fault: cap the replies of the model bound to the first worker who writes code, so its real output cannot fit.
  6. Run. Cynqra detects the failure, replaces the model, the successor inherits the work, the budget moves,
     and the project continues to delivery. Every founder decision is approved and listed.
  7. Report: staffing, replacements, the ledger, every outcome learned, each model's measured record.
@@ -106,17 +106,21 @@ def run(args) -> int:
         say(f"budget ${args.budget_usd}: allocated {sum(L['allocated'].values()):.4f} to {len(L['allocated'])} tasks, "
             f"reserve {L['reserve']:.4f}")
         # 5. fault
-        eng = next(w for w in wf["workers"] if w["id"] == "w_eng_a")
+        from cynqra import roles
+        coders = [w for w in wf["workers"] if "code" in roles.role(w["role"])["owns"]]
+        eng = coders[0]  # the synthesizer and the platform guarantee someone writes the code
         faulted = eng["model_id"]
         api(f"/api/intelligence/{faulted}/fault", {"max_reply": FAULT_REPLY_TOKENS})
         rep["fault"] = {"model_id": faulted, "model": eng["model"], "max_reply": FAULT_REPLY_TOKENS,
-                        "why": "the model staffed as Engineer A; its replies are capped so its real code cannot fit"}
-        say(f"FAULT: {eng['model']} (Engineer A's model) now has its replies capped at {FAULT_REPLY_TOKENS} tokens")
+                        "worker": eng["id"],
+                        "why": f"the intelligence bound to {eng['title']}; its replies are capped so its real code cannot fit"}
+        say(f"FAULT: {eng['model']} ({eng['title']}'s intelligence) now has its replies capped at {FAULT_REPLY_TOKENS} tokens")
         # 6. run
         api("/api/run/auto", {"on": True, "delay": 0})
         seen, deadline = 0, t0 + args.max_minutes * 60
-        shown = ("worker.model_assigned", "worker.model_replaced", "task.verified", "verification.completed",
-                 "task.reply_cut_off", "task.failed", "deployment.verified", "worker.self_checked")
+        shown = ("worker.intelligence_bound", "worker.model_replaced", "task.rerouted", "intelligence.version_changed",
+                 "task.verified", "verification.completed", "task.reply_cut_off", "task.failed", "deployment.verified",
+                 "worker.self_checked")
         while time.time() < deadline:
             st = api("/api/state")
             for ev in st.get("events") or []:
@@ -125,7 +129,10 @@ def run(args) -> int:
                     if ev["event_type"] in shown:
                         p = ev.get("payload") or {}
                         extra = (f"{p.get('from')} -> {p.get('to')}: {p.get('reason', '')[:120]}" if ev["event_type"] ==
-                                 "worker.model_replaced" else p.get("verdict") or p.get("passed") or p.get("reason") or "")
+                                 "worker.model_replaced" else
+                                 f"{p.get('previous') or 'none'} -> {p.get('intelligence_id')}: {p.get('reason', '')[:120]}"
+                                 if ev["event_type"] == "worker.intelligence_bound" else
+                                 p.get("verdict") or p.get("passed") or p.get("reason") or "")
                         say(f"{ev['event_type']:<24} {ev['aggregate_id']:<10} {str(extra)[:160]}")
             phase = st["meta"]["phase"]
             if phase in ("accepted", "stopped", "stopped_error"):

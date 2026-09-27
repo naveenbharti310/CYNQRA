@@ -2,12 +2,20 @@
 # staffs a four-worker organization from them for a real objective within a dollar budget, has the model
 # staffed as Engineer A fail for real (its replies capped), detects the failure, replaces the model with
 # another, lets the successor continue from the kept work, and delivers. desktop.py --workforce; the report
-# is printed to the log and kept as an artifact. Runs when a commit message on cynqra contains [workforce].
+# is printed to the log and kept as an artifact. Runs when a commit message on cynqra contains [workforce], or by
+# hand (Actions > cynqra-workforce > Run workflow) for one route or both.
 name: cynqra-workforce
 
 on:
   push:
     branches: [cynqra]
+  workflow_dispatch:
+    inputs:
+      route:
+        description: Which demonstration to run
+        type: choice
+        options: [both, local, hf]
+        default: both
 
 permissions:
   contents: read
@@ -21,7 +29,7 @@ env:
 
 jobs:
   local:
-    if: contains(github.event.head_commit.message, '[workforce]')
+    if: contains(github.event.head_commit.message, '[workforce]') || (github.event_name == 'workflow_dispatch' && inputs.route != 'hf')
     name: Three open models on this machine (Qwen3.5 4B, Qwen3.5 9B, gpt-oss 20B)
     runs-on: ubuntu-latest
     timeout-minutes: 355
@@ -51,7 +59,7 @@ jobs:
           path: out/
 
   hf:
-    if: contains(github.event.head_commit.message, '[workforce]')
+    if: contains(github.event.head_commit.message, '[workforce]') || (github.event_name == 'workflow_dispatch' && inputs.route != 'local')
     name: Qwen3.5-35B-A3B, GLM-4.7 and Kimi K2.5 on Hugging Face
     runs-on: ubuntu-latest
     timeout-minutes: 180
