@@ -144,13 +144,13 @@ function wizard() {
   const modeChoice = phase === "new" ? `
       <label class="lbl" for="coname">Project name</label>
       <input type="text" id="coname" value="${esc(scen ? scen.title : "My project")}">
-      ${isDesktop() ? "" : `<div class="modes" role="radiogroup" aria-label="Intelligence">
+      ${`<div class="modes" role="radiogroup" aria-label="Intelligence">
         <label class="mode ${S.mode === "demo" ? "on" : ""}" id="m-demo"><input type="radio" name="mode" value="demo" ${S.mode === "demo" ? "checked" : ""}>Demo: scripted workers</label>
         <label class="mode ${S.mode === "live" ? "on" : ""}" id="m-live"><input type="radio" name="mode" value="live" ${S.mode === "live" ? "checked" : ""}>Live: real models</label>
       </div>
       ${S.mode === "demo" ? `<label class="lbl" for="scenario">Demo scenario</label>
         <select id="scenario" data-keep="no">${(st.scenarios || []).map((x) => `<option value="${esc(x.id)}" ${x.id === S.scenario ? "selected" : ""}>${esc(x.title)}</option>`).join("")}</select>
-        <p class="small muted" style="margin:0">${esc(scen ? scen.about : "")}</p>` : ""}`}` : "";
+        <p class="small muted" style="margin:0">${esc(scen ? scen.about : "")}</p>` : intelSources()}`}` : "";
   const right = obj ? objectiveCard(obj) : `<div class="card" style="flex:1;display:flex;align-items:center;justify-content:center"><p class="muted">Your structured objective appears here.</p></div>`;
   return `<div class="wiz">${top}<div class="wiz-body">
     <div class="wiz-left">
@@ -162,8 +162,9 @@ function wizard() {
       <textarea class="big" id="messy">${esc(obj ? obj.statement : scen ? scen.messy : "")}</textarea>
       <div class="row"><button class="btn primary" id="structure" ${S.busy ? "disabled" : ""}>${obj ? "Structure it again" : "Structure my objective"}</button></div>
       <div class="err" role="alert">${esc(S.err)}</div>
-      <p class="small muted" style="margin:0">${isDesktop() ? `Every word the workers write comes from ${esc(rt().model_name || "the model")}, running on this computer, or from the models in the registry. On a laptop each step takes minutes; the Work view shows what the model is doing.`
-        : "Demo mode: the words the workers write come from a prepared script, which stands in the run's model registry as its only model, and every screen says so. Code is still written, tested, backtested and deployed for real. Live mode staffs every worker from the model registry."}</p>
+      <p class="small muted" style="margin:0">${S.mode === "demo" && phase === "new" || st.meta.mode === "demo"
+        ? "Demo mode: the words the workers write come from a prepared script, and every screen says so. Code is still written, tested, backtested and deployed for real. Nothing to download or connect."
+        : `Live mode: every worker is bound to an intelligence from the ones available, chosen from measured evidence.${isDesktop() ? " A model on this computer takes minutes per step; the Work view shows what it is doing." : ""}`}</p>
     </div>
     <div class="wiz-right">${right}</div></div></div>`;
 }
@@ -293,10 +294,10 @@ function rtSignature() {
     r.busy ? Math.floor(r.busy.tokens / 25) : -1, (r.catalog || []).map((m) => `${m.installed}:${m.partial_gb}`).join()].join(",");
 }
 
+/* The models this computer can run are one source of intelligence among others, opened on request: a new user can
+   try the demo or connect a provider without downloading anything. */
 function showModelScreen() {
-  if (!isDesktop()) return false;
-  if (S.modelOpen) return true;
-  return rt().state !== "ready" && S.st.meta.phase === "new";
+  return isDesktop() && S.modelOpen;
 }
 
 function modelActivity() {
@@ -308,10 +309,19 @@ function modelActivity() {
 }
 
 function modelBanner() {
-  if (!isDesktop() || rt().state === "ready") return "";
-  const r = rt(), working = RT_WORKING.includes(r.state);
-  return `<div class="notice">${working ? `The model is ${r.state === "downloading" ? "downloading" : "starting"}; the run continues when it is ready.`
-    : "The model is not running, so the organization cannot work."} <button class="btn sm primary" data-model-open="1">Open model settings</button></div>`;
+  if (!S.st || S.st.meta.mode !== "live" || regModels().some((m) => m.available)) return "";
+  const r = rt(), working = isDesktop() && RT_WORKING.includes(r.state);
+  return `<div class="notice">${working ? `A model is ${r.state === "downloading" ? "downloading" : "starting"} on this computer; the run continues when it is ready.`
+    : "No intelligence is available, so the organization cannot work."} ${isDesktop() ? `<button class="btn sm" data-model-open="1">Models on this computer</button>` : ""}<button class="btn sm primary" data-reg-open="1">Connect a provider</button></div>`;
+}
+
+/* Where a live run's intelligence comes from, on the first screen. */
+function intelSources() {
+  const avail = regModels().filter((m) => m.available), conns = supConns().filter((c) => c.origin !== "demo");
+  return `<div class="card stack" style="padding:14px 16px"><div class="between"><b>Intelligence available</b><span class="pill ${avail.length ? "teal" : "warn"}">${avail.length} model${avail.length === 1 ? "" : "s"}</span></div>
+    <span class="small muted">${avail.length ? `From ${esc(conns.filter((c) => avail.some((m) => m.connection_id === c.id)).map((c) => c.name).join(", "))}. Cynqra picks which one powers each worker from measured evidence.`
+      : "None yet. Download an open model to this computer, or connect a provider such as Hugging Face, OpenAI or Anthropic."}</span>
+    <div class="row wrap" style="gap:8px">${isDesktop() ? `<button class="btn sm" data-model-open="1">Models on this computer</button>` : ""}<button class="btn sm" data-reg-open="1">Connect a provider</button></div></div>`;
 }
 
 function modelStatus() {
@@ -362,12 +372,11 @@ function modelScreen() {
         <option value="off" ${r.gpu === "off" ? "selected" : ""}>Off: use the processor only</option></select>
       <span class="small muted">${gpus ? `Found: ${gpus}. ` : "No graphics card found through Vulkan. "}If the card cannot run the model, Cynqra falls back to the processor by itself. Applies the next time a model starts.</span>`
     : (r.servers || []).includes("metal") ? `<span class="small muted">This Mac's GPU is used through Metal.</span>` : "";
-  const back = S.st.meta.phase !== "new" || r.state === "ready";
   return `<div class="wiz"><div class="wiz-top"><div class="row"><span class="wordmark">Cynqra</span><span class="muted small">Model</span></div>
-      <div class="row">${back && S.modelOpen ? `<button class="btn sm" data-model-close="1">Back</button>` : ""}<button class="btn sm" data-app-quit="1">Quit</button></div></div>
+      <div class="row"><button class="btn sm" data-model-close="1">Back</button><button class="btn sm" data-app-quit="1">Quit</button></div></div>
     <div class="wiz-body"><div class="wiz-left">
-      <h1 class="hero">The model your organization runs on.</h1>
-      <p class="lede">Cynqra's CTO, PM and engineers are an open-weight model running on this computer through llama.cpp. It is downloaded once; after that no prompt, answer or code leaves this computer.</p>
+      <h1 class="hero">Models on this computer.</h1>
+      <p class="lede">An open-weight model can run here, through llama.cpp: downloaded once, after which no prompt, answer or code leaves this computer. It is one source of intelligence among those you connect; Cynqra picks which one powers each worker. Nothing here is required to try the demo.</p>
       <div class="card stack"><div class="kv"><span>This computer</span><span>${esc(r.platform)}</span></div>
         <div class="kv"><span>Memory</span><span>${r.ram_gb ? `${r.ram_gb} GB` : "unknown"}</span></div>
         <div class="kv"><span>Model server</span><span>llama.cpp, ${esc((r.servers || []).join(", ") || "missing")}</span></div>${accel}</div>
@@ -380,8 +389,10 @@ function modelScreen() {
 /* ---------- shell ---------- */
 function modePill() {
   const st = S.st;
-  if (isDesktop()) return `<span class="pill blue wrap">Model: ${esc(rt().model_name || "not running")}${rt().state === "ready" ? ", this computer" : ""}</span>`;
-  if (st.meta.mode === "live") return `<span class="pill blue">Live mode: ${esc(st.intelligence || "model")}</span>`;
+  if (st.meta.mode === "live" || (st.meta.phase === "new" && S.mode === "live")) {
+    const n = regModels().filter((m) => m.available).length;
+    return `<span class="pill blue">Live mode: ${n} intelligence source${n === 1 ? "" : "s"} available</span>`;
+  }
   return `<span class="pill amber">Demo mode: scripted workers</span>`;
 }
 function riskPill(r) {
@@ -413,7 +424,7 @@ function shell() {
       <div class="foot">${modePill()}
         <button class="btn danger ${st.meta.frozen ? "on" : ""}" id="kill">${st.meta.frozen ? "Release kill switch" : "Kill switch"}</button>
         <button class="btn sm" id="reset" title="Archive this run and start again">New run</button>${guideToggle()}
-        ${isDesktop() ? `<div class="row" style="gap:8px"><button class="btn sm" data-model-open="1">Model</button><button class="btn sm" data-app-quit="1">Quit</button></div>` : ""}</div></nav>
+        ${isDesktop() ? `<div class="row" style="gap:8px"><button class="btn sm" data-model-open="1">This computer</button><button class="btn sm" data-app-quit="1">Quit</button></div>` : ""}</div></nav>
     <main class="main">
       <header class="top"><h1>${VIEWS.find((v) => v[0] === S.view)[1]}</h1>
         <div class="row small" style="gap:20px">
@@ -829,7 +840,7 @@ function bind() {
   const on = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
   on("structure", () => {
     const isNew = S.st.meta.phase === "new", name = isNew ? $("#coname").value : "", messy = $("#messy").value;
-    const mode = isDesktop() ? "live" : ((($("input[name=mode]:checked") || {}).value) || S.mode);
+    const mode = (($("input[name=mode]:checked") || {}).value) || S.mode;
     act(async () => {
       if (isNew) await api("/api/company", { name, mode, scenario: S.scenario });
       await api("/api/objective/draft", { messy });
@@ -865,7 +876,7 @@ function bind() {
   on("resume", () => act(() => api("/api/run/resume", {})));
   on("auto", () => act(() => api("/api/run/auto", { on: !S.st.auto.on })));
   on("kill", () => act(() => api("/api/killswitch", { on: !S.st.meta.frozen })));
-  on("reset", () => { if (window.confirm("Archive this run and start a new one? Nothing is deleted.")) act(async () => { await api("/api/reset", {}); S.view = "company"; S.seen = -1; S.mode = isDesktop() ? "live" : "demo"; }); });
+  on("reset", () => { if (window.confirm("Archive this run and start a new one? Nothing is deleted.")) act(async () => { await api("/api/reset", {}); S.view = "company"; S.seen = -1; S.mode = "demo"; }); });
   on("ask", () => {
     const q = $("#gq").value, subject = $("#gs").value.trim();
     act(async () => {
