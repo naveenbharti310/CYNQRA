@@ -654,6 +654,10 @@ def main() -> int:
     ap.add_argument("--timeout", type=float, default=120.0)
     ap.add_argument("--check-model", choices=sorted(BY_ID))
     ap.add_argument("--e2e", choices=sorted(BY_ID))
+    ap.add_argument("--workforce", choices=("local", "hf"),
+                    help="the AI workforce demonstration: three real models, staffed, faulted and replaced")
+    ap.add_argument("--budget-usd", type=float, default=2.0)
+    ap.add_argument("--no-probe", action="store_true", help="with --workforce: skip the calibration probes")
     ap.add_argument("objective", nargs="?", default="")
     ap.add_argument("--company", default="Cynqra end-to-end")
     ap.add_argument("--gpu", choices=("auto", "on", "off"))
@@ -668,6 +672,9 @@ def main() -> int:
         return window_test(args)
     if args.check_model:
         return check_model(args)
+    if args.workforce:
+        import workforce_demo
+        return workforce_demo.run(args)
     if args.e2e:
         if not args.objective:
             ap.error("--e2e needs an objective")

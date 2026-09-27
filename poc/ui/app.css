@@ -268,3 +268,15 @@ textarea.note{min-height:70px;resize:vertical;font-size:14px}
 pre.log{max-height:220px;overflow:auto;font:12px/1.45 var(--mono);background:var(--nav);padding:10px;border-radius:8px;white-space:pre-wrap;word-break:break-all}
 .closed{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--ink2)}
 .pill.wrap{white-space:normal}
+
+/* the AI workforce and the model registry */
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 14px; margin-bottom: 14px; }
+.tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 6px; }
+.tbl th, .tbl td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.tbl th { font-weight: 600; color: var(--ink2); }
+.tbl tr.chosen td { background: var(--paper); font-weight: 600; }
+.tbl tr.over td { color: var(--ink2); text-decoration: line-through; }
+.rep { border-left: 3px solid var(--accent, #0F6B5C); margin-bottom: 10px; }
+.row.wrap { flex-wrap: wrap; }
+.tscroll { overflow-x: auto; max-width: 100%; }
+.mcard .pill { white-space: normal; text-align: right; max-width: 55%; }

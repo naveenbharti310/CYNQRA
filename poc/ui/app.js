@@ -5,6 +5,7 @@
 const S = {
   st: null, view: "company", worker: "w_eng_b", replayTask: null, replay: null, replayKey: "",
   seen: -1, sig: "", err: "", busy: false, graph: null, mode: "demo", shown: new Set(), guide: true, modelOpen: false,
+  regOpen: false, probes: {},
 };
 /* Cards animate in only the first time they appear; a repaint must not replay it for every card. */
 const fresh = (key) => { if (S.shown.has(key)) return ""; S.shown.add(key); return "fresh"; };
@@ -22,8 +23,8 @@ const KIND_TITLE = {
   objective_change: "Objective change", approve_plan: "Organization and plan", confirm_objective: "Confirm objective",
 };
 const WORKER_TITLE = { w_cto: "CTO", w_pm: "PM", w_eng_a: "Engineer A", w_eng_b: "Engineer B", orchestrator: "Orchestrator", verification: "Verification", founder: "Founder" };
-const VIEWS = [["company", "Company"], ["organization", "Organization"], ["work", "Work"], ["decisions", "Decisions"],
-  ["evolution", "Evolution"], ["audit", "Audit"], ["delivery", "Delivery"]];
+const VIEWS = [["company", "Company"], ["organization", "Organization"], ["workforce", "Workforce"], ["work", "Work"],
+  ["decisions", "Decisions"], ["models", "Models"], ["evolution", "Evolution"], ["audit", "Audit"], ["delivery", "Delivery"]];
 const wt = (id) => WORKER_TITLE[id] || id;
 
 async function api(path, body) {
@@ -47,6 +48,7 @@ async function refresh(force) {
   try {
     const st = await api("/api/state?window=1");  // ?window=1: the desktop app knows its window is open
     S.st = st;
+    if (S.view === "models" || S.regOpen) { try { S.probes = (await api("/api/models")).probes || {}; } catch (e) { /* keep */ } }
     toasts(st.events || []);
     if (S.view === "audit") await loadReplay();
     paint(force);
@@ -58,7 +60,7 @@ function signature() {
   const ev = st.events || [];
   return [ev.length ? ev[ev.length - 1].seq : 0, st.meta.phase, st.meta.frozen, st.auto.on, S.view, S.worker,
     S.replayTask, S.replayKey, S.err, S.busy, S.guide, JSON.stringify(S.graph), (st.decisions.pending || []).map((d) => d.id).join(),
-    S.modelOpen, rtSignature()].join("|");
+    S.modelOpen, rtSignature(), S.regOpen, JSON.stringify(st.workforce || {}).length, JSON.stringify(S.probes).length].join("|");
 }
 
 function paint(force) {
@@ -71,7 +73,7 @@ function paint(force) {
   const phase = S.st.meta.phase;
   const model = showModelScreen();
   const g = model ? "" : guideBar();
-  $("#app").innerHTML = (model ? modelScreen() : ["new", "objective", "planning"].includes(phase) ? wizard() : shell()) + g;
+  $("#app").innerHTML = (model ? modelScreen() : S.regOpen ? regScreen() : ["new", "objective", "planning"].includes(phase) ? wizard() : shell()) + g;
   $("#app").classList.toggle("with-guide", !!g);
   const bar = $(".guide-bar");
   if (bar) document.documentElement.style.setProperty("--guide-h", bar.offsetHeight + "px");
@@ -123,7 +125,7 @@ function toast(msg, kind) {
 function wizard() {
   const st = S.st, phase = st.meta.phase, obj = st.objective;
   const top = `<div class="wiz-top"><div class="row"><span class="wordmark">Cynqra</span><span class="muted small">${esc(st.company ? st.company.name : "New company")}</span></div>
-    <div class="row">${guideToggle()}${modePill()}</div></div>`;
+    <div class="row"><button class="btn sm" data-reg-open="1">Models (${regModels().length})</button>${guideToggle()}${modePill()}</div></div>`;
   if (phase === "planning") return `<div class="wiz">${top}${planStep()}</div>`;
   const modeChoice = phase === "new" ? `
       <label class="lbl" for="coname">Company name</label>
@@ -163,6 +165,8 @@ function objectiveCard(obj) {
     <div class="fields">${fields}
       <div class="field" style="border-style:dashed"><div class="caps">Guardrails</div>
         <div class="between"><label for="cap">Budget cap, work units</label><input type="number" id="cap" data-keep="no" min="20" value="${esc(st.budget.cap)}" style="width:110px"></div>
+        ${wfSettings() ? `<div class="between"><label for="usd">Budget, US dollars</label><input type="number" id="usd" data-keep="no" min="0" step="0.5" value="${esc(wfSettings().budget_usd)}" style="width:110px"></div>
+        <div class="between"><label for="tv">Value of an hour, US dollars</label><input type="number" id="tv" data-keep="no" min="0" step="1" value="${esc(wfSettings().time_value_per_hour)}" style="width:110px"></div>` : ""}
         <div class="between small"><span>Autonomy</span><span>L1: low risk only (D-5)</span></div></div>
     </div>
     <div class="between" style="margin-top:auto;padding-top:14px;border-top:1px solid var(--line)">
@@ -318,7 +322,8 @@ function shell() {
   const nav = VIEWS.map(([k, label]) => `<button class="nav ${S.view === k ? "on" : ""}" data-view="${k}"${S.view === k ? ' aria-current="page"' : ""}>
     <span>${label}</span>${k === "decisions" && pend ? `<span class="badge">${pend}</span>` : ""}</button>`).join("");
   const running = st.meta.phase === "running";
-  const views = { company: vCompany, organization: vOrg, work: vWork, decisions: vDecisions, evolution: vEvolution, audit: vAudit, delivery: vDelivery };
+  const views = { company: vCompany, organization: vOrg, workforce: vWorkforce, work: vWork, decisions: vDecisions, models: vModels,
+    evolution: vEvolution, audit: vAudit, delivery: vDelivery };
   return `<div class="shell">
     <nav class="side" aria-label="Main"><div class="brand"><span class="wordmark">Cynqra</span><span class="small muted">${esc(st.company ? st.company.name : "")}</span></div>
       ${nav}
@@ -418,7 +423,7 @@ function vOrg() {
         <div class="row"><select id="gq"><option value="approves">Who approves</option><option value="owns">Who owns</option><option value="depends">What depends on</option></select>
           <input type="text" id="gs" value="merge_to_main" aria-label="Action type or task id" style="flex:1"><button class="btn sm" id="ask">Ask</button></div>${ans}</div></div>
     <div class="card side-panel stack"><div><span class="caps">Worker ${esc(w.id)}</span><h2 style="font-size:22px">${esc(w.title)}</h2></div>
-      <div class="kv"><span>Intelligence</span><span>${esc(w.intelligence_source_id)}</span></div>
+      <div class="kv"><span>${w.model_id ? "Model, chosen by the workforce engine" : "Intelligence"}</span><span>${esc(w.intelligence_source_id)}</span></div>
       <div class="kv"><span>Capabilities</span><span>${esc((w.capabilities || []).join(", "))}</span></div>
       <div class="kv"><span>Reports to</span><span>${esc(wt(w.reports_to))}</span></div>
       <div class="kv"><span>Current work</span><span>${esc(cur)}</span></div>
@@ -427,6 +432,109 @@ function vOrg() {
       <h3 style="font-size:15px;margin-top:6px">Authority (${esc(st.policy.version)})</h3>${auth}
       <p class="small muted" style="margin:6px 0 0">Identity stays when the intelligence changes: switch to a live model and the role, memory and history carry over.</p></div></div>`;
 }
+/* ---------------------------------------------------------------- the AI workforce and the model registry -- */
+const wfv = () => (S.st && S.st.workforce) || {};
+const regModels = () => wfv().registry || [];
+const wfSettings = () => (regModels().length ? wfv().settings : null);
+const usd = (v) => (v === null || v === undefined ? "n/a" : `$${Number(v).toFixed(Number(v) < 1 ? 4 : 2)}`);
+const pctx = (v) => (v === null || v === undefined ? "n/a" : `${Math.round(v * 100)}%`);
+const RUNTIME = { llama: "This computer (llama.cpp)", hf: "Hugging Face Inference Providers", openai_compatible: "OpenAI-compatible server" };
+
+function candTable(rows, chosen, compact) {
+  if (!rows || !rows.length) return "";
+  return `<div class="tscroll"><table class="tbl"><thead><tr><th>Model</th><th>P(verified)</th><th>Expected cost</th><th>Expected time</th><th>Score</th><th>${compact ? "Samples" : "Evidence"}</th></tr></thead><tbody>
+    ${rows.map((r) => `<tr class="${r.model_id === chosen ? "chosen" : ""}${r.fits_budget === false ? " over" : ""}"><td>${esc(r.model)}${r.model_id === chosen ? " ✓" : ""}</td>
+      <td class="mono">${pctx(r.p_task)}</td><td class="mono">${usd(r.expected_usd)}</td><td class="mono">${esc(r.expected_minutes)} min</td>
+      <td class="mono">${esc(r.score)}</td><td class="small">${compact ? esc((r.by_kind || []).reduce((a, k) => a + (k.samples || 0), 0))
+        : esc((r.by_kind || []).map((k) => `${k.kind}: ${k.basis}`).join("; "))}</td></tr>`).join("")}</tbody></table></div>`;
+}
+
+function vWorkforce() {
+  const wf = wfv();
+  if (!wf.active) return `<div class="card stack"><h2 style="font-size:18px">One model for every worker</h2><p class="muted">${esc(wf.why || "")}.
+    Register models in <button class="btn sm" data-view="models">Models</button> and start a live run: Cynqra then chooses a model for each worker, meters it and replaces it when it fails.</p></div>`;
+  const L = wf.ledger || {}, s = wf.settings || {};
+  const alloc = Object.values(L.allocated || {}).reduce((a, b) => a + b, 0);
+  const tile = (v, l) => `<div class="tile"><b>${v}</b><span>${l}</span></div>`;
+  const workers = (wf.workers || []).map((w) => `<div class="card stack">
+      <div class="between"><div><span class="caps">${esc(w.role)} · ${esc(w.id)}</span><h2 style="font-size:19px">${esc(w.title)}</h2></div>
+        <span class="pill teal">${esc(w.model)}</span></div>
+      <div class="kv"><span>Budget allocated, spent</span><span class="mono">${usd(w.budget.allocated)}, ${usd(w.budget.spent)}</span></div>
+      <div class="kv"><span>Verified, first pass, reworks</span><span class="mono">${w.performance.verified || 0}, ${w.performance.first_pass || 0}, ${w.performance.reworks || 0}</span></div>
+      <details><summary class="small">The staffing choice: every available model, scored for this role</summary>${candTable(w.candidates, (w.candidates[0] || {}).model_id, true)}</details></div>`).join("");
+  const reps = (wf.replacements || []).map((r) => `<div class="card stack rep">
+      <div class="between"><b>${esc(r.task_id)}: ${esc(r.role)} ${esc(r.worker_id)} moved from ${esc(modelName(r.from))} to ${esc(modelName(r.to))}</b><span class="small muted">${esc(r.at)}</span></div>
+      <span class="small">Why: ${esc(r.reason)}</span>
+      <span class="small">Before the change: ${esc(r.attempts)} attempt${r.attempts === 1 ? "" : "s"} on this task reached verification, and ${usd(r.usd_spent_by_previous)} was spent on it.</span>
+      <span class="small">Inherited: ${esc(r.inherited.join(", "))}.</span>
+      <details><summary class="small">The choice: every other available model</summary>${candTable(r.candidates, r.to)}</details></div>`).join("")
+    || `<p class="muted small">No worker has been replaced in this run.</p>`;
+  const ledger = (L.events || []).slice(-8).reverse().map((e) => `<div class="list-row small"><span>${e.what === "allocated" ? `Allocated ${e.tasks} tasks` : `${esc(e.task)}: released ${usd(e.released)} from ${esc(modelName(e.from))}, drew ${usd(e.drawn)} for ${esc(modelName(e.to))}`}</span><span class="mono">reserve ${usd(e.reserve)}</span></div>`).join("");
+  return `<div class="tiles">${tile(usd(s.budget_usd), "Budget")}${tile(usd(alloc), "Allocated to tasks")}${tile(usd(L.spent_total), "Spent")}
+      ${tile(usd(L.reserve), "Reserve for retries and replacements")}${tile(`$${esc(s.time_value_per_hour)}/h`, "Value of an hour")}${tile((wf.replacements || []).length, "Replacements")}</div>
+    <div class="grid2">${workers}</div>
+    <h2 style="font-size:18px;margin:10px 0 4px">Replacements</h2>${reps}
+    <div class="card"><h2 style="font-size:17px;margin-bottom:6px">Budget ledger</h2>${ledger || '<p class="muted small">Nothing allocated yet.</p>'}</div>`;
+}
+
+function modelName(id) { const m = regModels().find((x) => x.id === id); return m ? m.name : id; }
+
+function perfRows(perf) {
+  const row = (label, s) => `<tr><td>${esc(label)}</td><td class="mono">${s.attempts}</td><td class="mono">${pctx(s.success_rate)}</td><td class="mono">${pctx(s.first_pass_rate)}</td>
+    <td class="mono">${usd(s.usd_per_attempt)}</td><td class="mono">${s.seconds_per_attempt === null ? "n/a" : (s.seconds_per_attempt / 60).toFixed(1) + " min"}</td></tr>`;
+  const kinds = Object.entries(perf.by_task_kind || {});
+  if (!perf.overall.attempts) return `<p class="small muted">No measured work yet. Probe it, or let it work: every verification it gets is recorded here.</p>`;
+  return `<div class="tscroll"><table class="tbl"><thead><tr><th>Work</th><th>Attempts</th><th>Verified</th><th>First pass</th><th>Cost/attempt</th><th>Time/attempt</th></tr></thead><tbody>
+    ${row("All", perf.overall)}${kinds.map(([k, s]) => row(k, s)).join("")}</tbody></table></div>`;
+}
+
+function vModels() {
+  const models = regModels();
+  const cards = models.map((m) => {
+    const pr = S.probes[m.id] || {}, o = m.performance.overall, f = m.fault || {};
+    return `<div class="card stack mcard">
+      <div class="between"><div><span class="caps">${esc(RUNTIME[m.runtime] || m.runtime)}</span><h2 style="font-size:19px">${esc(m.name)}</h2></div>
+        <span class="pill ${m.available ? "teal" : "warn"}">${m.available ? "Available" : esc(m.availability)}</span></div>
+      <div class="kv"><span>Serves</span><span class="mono small">${esc(m.ref)}</span></div>
+      <div class="kv"><span>Provider, licence</span><span>${esc(m.provider || "n/a")}, ${esc(m.license || "n/a")}</span></div>
+      <div class="kv"><span>Context, hardware</span><span>${esc(m.context || "n/a")} tokens, ${esc(m.hardware || "n/a")}</span></div>
+      <div class="kv"><span>Price</span><span class="mono">${m.local ? `$${m.compute_usd_per_hour}/h of this computer` : `$${m.price_in} in, $${m.price_out} out per M tokens`}</span></div>
+      <div class="kv"><span>Calls, errors, speed</span><span class="mono">${o.calls}, ${o.call_errors}, ${o.write_tps ? o.write_tps + " tokens/s" : "n/a"}</span></div>
+      <h3 style="font-size:14px;margin-top:4px">Measured on Cynqra's work</h3>${perfRows(m.performance)}
+      ${Object.keys(f).length ? `<div class="notice small">Fault set: ${f.offline ? "offline" : ""}${f.offline && f.max_reply ? ", " : ""}${f.max_reply ? `replies capped at ${f.max_reply} tokens` : ""}</div>` : ""}
+      <div class="row wrap" style="gap:8px">
+        <button class="btn sm" data-probe="${esc(m.id)}" ${pr.state === "running" ? "disabled" : ""}>${pr.state === "running" ? "Probing..." : "Probe it"}</button>
+        <button class="btn sm" data-fault-off="${esc(m.id)}" data-on="${f.offline ? "0" : "1"}">${f.offline ? "Bring back online" : "Take offline"}</button>
+        <input type="number" id="cap_${esc(m.id)}" min="0" step="10" placeholder="reply cap" value="${esc(f.max_reply || "")}" style="width:100px" aria-label="Reply cap in tokens">
+        <button class="btn sm" data-fault-cap="${esc(m.id)}">Set reply cap</button>
+        <button class="btn sm" data-remove="${esc(m.id)}">Remove</button></div>
+      ${pr.log && pr.log.length ? `<pre class="log">${esc(pr.log.join("\\n"))}${pr.error ? "\\n" + esc(pr.error) : ""}</pre>` : ""}</div>`;
+  }).join("");
+  return `<div class="card stack"><h2 style="font-size:18px">Register a model</h2>
+      <p class="small muted" style="margin:0">A model brings facts, not scores. What it is good at is measured on Cynqra's own work, and the workforce engine reads only that. Keys stay in the environment: name the variable, never paste a key.</p>
+      <div class="row wrap" style="gap:8px">
+        <select id="r_runtime" aria-label="Runtime"><option value="hf">Hugging Face (HF_TOKEN)</option><option value="llama">This computer (a downloaded model)</option><option value="openai_compatible">OpenAI-compatible server</option></select>
+        <input type="text" id="r_ref" placeholder="zai-org/GLM-4.7, or a catalog id" style="flex:1;min-width:220px" aria-label="Model reference">
+        <input type="text" id="r_name" placeholder="Display name" style="width:160px" aria-label="Name"></div>
+      <div class="row wrap" style="gap:8px">
+        <input type="number" id="r_in" step="0.01" placeholder="$ in / M" style="width:100px" aria-label="Price in">
+        <input type="number" id="r_out" step="0.01" placeholder="$ out / M" style="width:100px" aria-label="Price out">
+        <input type="number" id="r_hour" step="0.01" placeholder="$ / hour (local)" style="width:130px" aria-label="Compute price per hour">
+        <input type="number" id="r_ctx" placeholder="context" style="width:100px" aria-label="Context length">
+        <input type="text" id="r_provider" placeholder="provider" style="width:120px" aria-label="Provider">
+        <input type="text" id="r_license" placeholder="licence" style="width:110px" aria-label="Licence">
+        <input type="text" id="r_base" placeholder="base URL (OpenAI-compatible)" style="width:210px" aria-label="Base URL">
+        <input type="text" id="r_keyenv" placeholder="key variable name" style="width:150px" aria-label="Key environment variable">
+        <button class="btn primary sm" id="register">Register</button></div></div>
+    <div class="grid2">${cards || '<p class="muted">No models yet.</p>'}</div>`;
+}
+
+function regScreen() {
+  return `<div class="wiz"><div class="wiz-top"><div class="row"><span class="wordmark">Cynqra</span><span class="muted small">Model registry</span></div>
+    <div class="row"><button class="btn sm primary" data-reg-close="1">Done</button></div></div>
+    <div class="view">${S.err ? `<div class="err" role="alert">${esc(S.err)}</div>` : ""}${vModels()}</div></div>`;
+}
+
 function graphAnswer(g) {
   if (g.error) return `<span style="color:var(--red)">${esc(g.error)}</span>`;
   if (g.approves) return `<b>${esc(g.action_type)}</b> (${esc(g.risk_tier)}): executes ${esc(g.executes.join(", ") || "nobody")}; proposes ${esc(g.proposes.join(", ") || "nobody")}; approves: ${esc(g.approves)}.`;
@@ -581,9 +689,10 @@ function bind() {
   on("confirm", () => {
     const fields = {}; $$("[data-field]").forEach((i) => fields[i.dataset.field] = i.value);
     const cap = Number($("#cap").value);
+    const usd = $("#usd") ? Number($("#usd").value) : null, tv = $("#tv") ? Number($("#tv").value) : null;
     act(async () => {
       await api("/api/objective/fields", { fields });
-      await api("/api/objective/guardrails", { budget_cap: cap });
+      await api("/api/objective/guardrails", usd === null ? { budget_cap: cap } : { budget_cap: cap, budget_usd: usd, time_value_per_hour: tv });
       await api("/api/objective/confirm", {});
     });
   });
@@ -608,6 +717,19 @@ function bind() {
     });
   });
   $$("[data-worker]").forEach((b) => b.onclick = () => { S.worker = b.dataset.worker; paint(true); });
+  $$("[data-reg-open]").forEach((b) => b.onclick = () => { S.regOpen = true; S.err = ""; paint(true); });
+  $$("[data-reg-close]").forEach((b) => b.onclick = () => { S.regOpen = false; S.err = ""; paint(true); });
+  on("register", () => {
+    const v = (id) => ($("#" + id) || {}).value || "";
+    const spec = { runtime: v("r_runtime"), ref: v("r_ref").trim(), name: v("r_name").trim(), provider: v("r_provider").trim(),
+      license: v("r_license").trim(), base_url: v("r_base").trim(), api_key_env: v("r_keyenv").trim() };
+    [["price_in", "r_in"], ["price_out", "r_out"], ["compute_usd_per_hour", "r_hour"], ["context", "r_ctx"]].forEach(([k, id]) => { if (v(id) !== "") spec[k] = Number(v(id)); });
+    act(() => api("/api/models", spec));
+  });
+  $$("[data-probe]").forEach((b) => b.onclick = () => { const id = b.dataset.probe; act(async () => { S.probes[id] = await api(`/api/models/${id}/probe`, {}); }); });
+  $$("[data-fault-off]").forEach((b) => b.onclick = () => { const id = b.dataset.faultOff, on = b.dataset.on === "1"; act(() => api(`/api/models/${id}/fault`, { offline: on })); });
+  $$("[data-fault-cap]").forEach((b) => b.onclick = () => { const id = b.dataset.faultCap, n = Number(($("#cap_" + id) || {}).value || 0); act(() => api(`/api/models/${id}/fault`, { max_reply: n })); });
+  $$("[data-remove]").forEach((b) => b.onclick = () => { const id = b.dataset.remove; if (window.confirm("Remove this model from the registry? Its measured record is kept.")) act(() => api(`/api/models/${id}/remove`, {})); });
   $$("[data-rt-start]").forEach((b) => b.onclick = () => { const model = b.dataset.rtStart; act(() => api("/api/runtime/start", { model })); });
   on("rt-cancel", () => act(() => api("/api/runtime/cancel", {})));
   on("rt-stop", () => act(() => api("/api/runtime/stop", {})));

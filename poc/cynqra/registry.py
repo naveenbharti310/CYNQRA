@@ -40,6 +40,33 @@ def slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:48] or "model"
 
 
+def hf_facts(ref: str) -> dict:
+    """A Hugging Face model's facts from the router's live listing: its provider (the one named after ':' in ref,
+    else a live one supporting structured output, cheapest first), that provider's price and context."""
+    import json
+    import urllib.request
+    base, _, want = ref.partition(":")
+    url = (os.environ.get("HF_ROUTER_URL") or "https://router.huggingface.co/v1").rstrip("/") + "/models"
+    try:
+        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {os.environ['HF_TOKEN']}"})
+        data = json.loads(urllib.request.urlopen(req, timeout=30).read())
+    except (OSError, ValueError) as exc:
+        raise RegistryError(f"could not read Hugging Face's model list: {exc}") from exc
+    entry = next((m for m in data.get("data") or [] if m.get("id") == base), None)
+    if entry is None:
+        raise RegistryError(f"{base} is not served by Hugging Face Inference Providers now")
+    live = [p for p in entry.get("providers") or [] if p.get("status") == "live"
+            and p.get("supports_structured_output") is not False and (p.get("pricing") or {}).get("input") is not None]
+    if want:
+        live = [p for p in live if p.get("provider") == want]
+    if not live:
+        raise RegistryError(f"no live provider with structured output serves {ref}")
+    p = min(live, key=lambda x: x["pricing"]["input"] + x["pricing"]["output"])
+    return {"provider": p["provider"], "price_in": float(p["pricing"]["input"]),
+            "price_out": float(p["pricing"]["output"]), "context": int(p.get("context_length") or 0),
+            "hardware": f"hosted by {p['provider']}", "ref": f"{base}:{p['provider']}"}
+
+
 class Registry:
     def __init__(self, root: Path, runtime=None):
         self.root = Path(root)
@@ -83,10 +110,14 @@ class Registry:
                      "license": c.get("license", ""), "local": True, "predict": c["predict"], "think": c["think"]}
         elif runtime == "openai_compatible" and not spec.get("base_url"):
             raise RegistryError("an openai_compatible model needs base_url")
+        elif runtime == "hf" and os.environ.get("HF_TOKEN"):
+            facts = hf_facts(ref)
         m = {"runtime": runtime, "ref": ref, "local": runtime == "llama", "provider": "", "version": "", "context": 0,
              "license": "", "params": "", "hardware": "hosted" if runtime != "llama" else "", "price_in": 0.0,
              "price_out": 0.0, "compute_usd_per_hour": 0.0, "base_url": "", "api_key_env": "", "effort": "",
              "json_schema": True, "tools": False}
+        ref = facts.pop("ref", ref)
+        m["ref"] = ref
         m.update(facts)
         for k in ("name", "provider", "version", "context", "license", "params", "hardware", "price_in", "price_out",
                   "compute_usd_per_hour", "base_url", "api_key_env", "effort", "json_schema", "tools"):

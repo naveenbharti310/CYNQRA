@@ -1,0 +1,79 @@
+# The AI workforce demonstration on real models: Cynqra registers three models, probes them on its own work,
+# staffs a four-worker organization from them for a real objective within a dollar budget, has the model
+# staffed as Engineer A fail for real (its replies capped), detects the failure, replaces the model with
+# another, lets the successor continue from the kept work, and delivers. desktop.py --workforce; the report
+# is printed to the log and kept as an artifact. Runs when a commit message on cynqra contains [workforce].
+name: cynqra-workforce
+
+on:
+  push:
+    branches: [cynqra]
+
+permissions:
+  contents: read
+
+env:
+  OBJECTIVE: >-
+    I run a small bakery and my staff keep losing track of custom cake orders. I want a simple internal web page
+    where they can log an order with the pickup date, see what is due in the next few days, and mark orders as
+    paid and picked up. Nothing public, no card payments, and it has to run on the shop laptop.
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  local:
+    if: contains(github.event.head_commit.message, '[workforce]')
+    name: Three open models on this machine (Qwen3.5 4B, Qwen3.5 9B, gpt-oss 20B)
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Room for three models (about 19 GB)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          df -h / | tail -1
+      - name: Build the app (Linux)
+        run: python3 desktop/build.py --target linux-x64 --stage-only
+      - name: The workforce demonstration
+        run: |
+          dist/stage/linux-x64/Cynqra/python/bin/python3 -X utf8 dist/stage/linux-x64/Cynqra/app/desktop.py \
+            --workforce local "$OBJECTIVE" --data "$RUNNER_TEMP/wf" --company "Bakery orders" --budget-usd 2 --max-minutes 300
+      - name: Report
+        if: always()
+        run: |
+          cat "$RUNNER_TEMP"/wf/reports/workforce_*.json 2>/dev/null || echo "no report"
+          mkdir -p out && cp -r "$RUNNER_TEMP/wf/reports" out/ 2>/dev/null; cp "$RUNNER_TEMP/wf/runtime/llama-server.log" out/ 2>/dev/null; true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: workforce-local
+          path: out/
+
+  hf:
+    if: contains(github.event.head_commit.message, '[workforce]')
+    name: Qwen3.5-35B-A3B, GLM-4.7 and Kimi K2.5 on Hugging Face
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Hugging Face token
+        id: token
+        run: |
+          if [ -z "$HF_TOKEN" ]; then echo "No HF_TOKEN secret: the hosted demonstration is skipped."; echo "go=0" >> "$GITHUB_OUTPUT"
+          else echo "go=1" >> "$GITHUB_OUTPUT"; fi
+      - name: The workforce demonstration
+        if: steps.token.outputs.go == '1'
+        run: python3 poc/desktop.py --workforce hf "$OBJECTIVE" --data "$RUNNER_TEMP/wf" --company "Bakery orders" --budget-usd 5 --max-minutes 170
+      - name: Report
+        if: always() && steps.token.outputs.go == '1'
+        run: |
+          cat "$RUNNER_TEMP"/wf/reports/workforce_*.json 2>/dev/null || echo "no report"
+          mkdir -p out && cp -r "$RUNNER_TEMP/wf/reports" out/ 2>/dev/null; true
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.token.outputs.go == '1'
+        with:
+          name: workforce-hf
+          path: out/
