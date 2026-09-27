@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import threading
+from concurrent.futures import ThreadPoolExecutor
 import time
 import uuid
 from datetime import datetime
@@ -39,6 +40,8 @@ from .intelligence_layer.registry import RegistryError
 from .protocol import ProtocolError, build
 
 DEFAULT_SCENARIO = "candidate_tracker"
+# One model on this machine answers one call at a time: local calls take turns; hosted ones run side by side.
+_LOCAL_CALLS = threading.Lock()
 
 
 class EngineError(RuntimeError):
@@ -159,13 +162,28 @@ class Engine:
         mid = self.intelligence_for(worker_id)
         pin = (binding.current(self.store, who) or {}).get("version")
         try:
-            return self.supply.gateway.invoke(mid, request, pinned_version=pin)
+            return self._call(mid, request, pin)
         except VersionChanged as exc:
             replacement.version_changed(self, who, exc)  # kept after its regression check, or rebound
             b = binding.current(self.store, who)
-            return self.supply.gateway.invoke(b["intelligence_id"], request, pinned_version=b["version"])
+            return self._call(b["intelligence_id"], request, b["version"])
         except SupplyError as exc:
             raise IntelligenceError(str(exc), model_id=mid) from exc
+
+    def _call(self, mid: str, request: dict, pin: str | None) -> dict:
+        """The model call itself, the slow part, made without holding the run: while one worker waits for its
+        intelligence, the others record their results. Everything before and after the call is serialized."""
+        local = bool(self.registry.get(mid).get("local"))
+        owned = self.lock._is_owned()
+        state = self.lock._release_save() if owned else None
+        try:
+            if local:
+                with _LOCAL_CALLS:
+                    return self.supply.gateway.invoke(mid, request, pinned_version=pin)
+            return self.supply.gateway.invoke(mid, request, pinned_version=pin)
+        finally:
+            if owned:
+                self.lock._acquire_restore(state)
 
     def _staff(self, refine: bool = False) -> None:
         """Stage 4: an intelligence for every worker; once the roadmap exists, refined to the kinds of the tasks
@@ -589,6 +607,10 @@ class Engine:
 
     # --- Stage 8: the run ------------------------------------------------------------------------------------------
     def step(self) -> dict:
+        """One round of the run. Every worker with work it can do now takes one piece of it (a person does one
+        thing at a time), and they work at the same time: each hands its result on, or raises a Blocker, when it is
+        done, and the colleague it concerns picks that up in the next round. Verification and approved actions are
+        the platform's and run in the same round. Model calls overlap; recording their results is serialized."""
         with self.lock:
             m = self.meta
             if m["frozen"]:
@@ -597,35 +619,74 @@ class Engine:
                 return {"did": "idle", "why": f"phase {m['phase']}"}
             if budget.ledger(self.store)["state"] == "breaker":
                 return {"did": "idle", "why": "budget breaker open"}
-            tasks = self.tasks()
-            by_id = {t["id"]: t for t in tasks}
-            for t in tasks:
-                s = t["status"]
-                ready = all(by_id[d]["status"] == "VERIFIED" for d in t["dependencies"])
-                try:
-                    if s == "PLANNED" and ready:
-                        return execution.assign(self, t)
-                    if s in ("ASSIGNED", "REWORK"):
-                        return execution.work(self, t)
-                    if s == "BLOCKED":
-                        return execution.answer(self, t)
-                    if s == "REVIEW":
-                        return execution.verify(self, t)
-                    if s == "APPROVED":
-                        return execution.execute_approved(self, t)
-                except ProtocolError as exc:
-                    return self._violation(self.task(t["id"]), s, exc)
-                except IntelligenceError as exc:
-                    handled = replacement.model_failed(self, self.task(t["id"]), exc)
-                    if handled:
-                        return handled
-                    self.set_meta(phase="stopped_error", failed_stage="run",
-                                  notice=f"Stopped on {t['id']}: the intelligence failed ({exc}). Nothing was invented.")
-                    self.event("task.failed", "task", t["id"], {"reason": "intelligence_error"}, correlation_id=t["id"])
-                    return {"did": "error", "task": t["id"], "why": str(exc)}
-            if tasks and all(t["status"] == "VERIFIED" for t in tasks):
-                return delivery.deliver(self)
-            return {"did": "idle", "why": "waiting on the founder"}
+            actions = self._round()
+            if not actions:
+                tasks = self.tasks()
+                if tasks and all(t["status"] == "VERIFIED" for t in tasks):
+                    return delivery.deliver(self)
+                return {"did": "idle", "why": "waiting on the founder"}
+        if len(actions) == 1 or not isinstance(self.intel, ModelSource):
+            # a prepared script answers at once: its round runs in plan order, so a demo replays the same way
+            results = [self._act(tid) for tid in actions]
+        else:
+            with ThreadPoolExecutor(max_workers=min(len(actions), project_settings.get(self.store)["parallel_workers"]),
+                                    thread_name_prefix="worker") as pool:
+                results = list(pool.map(self._act, actions))
+        results = [r for r in results if r]
+        if not results:
+            return {"did": "idle", "why": "nothing could proceed"}
+        if len(results) == 1:
+            return results[0]
+        errors = [r for r in results if r["did"] == "error"]
+        return {"did": "error" if errors else "round", "task": results[0].get("task"), "actions": results,
+                "why": errors[0]["why"] if errors else f"{len(results)} pieces of work at the same time"}
+
+    ACTIONS = {"PLANNED": execution.assign, "ASSIGNED": execution.work, "REWORK": execution.work,
+               "BLOCKED": execution.answer, "REVIEW": execution.verify, "APPROVED": execution.execute_approved}
+
+    def _round(self) -> list[str]:
+        """The tasks that move this round: those whose inputs are ready, one per worker who has to act on them (the
+        assigner hands a task over, the owner works on it, the colleague a Blocker names answers it)."""
+        tasks = self.tasks()
+        by_id = {t["id"]: t for t in tasks}
+        busy: set[str] = set()
+        out = []
+        for t in tasks:
+            s = t["status"]
+            if s not in self.ACTIONS or (s == "PLANNED" and not all(
+                    by_id[d]["status"] == "VERIFIED" for d in t["dependencies"])):
+                continue
+            actor = {"PLANNED": t.get("handoff_from"), "ASSIGNED": t["owner_worker_id"], "REWORK": t["owner_worker_id"],
+                     "BLOCKED": (t.get("blocker") or {}).get("needs_from")}.get(s) or ""
+            if actor.startswith("w_"):
+                if actor in busy:
+                    continue
+                busy.add(actor)
+            out.append(t["id"])
+        return out
+
+    def _act(self, tid: str) -> dict | None:
+        """One worker's (or the platform's) piece of work on one task, as the step used to do it."""
+        with self.lock:
+            m = self.meta
+            if m["frozen"] or m["phase"] != "running" or budget.ledger(self.store)["state"] == "breaker":
+                return None
+            t = self.task(tid)
+            s = t["status"]
+            if s not in self.ACTIONS:
+                return None
+            try:
+                return self.ACTIONS[s](self, t)
+            except ProtocolError as exc:
+                return self._violation(self.task(tid), s, exc)
+            except IntelligenceError as exc:
+                handled = replacement.model_failed(self, self.task(tid), exc)
+                if handled:
+                    return handled
+                self.set_meta(phase="stopped_error", failed_stage="run",
+                              notice=f"Stopped on {tid}: the intelligence failed ({exc}). Nothing was invented.")
+                self.event("task.failed", "task", tid, {"reason": "intelligence_error"}, correlation_id=tid)
+                return {"did": "error", "task": tid, "why": str(exc)}
 
     def _violation(self, t: dict, state: str, exc: ProtocolError) -> dict:
         """A reply that is not a valid protocol object: counted against the worker whose reply it was."""

@@ -11,7 +11,8 @@ self_checks             how many times an engineer may test and fix its own work
 from __future__ import annotations
 
 DEFAULTS = {"budget_usd": 5.0, "time_value_per_hour": 10.0, "compute_usd_per_hour": 0.0, "infra_usd_per_day": 0.0,
-            "reserve_min_pct": 0.15, "allow_workforce_override": False, "self_checks": 2}
+            "reserve_min_pct": 0.15, "allow_workforce_override": False, "self_checks": 2,
+            "parallel_workers": 6}
 NUMBERS = ("budget_usd", "time_value_per_hour", "compute_usd_per_hour", "infra_usd_per_day", "reserve_min_pct")
 
 
@@ -39,6 +40,8 @@ def update(store, changes: dict) -> dict:
             v = bool(v)
         elif k == "self_checks":
             v = max(0, int(v))
+        elif k == "parallel_workers":  # how many workers' model calls may be in flight at once
+            v = max(1, int(v))
         else:
             raise SettingsError(f"unknown setting {k}")
         s[k] = v
