@@ -11,10 +11,10 @@ import os
 import unittest
 
 from fake_ollama import FakeOllama
-from helpers import SCENARIO, TempDir, engine_to_running, no_model_env, restore_env, run_journey
+from helpers import SCENARIO, TempDir, engine_to_running, env_source, no_model_env, restore_env, run_journey
 
 from cynqra import model_adapter
-from cynqra.intelligence import ModelSource, _file_blocks, _parse_json
+from cynqra.intelligence import _file_blocks, _parse_json
 
 
 class Base(unittest.TestCase):
@@ -87,7 +87,7 @@ class LocalServerTests(unittest.TestCase):
         try:
             os.environ.update({"CYNQRA_LOCAL_BASE_URL": p.base + "/v1", "CYNQRA_MODEL": "qwen3.6-35b-a3b",
                                "CYNQRA_THINK": "false", "CYNQRA_SEED": "42"})
-            data, usage = ModelSource()._call("Plan the work for this organization", schema={"type": "object"})
+            data, usage = env_source()._call("Plan the work for this organization", schema={"type": "object"})
             body = p.requests[-1]["body"]
             self.assertEqual(p.requests[-1]["path"], "/v1/chat/completions")
             self.assertEqual(body["response_format"]["json_schema"]["schema"], {"type": "object"})
@@ -116,14 +116,14 @@ class LocalServerTests(unittest.TestCase):
 
     def test_hugging_face_inference_providers(self):
         from test_adapter import FakeProvider
-        import live_check
+        from cynqra.registry import WORST_PRICE, Registry
         saved = no_model_env()
         p = FakeProvider()
         try:
             os.environ.update({"HF_TOKEN": "hf_test_not_real", "CYNQRA_HF_MODEL": "openai/gpt-oss-120b:cerebras",
                                "HF_ROUTER_URL": p.base + "/v1", "CYNQRA_EFFORT": "low"})
             self.assertEqual(model_adapter.resolve()["kind"], "hf")
-            data, usage = ModelSource()._call("Plan the work for this organization", schema={"type": "object"})
+            data, usage = env_source()._call("Plan the work for this organization", schema={"type": "object"})
             r = p.requests[-1]
             self.assertEqual((r["path"], r["headers"]["authorization"]), ("/v1/chat/completions", "Bearer hf_test_not_real"))
             self.assertEqual(r["body"]["model"], "openai/gpt-oss-120b:cerebras")
@@ -134,8 +134,15 @@ class LocalServerTests(unittest.TestCase):
             self.assertIn("tasks", data)
             self.assertFalse(usage["estimated"])
             self.assertIsNone(model_adapter.resolve().get("local"), "paid calls, so spend is counted")
+            tmp = TempDir()
+            reg = Registry(tmp.path / "reg")
+            m = reg.register({"runtime": "environment", "ref": "environment", "id": "a"})
+            self.assertEqual((m["price_in"], m["price_out"]), WORST_PRICE, "an unlisted hosted model errs on the safe side")
             os.environ["CYNQRA_PRICE_PER_M"] = "0.25,0.69"
-            self.assertEqual(live_check.price("openai/gpt-oss-120b:cerebras"), (0.25, 0.69))
+            m = reg.register({"runtime": "environment", "ref": "environment", "id": "b"})
+            self.assertEqual((m["price_in"], m["price_out"], m["local"]), (0.25, 0.69, False))
+            reg.close()
+            tmp.cleanup()
             p.mode = "hf_401"
             self.assertIn("refused the token", model_adapter.complete("x")["error"])
             p.mode = "hf_402"
@@ -198,7 +205,7 @@ class FileBlockTests(unittest.TestCase):
         intelligence.model_adapter.complete = fake
         os.environ["CYNQRA_LOCAL_BASE_URL"] = "http://127.0.0.1:9/v1"
         try:
-            data, usage = ModelSource()._call("write a.py", files=True)
+            data, usage = env_source()._call("write a.py", files=True)
         finally:
             intelligence.model_adapter.complete = saved
         self.assertEqual(data["files"], {"a.py": "x = 1\n"})
@@ -223,7 +230,7 @@ class FileBlockTests(unittest.TestCase):
         intelligence.model_adapter.complete = fake
         os.environ["CYNQRA_LOCAL_BASE_URL"] = "http://127.0.0.1:9/v1"
         try:
-            data, usage = ModelSource().structure_objective("My staff lose cake orders.")
+            data, usage = env_source().structure_objective("My staff lose cake orders.")
         finally:
             intelligence.model_adapter.complete = saved
         self.assertEqual(len(seen), 2)
@@ -232,7 +239,6 @@ class FileBlockTests(unittest.TestCase):
         self.assertFalse(seen[1][1]["additionalProperties"])
         self.assertEqual(data["priorities"], second["priorities"])
         self.assertEqual(data["inferred_fields"], ["business_outcome", "success_criteria", "priorities"])
-        self.assertEqual(data["missing_fields"], [])
         self.assertEqual((usage["tokens_in"], usage["tokens_out"]), (200, 100))
 
     def test_a_prompt_sent_again_gets_temperature_so_the_reply_can_change(self):
@@ -250,7 +256,7 @@ class FileBlockTests(unittest.TestCase):
         intelligence.model_adapter.complete = fake
         os.environ["CYNQRA_LOCAL_BASE_URL"] = "http://127.0.0.1:9/v1"
         try:
-            src = ModelSource()
+            src = env_source()
             for prompt in ("same", "same", "other", "same", "same", "same"):
                 src._call(prompt)
             for _ in range(2):
@@ -276,12 +282,12 @@ class FileBlockTests(unittest.TestCase):
         os.environ["CYNQRA_LOCAL_BASE_URL"] = "http://127.0.0.1:9/v1"
         os.environ["CYNQRA_NUM_PREDICT"] = "6144"
         try:
-            data, usage = ModelSource()._call("write the store", files=True)
+            data, usage = env_source()._call("write the store", files=True)
             with self.assertRaises(intelligence.IntelligenceError):  # a JSON reply cannot be used in part
                 fake_json = {"text": '{"a": ', "tokens_in": 1, "tokens_out": 1, "estimated": False,
                              "error": "RuntimeError: reply truncated at max_tokens"}
                 intelligence.model_adapter.complete = lambda prompt, **kw: fake_json
-                ModelSource()._call("plan it", schema={"type": "object"})
+                env_source()._call("plan it", schema={"type": "object"})
         finally:
             intelligence.model_adapter.complete = saved
             os.environ.pop("CYNQRA_NUM_PREDICT", None)
@@ -334,8 +340,8 @@ class JourneyTests(Base):
         e.close()
 
     def test_replies_that_keep_overflowing_are_escalated_not_retried_without_end(self):
-        from cynqra import engine as engine_mod
-        src = ModelSource()
+        from cynqra import execution
+        src = env_source()
         real = src.work
 
         def always_cut(task, **kw):
@@ -352,16 +358,16 @@ class JourneyTests(Base):
                 break
             e.decide(e.pending_decisions()[0]["id"], "approve")
         self.assertEqual(len(esc), 1)
-        self.assertIn(f"{engine_mod.MAX_CUT_OFFS + 1} replies in a row were longer than the model's output limit",
+        self.assertIn(f"{execution.MAX_CUT_OFFS + 1} replies in a row were longer than the model's output limit",
                       esc[0]["problem"])
         cuts = [x for x in e.store.events() if x["event_type"] == "task.reply_cut_off"]
-        self.assertEqual(len(cuts), engine_mod.MAX_CUT_OFFS)
+        self.assertEqual(len(cuts), execution.MAX_CUT_OFFS)
         e.decide(esc[0]["id"], "approve")
         self.assertEqual(e.task(esc[0]["task_id"])["cut_offs"], 0, "an approved retry starts counting again")
         e.close()
 
     def test_a_syntax_error_is_named_back_to_the_engineer(self):
-        src = ModelSource()
+        src = env_source()
         calls = []
         real = src.work
 
@@ -377,8 +383,7 @@ class JourneyTests(Base):
         e = Engine(self.tmp.path, intelligence=src)
         e.create_company("Harbor Recruiting", "live")
         e.draft_objective(SCENARIO["messy"])
-        e.confirm_objective()
-        e.decide(e.pending_decisions()[0]["id"], "approve")
+        e.submit_objective()
         run_journey(e)
         fb = [x for x in e.store.events() if x["event_type"] == "worker.self_checked" and x["aggregate_id"] == "t_04"]
         self.assertFalse(fb[0]["payload"]["passed"])

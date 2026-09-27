@@ -6,9 +6,11 @@
   python poc/live_check.py --max-usd 5 --objective "one founder sentence"
 
 Every model call goes through cynqra/model_adapter.py against the provider's real API.
-A shell command model (CYNQRA_S1_MODEL_CMD) is refused unless --allow-cmd is given; then
-the report says so, tokens are estimated, no dollars are counted and the dollar cap does
-not apply, and counts_as_measured_result is false. tests/model_bridge.py is such a command.
+The run is staffed from a registry holding the model the environment names, priced at its list
+price (registry.LIST_PRICES, or CYNQRA_PRICE_PER_M), and --max-usd is the run's budget: the
+Budget Engine's breaker is the spend cap. A shell command model (CYNQRA_S1_MODEL_CMD) is refused
+unless --allow-cmd is given; then the report says so, tokens are estimated, no dollars are
+counted and counts_as_measured_result is false. tests/model_bridge.py is such a command.
 
 The founder's decisions are approved automatically, the same way tests/helpers.run_journey
 does it, and every one is listed in the report. The run passes only when the product the
@@ -38,10 +40,9 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from cynqra import model_adapter  # noqa: E402
+from cynqra import budget, model_adapter  # noqa: E402
 from cynqra.engine import Engine  # noqa: E402
-from cynqra.verification import NO_WINDOW, python_exe  # noqa: E402
-
+from cynqra.testrunner import NO_WINDOW, python_exe  # noqa: E402
 
 
 def reports_dir() -> Path:
@@ -49,40 +50,8 @@ def reports_dir() -> Path:
     return Path(os.environ.get("CYNQRA_REPORTS_DIR") or HERE / "live_reports")
 SCENARIO = json.loads((HERE / "scenarios" / "candidate_tracker" / "scenario.json").read_text(encoding="utf-8"))
 
-# USD per million tokens, input and output. First party list prices, checked 26 Sep 2026.
-# An unknown model is priced at the most expensive row so the cap errs on the safe side.
-PRICES = {
-    "claude-sonnet-5": (2.00, 10.00),
-    "claude-sonnet-4-6": (3.00, 15.00),
-    "claude-haiku-4-5": (1.00, 5.00),
-    "claude-opus-5": (5.00, 25.00),
-    "claude-opus-5-5": (4.00, 20.00),
-    "claude-opus-4-8": (5.00, 25.00),
-    "claude-fable-5-1": (10.00, 50.00),
-    "gpt-4o-mini": (0.15, 0.60),
-}
-WORST = (10.00, 50.00)
 UNRUN_MARKERS = ("HTTP 4", "HTTP 5", "network error", "No model", "refused (category", "URLError", "timed out",
                  "model command exited")
-
-
-def price(model: str) -> tuple[float, float]:
-    """A model not in the table (a Hugging Face provider's, say) can be priced with CYNQRA_PRICE_PER_M="in,out"."""
-    if model in PRICES:
-        return PRICES[model]
-    try:
-        pin, pout = (float(x) for x in os.environ["CYNQRA_PRICE_PER_M"].split(","))
-        return pin, pout
-    except (KeyError, ValueError):
-        return WORST
-
-
-def spend(calls: list[dict]) -> float:
-    total = 0.0
-    for c in calls:
-        pin, pout = price(c.get("label", ""))
-        total += c.get("tokens_in", 0) * pin / 1e6 + c.get("tokens_out", 0) * pout / 1e6
-    return round(total, 4)
 
 
 def rerun_product_tests(repo: Path) -> dict:
@@ -115,10 +84,9 @@ def health(url: str | None) -> dict:
         return {"url": url, "status": None, "error": str(exc)[:200]}
 
 
-def run(objective: str, max_usd: float, cap_units: int, data_dir: Path, log=print, allow_cmd: bool = False) -> dict:
+def run(objective: str, max_usd: float, data_dir: Path, log=print, allow_cmd: bool = False) -> dict:
     resolved = model_adapter.resolve()
     measured = bool(resolved) and resolved["kind"] != "cmd"
-    local = bool(resolved and resolved.get("local"))  # a model on this machine: real token counts, no API spend
     report = {"started_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "objective": objective,
               "max_usd": max_usd, "model": resolved, "effort": os.environ.get("CYNQRA_EFFORT") or "model default",
               "counts_as_measured_result": measured}
@@ -131,46 +99,41 @@ def run(objective: str, max_usd: float, cap_units: int, data_dir: Path, log=prin
     decisions, steps = [], []
 
     def cost() -> float:
-        return spend(e.store.all("call")) if measured and not local else 0.0
+        return budget.ledger(e.store)["spent_total"]
 
     def finish(outcome: str, reason: str) -> dict:
         calls = e.store.all("call")
         report.update(
             outcome=outcome, reason=reason, seconds=round(time.time() - t0, 1), phase=e.meta["phase"],
-            notice=e.meta.get("notice", ""), usd=cost(),
+            notice=e.meta.get("notice", ""), usd=round(cost(), 4),
             tokens_in=sum(c.get("tokens_in", 0) for c in calls), tokens_out=sum(c.get("tokens_out", 0) for c in calls),
-            calls=[{k: c.get(k) for k in ("id", "task_id", "worker", "purpose", "label", "tokens_in", "tokens_out",
-                                          "estimated", "latency_s")} for c in calls],
+            calls=[{k: c.get(k) for k in ("id", "task_id", "worker", "purpose", "label", "model_id", "tokens_in",
+                                          "tokens_out", "usd", "estimated", "latency_s")} for c in calls],
             decisions=decisions, steps=steps[-200:],
             objective_structured=(e.objective() or {}).get("structured"),
             inferred_fields=(e.objective() or {}).get("inferred_fields"),
-            plan=[{k: t.get(k) for k in ("id", "kind", "owner_worker_id", "title", "status", "attempts")} for t in e.tasks()]
-            if e.store.get("plan", "plan_1") else [],
-            verifications=[{k: v.get(k) for k in ("id", "task_id", "verdict", "tier")} for v in e.store.all("verification")],
+            plan=[{k: t.get(k) for k in ("id", "kind", "owner_worker_id", "title", "status", "attempts")} for t in e.tasks()],
+            verifications=[{k: v.get(k) for k in ("id", "task_id", "verdict", "method")} for v in e.store.all("verification")],
             metrics=e.metrics() if e.store.get("company", e.cid) else {},
-            budget=e.budget(),
+            budget=budget.ledger(e.store),
         )
         return report
 
     try:
         e.create_company("Live check", "live")
+        e.set_guardrails(budget_usd=max_usd)
+        model = e.registry.get("environment")
         log(f"model: {resolved['label']} ({resolved['kind']}), "
-            + ("local model: real token counts, no API spend" if local else
-               f"spend cap ${max_usd:.2f}" if measured else "command model: tokens estimated, no dollar cap"))
+            + (f"${model['price_in']}/${model['price_out']} per M tokens, budget ${max_usd:.2f}" if measured
+               else "command model: tokens estimated, no dollars counted"))
         obj = e.draft_objective(objective)
         log(f"objective structured: {len(obj['structured'])} fields, inferred {obj['inferred_fields']}, "
             f"missing {obj['missing_fields']}  ${cost():.3f}")
         if obj["missing_fields"]:
             return finish("FAIL", f"the model left objective fields empty: {obj['missing_fields']}")
-        e.set_guardrails(budget_cap=cap_units)
         e.submit_objective()
         decisions.append({"kind": "submit_objective", "action": "submit"})
-        if e.meta["phase"] == "stopped_error":
-            raise RuntimeError(e.meta.get("notice", "planning failed"))
         for _ in range(400):
-            if measured and not local and cost() > max_usd:
-                e.kill_switch(True)
-                return finish("UNRUN", f"spend cap reached: ${cost():.3f} > ${max_usd:.2f}. Run stopped by the kill switch.")
             phase = e.meta["phase"]
             if phase in ("accepted", "stopped", "stopped_error"):
                 break
@@ -182,6 +145,11 @@ def run(objective: str, max_usd: float, cap_units: int, data_dir: Path, log=prin
                 break
             if r["did"] == "idle":
                 pend = e.pending_decisions()
+                if any(d["kind"] == "budget_breaker" for d in pend):
+                    return finish("UNRUN", f"spend cap reached: ${cost():.3f} of ${max_usd:.2f}. The budget breaker "
+                                           "stopped the run.")
+                if any(d["kind"] == "escalation" and "stopped answering" in d["problem"] for d in pend):
+                    return finish("UNRUN", next(d["problem"] for d in pend if d["kind"] == "escalation"))
                 if not pend:
                     if e.meta["phase"] in ("accepted", "delivered"):
                         continue
@@ -249,13 +217,12 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Run the whole Cynqra POC against a real model.")
     ap.add_argument("--objective", default=SCENARIO["messy"], help="the founder sentence")
     ap.add_argument("--max-usd", type=float, default=3.00, help="hard spend cap; the run is killed above it")
-    ap.add_argument("--cap-units", type=int, default=4000, help="POC budget cap in work units (1 unit = 1000 tokens)")
     ap.add_argument("--keep", action="store_true", help="keep the run folder under poc/live_reports/")
     ap.add_argument("--allow-cmd", action="store_true", help="accept a command model (CYNQRA_S1_MODEL_CMD); not measured")
     args = ap.parse_args()
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     data = reports_dir() / f"run_{ts}"
-    report = run(args.objective, args.max_usd, args.cap_units, data, allow_cmd=args.allow_cmd)
+    report = run(args.objective, args.max_usd, data, allow_cmd=args.allow_cmd)
     path = write(report)
     if not args.keep:
         shutil.rmtree(data, ignore_errors=True)

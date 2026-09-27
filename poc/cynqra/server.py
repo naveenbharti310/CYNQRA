@@ -1,11 +1,11 @@
 """HTTP API and web UI for the POC. Standard library only. Binds to 127.0.0.1 only.
 
 GET  /api/state                     everything the UI shows
-POST /api/company                   {name, mode}
+POST /api/company                   {name, mode: demo|live, scenario}  (scenario: a prepared demo)
 POST /api/objective/draft           {messy}
 POST /api/objective/fields          {fields}
-POST /api/objective/guardrails      {budget_cap, budget_usd, time_value_per_hour, constraints, governance}
-POST /api/objective/confirm         submit the objective: requirements, then the proposed workforce
+POST /api/objective/guardrails      {budget_usd, time_value_per_hour, constraints, governance}
+POST /api/objective/submit          hand the objective over: requirements, then the proposed workforce
 POST /api/decisions/<id>            {action: approve|reject|request_evidence, note, edited}
 POST /api/run/step
 POST /api/run/auto                  {on, delay}
@@ -13,6 +13,9 @@ POST /api/killswitch                {on}
 POST /api/run/resume                retry after a model or network error
 GET  /api/replay/<task_id>
 GET  /api/graph?q=approves|owns|depends&subject=...
+GET  /api/models                    the model registry and running probes
+POST /api/models                    register a model {runtime, ref, ...}
+POST /api/models/<id>/fault|remove|probe
 GET  /api/export                    builds and downloads the export bundle
 POST /api/reset                     archives this run and starts a new one
 
@@ -44,7 +47,6 @@ from .probe import probe
 from .protocol import ProtocolError
 from .registry import Registry, RegistryError
 from .runtime import ModelRuntimeError
-from .workforce import Workforce
 
 UI = Path(__file__).resolve().parent.parent / "ui"
 mimetypes.add_type("font/woff2", ".woff2")
@@ -62,7 +64,6 @@ class App:
         self.window_polls = 0  # polls from the app's own page (?window=1), not from scripts or tests
         # The model registry sits beside the runs, not in one: what Cynqra learns about models outlives a run.
         self.registry = Registry(self.root / "registry", runtime=runtime)
-        self.workforce = Workforce(self.registry)
         self.probes: dict[str, dict] = {}
         self.engine = self._new_engine()
         self.auto = {"on": False, "delay": 0.9}
@@ -73,7 +74,7 @@ class App:
 
     def _new_engine(self) -> Engine:
         intel = self.factory() if self.factory else None
-        return Engine(self.root / "current", intelligence=intel, workforce=self.workforce)
+        return Engine(self.root / "current", intelligence=intel, registry=self.registry)
 
     def _loop(self) -> None:
         while not self._stop.is_set():
@@ -104,10 +105,7 @@ class App:
 
     def decide(self, decision_id: str, action: str, note: str, edited) -> dict:
         d = self.engine.decide(decision_id, action, note, edited)
-        if action == "approve":
-            gates = {"approve_workforce": "workforce approved", "approve_roadmap": "roadmap approved"}
-            self.last_step = ({"did": gates[d["kind"]]} if d["kind"] in gates
-                              else {"did": "approved", "decision": d["id"], "kind": d["kind"]})
+        self.last_step = {"did": d["outcome_label"], "decision": d["id"], "kind": d["kind"]}
         return d
 
     def window_poll(self) -> None:
@@ -256,14 +254,15 @@ def make_server(app: App, port: int = 8750) -> ThreadingHTTPServer:
                 return self._send(400, {"error": str(exc)})
             e = app.engine
             routes = {
-                "/api/company": lambda: e.create_company(body.get("name", ""), body.get("mode", "demo")),
+                "/api/company": lambda: e.create_company(body.get("name", ""), body.get("mode", "demo"),
+                                                         body.get("scenario")),
                 "/api/objective/draft": lambda: e.draft_objective(body.get("messy", "")),
                 "/api/objective/fields": lambda: e.edit_objective(body.get("fields") or {}),
-                "/api/objective/guardrails": lambda: e.set_guardrails(body.get("budget_cap"), body.get("risk_tolerance"),
-                                                                      body.get("budget_usd"), body.get("time_value_per_hour"),
+                "/api/objective/guardrails": lambda: e.set_guardrails(body.get("budget_usd"),
+                                                                      body.get("time_value_per_hour"),
                                                                       body.get("constraints"), body.get("governance")),
                 "/api/models": lambda: app.models_call(None, "register", body),
-                "/api/objective/confirm": e.confirm_objective,
+                "/api/objective/submit": e.submit_objective,
                 "/api/run/step": app.step,
                 "/api/killswitch": lambda: e.kill_switch(bool(body.get("on"))),
                 "/api/run/resume": e.resume,

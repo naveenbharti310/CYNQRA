@@ -5,7 +5,9 @@ import unittest
 
 from helpers import SCENARIO, TempDir, engine_to_running, no_model_env, restore_env, run_journey
 
+from cynqra import budget
 from cynqra.engine import Engine, EngineError
+from cynqra.gateway import GatewayError
 
 
 class Base(unittest.TestCase):
@@ -38,8 +40,15 @@ class GatewayTests(Base):  # A6
         self.assertEqual(r["status"], "denied")
 
     def test_unknown_worker_refused(self):
-        with self.assertRaises(EngineError):
+        with self.assertRaises(GatewayError):
             self.e.gateway("w_intern", "t_03", "write_file", target="a.py", content="")
+
+    def test_a_credential_is_never_written(self):  # Stage 8: output is sanitized
+        r = self.e.gateway("w_eng_a", "t_03", "write_file", target="cfg.py",
+                           content="KEY = 'sk-ant-api03-" + "x" * 40 + "'\n")
+        self.assertEqual(r["status"], "denied")
+        self.assertIn("credential", r["policy"]["reason"])
+        self.assertFalse(any(self.tmp.path.rglob("cfg.py")))
 
     def test_approval_must_match(self):
         r = self.e.gateway("w_cto", "t_05", "merge_to_main", target="main")
@@ -95,49 +104,76 @@ class DecisionTests(Base):  # A9
             self.e.decide(self.d["id"], "approve")
         with self.assertRaises(EngineError):
             self.e.decide("dec_nope", "approve")
-        d2 = self.e._decision("escalation", problem="p", recommendation="r", risk="LOW", confidence="low", cost="c",
+        d2 = self.e.decision("escalation", problem="p", recommendation="r", risk="LOW", confidence="low", cost="c",
                               evidence=[], change="c", source="w_pm")
         with self.assertRaises(EngineError):
             self.e.decide(d2["id"], "shrug")
 
     def test_escalation_budget_d29(self):
         for i in range(6):
-            self.e._decision("escalation", problem=f"p{i}", recommendation="r", risk="LOW", confidence="low",
+            self.e.decision("escalation", problem=f"p{i}", recommendation="r", risk="LOW", confidence="low",
                              cost="c", evidence=[], change="c", source="w_eng_a", task_id=f"x_{i}")
         digest = [d for d in self.e.pending_decisions() if d["in_digest"]]
         self.assertEqual(len(digest), 2, "only five worker escalations a day interrupt the founder")
-        sev1 = self.e._decision("escalation", problem="outage", recommendation="r", risk="HIGH", confidence="high",
+        sev1 = self.e.decision("escalation", problem="outage", recommendation="r", risk="HIGH", confidence="high",
                                 cost="c", evidence=[], change="c", source="w_cto", severity="SEV-1", task_id="x_sev1")
         self.assertFalse(sev1["in_digest"], "SEV-1 always interrupts")
 
 
-class BudgetTests(Base):  # A10
+class BudgetTests(Base):  # A10: one currency, US dollars, from the forecast to the hard stop
     def test_breaker_stops_work_and_the_founder_resumes_it(self):
-        self.e = engine_to_running(self.tmp.path, cap=30)
-        self.e.run_until_idle()
-        for _ in range(10):
+        # Verification and the workers' test runs use this machine's time; priced at $36/h, a few seconds of it
+        # reach a one-cent cap.
+        self.e = engine_to_running(self.tmp.path, budget_usd=0.01, governance={"compute_usd_per_hour": 36})
+        for _ in range(12):
+            self.e.run_until_idle()
             pend = self.e.pending_decisions()
-            if any(d["kind"] == "budget_breaker" for d in pend):
+            if any(d["kind"] == "budget_breaker" for d in pend) or not pend:
                 break
             self.e.decide(pend[0]["id"], "approve")
-            self.e.run_until_idle()
-        b = self.e.budget()
-        self.assertEqual(b["state"], "breaker")
-        self.assertEqual(sorted(b["warned"]), [50, 80, 95])
+        L = budget.ledger(self.e.store)
+        self.assertEqual(L["state"], "breaker")
+        self.assertGreaterEqual(L["spent_total"], 0.01)
+        self.assertEqual(sorted(L["warned"]), [50, 80, 95])
+        self.assertGreater(L["by_layer"]["verification"], 0)
         self.assertEqual(self.e.step(), {"did": "idle", "why": "budget breaker open"})
         types = [ev for ev in self.e.store.events() if ev["event_type"] == "budget.threshold_reached"]
-        self.assertEqual([ev["payload"]["threshold"] for ev in types], [50, 80, 95, 100])
+        self.assertEqual([ev["payload"]["threshold"] for ev in types][-1], 100)
         br = [d for d in self.e.pending_decisions() if d["kind"] == "budget_breaker"][0]
-        self.e.decide(br["id"], "approve", edited={"cap": 200})
-        self.assertEqual((self.e.budget()["cap"], self.e.budget()["state"]), (200, "ok"))
+        with self.assertRaises(EngineError):  # a cap under what is already spent opens the breaker again at once
+            self.e.decide(br["id"], "approve", edited={"budget_usd": 0.001})
+        self.assertEqual(self.e.store.get("decision", br["id"])["status"], "pending",
+                         "a refused cap leaves the breaker's decision open for another answer")
+        self.e.decide(br["id"], "approve")  # the recommendation: half as much again
+        self.assertEqual(budget.ledger(self.e.store)["state"], "ok")
+        self.assertGreater(self.e.snapshot()["budget"]["settings"]["budget_usd"], L["spent_total"])
+
+    def test_raising_the_cap_resumes_the_run(self):
+        self.e = engine_to_running(self.tmp.path, budget_usd=0.01, governance={"compute_usd_per_hour": 36})
+        for _ in range(12):
+            self.e.run_until_idle()
+            pend = self.e.pending_decisions()
+            br = [d for d in pend if d["kind"] == "budget_breaker"]
+            if br:
+                self.e.decide(br[0]["id"], "approve", edited={"budget_usd": 50})
+                break
+            self.e.decide(pend[0]["id"], "approve")
+        self.assertEqual(budget.ledger(self.e.store)["state"], "ok")
+        self.assertEqual(self.e.snapshot()["budget"]["settings"]["budget_usd"], 50.0)
         run_journey(self.e)
         self.assertEqual(self.e.meta["phase"], "accepted")
+        econ = self.e.final_report()["economics"]
+        self.assertGreater(econ["layers"]["verification"]["actual"], 0)
+        self.assertGreater(econ["layers"]["verification"]["forecast"], 0, "the forecast priced verification too")
 
-    def test_cap_below_floor_refused(self):
+    def test_bad_budget_refused(self):
         self.e = Engine(self.tmp.path)
         self.e.create_company("X")
+        for bad in (-1, "lots"):
+            with self.assertRaises(EngineError):
+                self.e.set_guardrails(budget_usd=bad)
         with self.assertRaises(EngineError):
-            self.e.set_guardrails(budget_cap=5)
+            self.e.set_guardrails(governance={"launch_rockets": True})
 
 
 class KillSwitchTests(Base):  # A14
@@ -190,7 +226,7 @@ class ObjectiveTests(Base):  # A2
         with self.assertRaises(EngineError):
             self.e.create_company("Again")
         with self.assertRaises(EngineError):
-            self.e.confirm_objective()
+            self.e.submit_objective()
 
     def test_change_during_a_run_pauses_d30(self):
         self.e.close()

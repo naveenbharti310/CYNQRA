@@ -1,0 +1,818 @@
+{
+  "id": "restaurant_forecast",
+  "title": "Restaurant covers forecast",
+  "about": "A nine-worker organization (CEO, CTO, PM, Data Scientist, Backend, Frontend, Designer, DevOps, QA) builds a 14-day covers forecast and prep plan for a restaurant kitchen: seven documents, one product rule for the founder, a forecast the platform backtests (the first method fails and is reworked), the store, the app, acceptance tests, a merge and a deploy by DevOps.",
+  "note": "Prepared script for demo mode. Every word a worker says in demo mode comes from this file, and the product shows that. Code in files/ is real and is tested, backtested and deployed for real.",
+  "settings": {
+    "self_checks": 0
+  },
+  "messy": "I run a busy restaurant and every week we either over-prep and bin food or run short on a Saturday. I want to know how many covers to expect each day for the next two weeks, and how much to prep, on a simple page the kitchen can check. It has to run on the office computer, and no customer personal data.",
+  "objective": {
+    "product": "Covers forecast and prep plan for the kitchen",
+    "target_customer": "The head chef and the floor manager of one restaurant",
+    "primary_outcome": "Expected covers for each of the next 14 days, with a prep plan for each day",
+    "business_outcome": "Less food thrown away and fewer short-staffed nights",
+    "success_criteria": "The kitchen sees a 14-day covers forecast that beats last week's numbers, with a prep plan for each day",
+    "constraints": "Runs on the office computer; no customer personal data",
+    "priorities": "Forecast accuracy first, then the prep plan page",
+    "inferred_fields": [
+      "business_outcome",
+      "priorities"
+    ],
+    "missing_fields": []
+  },
+  "requirements": {
+    "outcomes": [
+      "The kitchen preps for the covers it will actually serve",
+      "Busy days are staffed in advance"
+    ],
+    "requirements": [
+      {
+        "id": "r_01",
+        "area": "product",
+        "text": "The head chef and floor manager of one restaurant see expected covers for each of the next 14 days.",
+        "verification": "Brief and spec name the users and the horizon"
+      },
+      {
+        "id": "r_02",
+        "area": "functional",
+        "text": "The forecast is computed from the daily covers history the restaurant records, and new days can be added.",
+        "verification": "Store and API tests"
+      },
+      {
+        "id": "r_03",
+        "area": "ai_ml",
+        "text": "The forecast beats last week's numbers (the same weekday a week before) on held-out days.",
+        "verification": "The platform backtest"
+      },
+      {
+        "id": "r_04",
+        "area": "data",
+        "text": "The covers history is kept in one JSON file; bad rows are refused.",
+        "verification": "Store tests"
+      },
+      {
+        "id": "r_05",
+        "area": "design",
+        "text": "One page shows each day's forecast and prep number, weekends marked.",
+        "verification": "App test fetches the page"
+      },
+      {
+        "id": "r_06",
+        "area": "product",
+        "text": "The prep margin over the forecast is a business rule decided by the founder.",
+        "verification": "Founder decision on record"
+      },
+      {
+        "id": "r_07",
+        "area": "non_functional",
+        "text": "Standard library only, one process on the office computer, no customer personal data.",
+        "verification": "Architecture review and the delivery contract"
+      },
+      {
+        "id": "r_08",
+        "area": "qa",
+        "text": "Acceptance checks are automated and rerun on every change.",
+        "verification": "Acceptance tests in the suite"
+      },
+      {
+        "id": "r_09",
+        "area": "deployment",
+        "text": "Runs as one process with a health check and a rollback path.",
+        "verification": "Health check and smoke test on the live URL"
+      }
+    ],
+    "workstreams": [
+      {
+        "id": "ws_brief",
+        "name": "Brief and rules",
+        "requirement_ids": [
+          "r_01",
+          "r_06"
+        ],
+        "depends_on": []
+      },
+      {
+        "id": "ws_model",
+        "name": "Forecast",
+        "requirement_ids": [
+          "r_03"
+        ],
+        "depends_on": [
+          "ws_brief"
+        ]
+      },
+      {
+        "id": "ws_product",
+        "name": "Product",
+        "requirement_ids": [
+          "r_02",
+          "r_04",
+          "r_05",
+          "r_07"
+        ],
+        "depends_on": [
+          "ws_brief"
+        ]
+      },
+      {
+        "id": "ws_quality",
+        "name": "Quality",
+        "requirement_ids": [
+          "r_08"
+        ],
+        "depends_on": [
+          "ws_model",
+          "ws_product"
+        ]
+      },
+      {
+        "id": "ws_release",
+        "name": "Release",
+        "requirement_ids": [
+          "r_09"
+        ],
+        "depends_on": [
+          "ws_quality"
+        ]
+      }
+    ]
+  },
+  "workforce": {
+    "summary": "A forecasting product needs a data scientist to own the method and its evidence, engineers for the store and the page, a designer for the kitchen's screen, QA for acceptance, and DevOps to ship it; a CEO sets the business rule, a PM coordinates, a CTO owns architecture and the merge.",
+    "roles": [
+      {
+        "role": "CEO",
+        "quantity": 1,
+        "why": "Owns the business brief and the prep margin, a trade-off between waste and running short.",
+        "requirement_ids": [
+          "r_01",
+          "r_06"
+        ]
+      },
+      {
+        "role": "CTO",
+        "quantity": 1,
+        "why": "Owns the architecture and reviews and merges the release.",
+        "requirement_ids": [
+          "r_07"
+        ]
+      },
+      {
+        "role": "PM",
+        "quantity": 1,
+        "why": "Writes the spec and the acceptance checks, assigns the work and clears Blockers.",
+        "requirement_ids": [
+          "r_01",
+          "r_02",
+          "r_08"
+        ]
+      },
+      {
+        "role": "DataScientist",
+        "quantity": 1,
+        "why": "Owns the forecasting method, its evaluation and forecast.py.",
+        "requirement_ids": [
+          "r_03",
+          "r_04"
+        ]
+      },
+      {
+        "role": "BackendEngineer",
+        "quantity": 1,
+        "why": "Builds the covers history store.",
+        "requirement_ids": [
+          "r_02",
+          "r_04"
+        ]
+      },
+      {
+        "role": "FrontendEngineer",
+        "quantity": 1,
+        "why": "Builds the app and the kitchen's page.",
+        "requirement_ids": [
+          "r_05"
+        ]
+      },
+      {
+        "role": "Designer",
+        "quantity": 1,
+        "why": "Designs the one screen the kitchen reads every morning.",
+        "requirement_ids": [
+          "r_05"
+        ]
+      },
+      {
+        "role": "DevOps",
+        "quantity": 1,
+        "why": "Writes the runbook and proposes and runs the deploy on the office computer.",
+        "requirement_ids": [
+          "r_09"
+        ]
+      },
+      {
+        "role": "QA",
+        "quantity": 1,
+        "why": "Writes the test plan and the automated acceptance tests.",
+        "requirement_ids": [
+          "r_08"
+        ]
+      }
+    ]
+  },
+  "plan": {
+    "workstreams": [
+      {
+        "id": "ws_brief",
+        "name": "Brief and rules"
+      },
+      {
+        "id": "ws_model",
+        "name": "Forecast"
+      },
+      {
+        "id": "ws_product",
+        "name": "Product"
+      },
+      {
+        "id": "ws_quality",
+        "name": "Quality"
+      },
+      {
+        "id": "ws_release",
+        "name": "Release"
+      }
+    ],
+    "milestones": [
+      {
+        "id": "m_1",
+        "name": "Brief, spec and rules agreed",
+        "due_day": 1
+      },
+      {
+        "id": "m_2",
+        "name": "Forecast, store and page built",
+        "due_day": 4
+      },
+      {
+        "id": "m_3",
+        "name": "Accepted and live",
+        "due_day": 5
+      }
+    ],
+    "tasks": [
+      {
+        "id": "t_01",
+        "workstream_id": "ws_brief",
+        "kind": "document",
+        "owner_worker_id": "w_ceo",
+        "title": "Business brief",
+        "inputs": "",
+        "expected_output": "business_brief.md",
+        "dependencies": [],
+        "deadline_day": 1,
+        "milestone_id": "m_1",
+        "acceptance_criteria": [
+          "States the outcome, the priorities and the risks",
+          "Addresses the constraints and the success criteria"
+        ],
+        "requirement_ids": [
+          "r_01",
+          "r_06"
+        ],
+        "documents": [
+          "business_brief"
+        ]
+      },
+      {
+        "id": "t_02",
+        "workstream_id": "ws_brief",
+        "kind": "document",
+        "owner_worker_id": "w_pm",
+        "title": "Product spec and acceptance checks",
+        "inputs": "",
+        "expected_output": "product_spec.md and acceptance.md",
+        "dependencies": [
+          "t_01"
+        ],
+        "deadline_day": 1,
+        "milestone_id": "m_1",
+        "acceptance_criteria": [
+          "The spec names the users and what is out of scope",
+          "At least three numbered acceptance checks"
+        ],
+        "requirement_ids": [
+          "r_01",
+          "r_02",
+          "r_05",
+          "r_08"
+        ],
+        "documents": [
+          "product_spec",
+          "acceptance"
+        ]
+      },
+      {
+        "id": "t_03",
+        "workstream_id": "ws_brief",
+        "kind": "decision",
+        "owner_worker_id": "w_ceo",
+        "title": "Prep margin",
+        "inputs": "",
+        "expected_output": "A product rule for the prep margin, as an Approval",
+        "dependencies": [
+          "t_02"
+        ],
+        "deadline_day": 1,
+        "milestone_id": "m_1",
+        "acceptance_criteria": [
+          "The founder has decided the prep margin"
+        ],
+        "requirement_ids": [
+          "r_06"
+        ]
+      },
+      {
+        "id": "t_04",
+        "workstream_id": "ws_product",
+        "kind": "document",
+        "owner_worker_id": "w_design",
+        "title": "Kitchen screen design",
+        "inputs": "",
+        "expected_output": "design.md",
+        "dependencies": [
+          "t_02"
+        ],
+        "deadline_day": 2,
+        "milestone_id": "m_2",
+        "acceptance_criteria": [
+          "Screens and flows for the morning check"
+        ],
+        "requirement_ids": [
+          "r_05"
+        ],
+        "documents": [
+          "design"
+        ]
+      },
+      {
+        "id": "t_05",
+        "workstream_id": "ws_model",
+        "kind": "document",
+        "owner_worker_id": "w_ds",
+        "title": "Forecasting method",
+        "inputs": "",
+        "expected_output": "method.md",
+        "dependencies": [
+          "t_02"
+        ],
+        "deadline_day": 2,
+        "milestone_id": "m_2",
+        "acceptance_criteria": [
+          "The method and how it is evaluated against the baseline"
+        ],
+        "requirement_ids": [
+          "r_03"
+        ],
+        "documents": [
+          "method"
+        ]
+      },
+      {
+        "id": "t_06",
+        "workstream_id": "ws_product",
+        "kind": "document",
+        "owner_worker_id": "w_cto",
+        "title": "Architecture",
+        "inputs": "",
+        "expected_output": "architecture.md",
+        "dependencies": [
+          "t_02"
+        ],
+        "deadline_day": 2,
+        "milestone_id": "m_2",
+        "acceptance_criteria": [
+          "Components and the data file"
+        ],
+        "requirement_ids": [
+          "r_04",
+          "r_07"
+        ],
+        "documents": [
+          "architecture"
+        ]
+      },
+      {
+        "id": "t_07",
+        "workstream_id": "ws_model",
+        "kind": "forecast",
+        "owner_worker_id": "w_ds",
+        "title": "Forecast",
+        "inputs": "",
+        "expected_output": "forecast.py and test_forecast.py",
+        "dependencies": [
+          "t_03",
+          "t_05"
+        ],
+        "deadline_day": 3,
+        "milestone_id": "m_2",
+        "acceptance_criteria": [
+          "forecast(history, horizon) returns one number per day ahead",
+          "Beats the seasonal baseline in the platform backtest"
+        ],
+        "requirement_ids": [
+          "r_03"
+        ]
+      },
+      {
+        "id": "t_08",
+        "workstream_id": "ws_product",
+        "kind": "code",
+        "owner_worker_id": "w_be",
+        "title": "Covers history store",
+        "inputs": "",
+        "expected_output": "data.py and test_data.py",
+        "dependencies": [
+          "t_06"
+        ],
+        "deadline_day": 3,
+        "milestone_id": "m_2",
+        "acceptance_criteria": [
+          "Adds, replaces and lists days; refuses bad rows",
+          "Saves to the DATA_FILE JSON file"
+        ],
+        "requirement_ids": [
+          "r_02",
+          "r_04"
+        ]
+      },
+      {
+        "id": "t_09",
+        "workstream_id": "ws_product",
+        "kind": "code",
+        "owner_worker_id": "w_fe",
+        "title": "App and kitchen page",
+        "inputs": "",
+        "expected_output": "app.py, index.html, test_app.py, smoke.json",
+        "dependencies": [
+          "t_04",
+          "t_07",
+          "t_08"
+        ],
+        "deadline_day": 4,
+        "milestone_id": "m_2",
+        "acceptance_criteria": [
+          "GET /health and GET / answer 200",
+          "The page lists 14 days with prep numbers, weekends marked"
+        ],
+        "requirement_ids": [
+          "r_05",
+          "r_07"
+        ]
+      },
+      {
+        "id": "t_10",
+        "workstream_id": "ws_quality",
+        "kind": "document",
+        "owner_worker_id": "w_qa",
+        "title": "Test plan",
+        "inputs": "",
+        "expected_output": "test_plan.md",
+        "dependencies": [
+          "t_02"
+        ],
+        "deadline_day": 2,
+        "milestone_id": "m_3",
+        "acceptance_criteria": [
+          "Strategy and how each acceptance check is proven"
+        ],
+        "requirement_ids": [
+          "r_08"
+        ],
+        "documents": [
+          "test_plan"
+        ]
+      },
+      {
+        "id": "t_11",
+        "workstream_id": "ws_quality",
+        "kind": "code",
+        "owner_worker_id": "w_qa",
+        "title": "Acceptance tests",
+        "inputs": "",
+        "expected_output": "test_acceptance.py",
+        "dependencies": [
+          "t_09",
+          "t_10"
+        ],
+        "deadline_day": 4,
+        "milestone_id": "m_3",
+        "acceptance_criteria": [
+          "Acceptance checks 1 to 4 automated and passing"
+        ],
+        "requirement_ids": [
+          "r_08"
+        ]
+      },
+      {
+        "id": "t_12",
+        "workstream_id": "ws_release",
+        "kind": "document",
+        "owner_worker_id": "w_devops",
+        "title": "Runbook",
+        "inputs": "",
+        "expected_output": "runbook.md",
+        "dependencies": [
+          "t_06"
+        ],
+        "deadline_day": 4,
+        "milestone_id": "m_3",
+        "acceptance_criteria": [
+          "How to run it and how to roll back"
+        ],
+        "requirement_ids": [
+          "r_09"
+        ],
+        "documents": [
+          "runbook"
+        ]
+      },
+      {
+        "id": "t_13",
+        "workstream_id": "ws_release",
+        "kind": "review_merge",
+        "owner_worker_id": "w_cto",
+        "title": "Review and merge release 1",
+        "inputs": "",
+        "expected_output": "Release 1 on main",
+        "dependencies": [
+          "t_07",
+          "t_08",
+          "t_09",
+          "t_11"
+        ],
+        "deadline_day": 5,
+        "milestone_id": "m_3",
+        "acceptance_criteria": [
+          "The full suite passes on main"
+        ],
+        "requirement_ids": [
+          "r_07"
+        ]
+      },
+      {
+        "id": "t_14",
+        "workstream_id": "ws_release",
+        "kind": "deploy",
+        "owner_worker_id": "w_devops",
+        "title": "Deploy release 1",
+        "inputs": "",
+        "expected_output": "The forecast live on the office computer",
+        "dependencies": [
+          "t_12",
+          "t_13"
+        ],
+        "deadline_day": 5,
+        "milestone_id": "m_3",
+        "acceptance_criteria": [
+          "Health and smoke checks pass on the live URL"
+        ],
+        "requirement_ids": [
+          "r_09"
+        ]
+      }
+    ]
+  },
+  "assign": {
+    "t_04": {
+      "artifacts": [
+        "t_02/product_spec.md",
+        "t_02/acceptance.md"
+      ],
+      "context_ref": "objective v1",
+      "acceptance_check": "Design the one screen the kitchen reads each morning: 14 days, expected covers and prep, weekends marked. Write design.md with Screens and Flows and cite r_05."
+    },
+    "t_05": {
+      "artifacts": [
+        "t_02/product_spec.md",
+        "t_02/acceptance.md"
+      ],
+      "context_ref": "objective v1",
+      "acceptance_check": "Choose the forecasting method and say how it is evaluated against last week's numbers. Write method.md with Method and Evaluation and cite r_03."
+    },
+    "t_07": {
+      "artifacts": [
+        "t_05/method.md",
+        "t_02/acceptance.md"
+      ],
+      "context_ref": "objective v1, decided prep margin",
+      "acceptance_check": "Implement forecast(history, horizon) in forecast.py as method.md describes, with test_forecast.py. The platform backtests it against the same weekday a week before."
+    },
+    "t_08": {
+      "artifacts": [
+        "t_06/architecture.md"
+      ],
+      "context_ref": "objective v1",
+      "acceptance_check": "Implement CoversStore in data.py as architecture.md describes: one JSON file, one number a day, bad rows refused. Write test_data.py."
+    },
+    "t_09": {
+      "artifacts": [
+        "t_04/design.md",
+        "t_07/forecast.py",
+        "t_08/data.py",
+        "t_02/acceptance.md"
+      ],
+      "context_ref": "objective v1, decided prep margin",
+      "acceptance_check": "Build app.py and index.html on data.py and forecast.py: GET /api/forecast returns 14 days with covers and prep (the forecast plus the decided margin, rounded up). Write test_app.py and smoke.json. Do not change forecast.py or data.py."
+    },
+    "t_10": {
+      "artifacts": [
+        "t_02/acceptance.md"
+      ],
+      "context_ref": "objective v1",
+      "acceptance_check": "Write test_plan.md with Strategy and Acceptance: how each acceptance check is proven. Cite r_08."
+    },
+    "t_11": {
+      "artifacts": [
+        "t_10/test_plan.md",
+        "t_02/acceptance.md"
+      ],
+      "context_ref": "objective v1",
+      "acceptance_check": "Automate acceptance checks 1 to 4 in test_acceptance.py against the product's own functions."
+    },
+    "t_12": {
+      "artifacts": [
+        "t_06/architecture.md"
+      ],
+      "context_ref": "objective v1",
+      "acceptance_check": "Write runbook.md with Run and Rollback for the office computer. Cite r_09."
+    },
+    "t_14": {
+      "artifacts": [],
+      "context_ref": "objective v1",
+      "acceptance_check": "Release 1 is merged. Propose the deploy to the office computer; the preview, health and smoke checks run before the founder is asked."
+    }
+  },
+  "work": {
+    "t_01": [
+      {
+        "result": "done",
+        "summary": "Brief written from the objective.",
+        "files": {
+          "business_brief.md": "@files/t_01/business_brief.md"
+        },
+        "acceptance_check": "Outcome, priorities and risks; constraints and success criteria addressed."
+      }
+    ],
+    "t_02": [
+      {
+        "result": "done",
+        "summary": "Spec and six acceptance checks written.",
+        "files": {
+          "product_spec.md": "@files/t_02/product_spec.md",
+          "acceptance.md": "@files/t_02/acceptance.md"
+        },
+        "acceptance_check": "Every success criterion and constraint covered."
+      }
+    ],
+    "t_03": [
+      {
+        "result": "proposal",
+        "problem": "The prep plan needs a margin over the forecast, and nothing says how much. Too little and a busy night runs short; too much and food is thrown away.",
+        "recommendation": "Prep for the forecast plus 10 percent, rounded up to whole covers. Review it after four weeks of real numbers.",
+        "evidence_refs": [
+          "objective v1 business outcome",
+          "t_01/business_brief.md"
+        ],
+        "cost": "none, a product rule",
+        "confidence": "medium",
+        "what_would_change_this": "Four weeks of real covers showing the forecast error is well above or below 10 percent."
+      }
+    ],
+    "t_04": [
+      {
+        "result": "done",
+        "summary": "Screen and flows designed.",
+        "files": {
+          "design.md": "@files/t_04/design.md"
+        },
+        "acceptance_check": "Screens and flows; weekends marked."
+      }
+    ],
+    "t_05": [
+      {
+        "result": "done",
+        "summary": "Method and evaluation written.",
+        "files": {
+          "method.md": "@files/t_05/method.md"
+        },
+        "acceptance_check": "Method and its evaluation against the baseline."
+      }
+    ],
+    "t_06": [
+      {
+        "result": "done",
+        "summary": "Architecture written.",
+        "files": {
+          "architecture.md": "@files/t_06/architecture.md"
+        },
+        "acceptance_check": "Components and the data file."
+      }
+    ],
+    "t_07": [
+      {
+        "result": "done",
+        "summary": "Forecast written: the recent average for every day ahead, with tests.",
+        "files": {
+          "forecast.py": "@files/t_07/attempt1/forecast.py",
+          "test_forecast.py": "@files/t_07/test_forecast.py"
+        },
+        "acceptance_check": "python -m unittest test_forecast"
+      },
+      {
+        "result": "done",
+        "summary": "Reworked from the backtest: each day is the average of the same weekday over the last four weeks, as method.md says.",
+        "files": {
+          "forecast.py": "@files/t_07/attempt2/forecast.py",
+          "test_forecast.py": "@files/t_07/test_forecast.py"
+        },
+        "acceptance_check": "python -m unittest test_forecast"
+      }
+    ],
+    "t_08": [
+      {
+        "result": "done",
+        "summary": "Store and five tests written.",
+        "files": {
+          "data.py": "@files/t_08/data.py",
+          "test_data.py": "@files/t_08/test_data.py"
+        },
+        "acceptance_check": "python -m unittest test_data"
+      }
+    ],
+    "t_09": [
+      {
+        "result": "done",
+        "summary": "App, page and five tests written on the handed store and forecast.",
+        "files": {
+          "app.py": "@files/t_09/app.py",
+          "index.html": "@files/t_09/index.html",
+          "test_app.py": "@files/t_09/test_app.py",
+          "smoke.json": "@files/t_09/smoke.json"
+        },
+        "acceptance_check": "python -m unittest test_app"
+      }
+    ],
+    "t_10": [
+      {
+        "result": "done",
+        "summary": "Test plan written.",
+        "files": {
+          "test_plan.md": "@files/t_10/test_plan.md"
+        },
+        "acceptance_check": "Strategy and acceptance."
+      }
+    ],
+    "t_11": [
+      {
+        "result": "done",
+        "summary": "Acceptance checks 1 to 4 automated.",
+        "files": {
+          "test_acceptance.py": "@files/t_11/test_acceptance.py"
+        },
+        "acceptance_check": "python -m unittest test_acceptance"
+      }
+    ],
+    "t_12": [
+      {
+        "result": "done",
+        "summary": "Runbook written.",
+        "files": {
+          "runbook.md": "@files/t_12/runbook.md"
+        },
+        "acceptance_check": "Run and rollback."
+      }
+    ],
+    "t_13": [
+      {
+        "result": "proposal",
+        "problem": "Release 1 is verified on the integration branch and not yet on main.",
+        "recommendation": "Approve the merge to main. The full suite passes on the release candidate, and the forecast beat the baseline in the platform backtest.",
+        "cost": "no model cost: a test run and a merge on this machine",
+        "confidence": "high",
+        "what_would_change_this": "Any failing test, or a forecast change after the backtest."
+      }
+    ],
+    "t_14": [
+      {
+        "result": "proposal",
+        "problem": "Release 1 is merged and verified. It is not running, so the kitchen cannot use it yet.",
+        "recommendation": "Approve. Deploy release 1 on the office computer, then run the health check and the smoke test.",
+        "cost": "no model cost: a local release",
+        "confidence": "high",
+        "what_would_change_this": "A failing smoke test."
+      }
+    ]
+  },
+  "answer_blocker": {}
+}

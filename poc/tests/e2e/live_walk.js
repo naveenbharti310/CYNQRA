@@ -1,6 +1,6 @@
 // Live mode through the real UI in Chromium, with whatever model the server was started with.
 // Usage: node live_walk.js <base_url> <screenshot_dir> "<objective>" [--reject-plan-once]
-// Clicks what a founder clicks: Live mode, structure, confirm, (optionally ask for a different
+// Clicks what a founder clicks: Live mode, structure, submit, (optionally ask for a different
 // plan once), approve, then every decision card, "Try the same step again" after a model
 // error, and accept delivery. Then opens the live product. Waits are long because a real
 // model answers each step. Prints one JSON line: {"ok", "phase", "steps", "errors", "live_url"}.
@@ -31,12 +31,12 @@ function loadPlaywright() {
     await page.fill("#messy", objective);
     await page.click("#structure");
     steps.push("live mode chosen, objective sent");
-    await page.waitForSelector("#confirm", { timeout: LONG });
+    await page.waitForSelector("#submit", { timeout: LONG });
     const pill = await page.textContent(".wiz-top .pill");
     if (!/Live mode/.test(pill)) errors.push(`mode pill says ${pill}`);
     steps.push(`objective structured, ${await page.$$eval(".field.inf", (e) => e.length)} inferred fields`);
     await shot("objective");
-    await page.click("#confirm");
+    await page.click("#submit");
     await page.waitForSelector("#approve-workforce:not([disabled])", { timeout: LONG });
     steps.push(`workforce proposed: ${await page.$$eval(".wiz-right .tbl tbody tr", (r) => r.length)} roles`);
     await shot("workforce");

@@ -65,8 +65,9 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.call("/api/company", {"name": "Harbor Recruiting", "mode": "demo"})[0], 200)
         code, obj = self.call("/api/objective/draft", {"messy": SCENARIO["messy"]})
         self.assertEqual((code, obj["status"]), (200, "draft"))
-        self.assertEqual(self.call("/api/objective/guardrails", {"budget_cap": 120})[0], 200)
-        self.assertEqual(self.call("/api/objective/confirm", {})[0], 200)
+        self.assertEqual(self.call("/api/objective/guardrails", {"budget_usd": 2.5, "constraints": {"deadline": "a week"}})[0], 200)
+        self.assertEqual(self.call("/api/objective/guardrails", {"budget_usd": -1})[0], 400)
+        self.assertEqual(self.call("/api/objective/submit", {})[0], 200)
         for _ in range(30):
             st = self.call("/api/state")[1]
             if st["meta"]["phase"] == "accepted":
@@ -81,6 +82,9 @@ class ApiTests(unittest.TestCase):
         st = self.call("/api/state")[1]
         self.assertEqual(st["meta"]["phase"], "accepted")
         self.assertTrue(st["live_url"])
+        self.assertEqual(st["budget"]["settings"]["budget_usd"], 2.5)
+        self.assertEqual(st["objective"]["founder_constraints"], {"deadline": "a week"})
+        self.assertEqual({s["id"] for s in st["scenarios"]}, {"candidate_tracker", "restaurant_forecast"})
         code, rep = self.call("/api/replay/t_03")
         self.assertTrue(rep["complete"])
         code, g = self.call("/api/graph?q=approves&subject=deploy_production")
@@ -90,8 +94,9 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(req.read()[:2], b"PK")
 
     def test_bad_requests_are_400_not_crashes(self):
-        self.assertEqual(self.call("/api/objective/confirm", {})[0], 400)
+        self.assertEqual(self.call("/api/objective/submit", {})[0], 400)
         self.assertEqual(self.call("/api/company", {"name": "X", "mode": "psychic"})[0], 400)
+        self.assertEqual(self.call("/api/company", {"name": "X", "scenario": "../../etc"})[0], 400)
         self.assertEqual(self.call("/api/decisions/dec_nope", {"action": "approve"})[0], 400)
         self.assertEqual(self.call("/api/replay/t_99")[0], 400)
         req = urllib.request.Request(self.base + "/api/company", data=b"not json", method="POST")
@@ -102,7 +107,7 @@ class ApiTests(unittest.TestCase):
     def test_auto_run_and_reset_archive(self):
         self.call("/api/company", {"name": "A", "mode": "demo"})
         self.call("/api/objective/draft", {"messy": SCENARIO["messy"]})
-        self.call("/api/objective/confirm", {})
+        self.call("/api/objective/submit", {})
         pend = self.call("/api/state")[1]["decisions"]["pending"][0]
         self.call(f"/api/decisions/{pend['id']}", {"action": "approve"})
         self.assertTrue(self.call("/api/run/auto", {"on": True, "delay": 0})[1]["on"])

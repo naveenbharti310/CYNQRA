@@ -7,14 +7,15 @@ import shutil
 import unittest
 from pathlib import Path
 
-from helpers import POC, TempDir, engine_to_running, fake_model_cmd, no_model_env, restore_env, run_journey
+from helpers import M1_ROLES, POC, TempDir, engine_to_running, fake_model_cmd, no_model_env, restore_env, run_journey
 
-from cynqra import deploy, roles
-from cynqra.engine import Engine
-from cynqra.intelligence import IntelligenceError, ModelSource, validate_plan
-from cynqra.verification import run_unittests
+from cynqra import deploy, planner, roles
+from cynqra.engine import Engine, EngineError
+from cynqra.intelligence import IntelligenceError
+from cynqra.testrunner import run_unittests
 
 FILES = POC / "scenarios" / "candidate_tracker" / "files"
+RESTAURANT = POC / "scenarios" / "restaurant_forecast" / "files"
 
 
 class LiveModeTests(unittest.TestCase):  # A15
@@ -27,12 +28,20 @@ class LiveModeTests(unittest.TestCase):  # A15
         restore_env(self.saved)
 
     def test_live_needs_a_model(self):
-        with self.assertRaises(IntelligenceError):
-            ModelSource()
         e = Engine(self.tmp.path)
-        with self.assertRaises(IntelligenceError):
+        with self.assertRaises(EngineError):
             e.create_company("X", "live")
         self.assertEqual(e.meta["phase"], "new", "nothing is written when live mode cannot start")
+        e.close()
+
+    def test_a_live_run_reopens_after_its_model_is_gone(self):
+        os.environ["CYNQRA_S1_MODEL_CMD"] = fake_model_cmd()
+        e = engine_to_running(self.tmp.path, mode="live")
+        e.close()
+        del os.environ["CYNQRA_S1_MODEL_CMD"]
+        e = Engine(self.tmp.path)  # the app restarts without a model: the run still opens
+        self.assertEqual(e.meta["phase"], "running")
+        self.assertIn(e.step()["did"], ("assigned", "model_error_retry", "escalated"))
         e.close()
 
     def test_live_path_end_to_end_through_the_adapter(self):
@@ -43,20 +52,30 @@ class LiveModeTests(unittest.TestCase):  # A15
         calls = e.store.all("call")
         self.assertTrue(calls)
         self.assertTrue(all(c["label"] == "shell command" for c in calls))
+        self.assertTrue(all(c["model_id"] == "environment" for c in calls),
+                        "the environment's model was registered and staffed like any other")
+        self.assertEqual({w["model_id"] for w in e.workers()}, {"environment"})
         self.assertTrue(all(c["estimated"] for c in calls), "command token counts are marked estimated")
         self.assertEqual([t["status"] for t in e.tasks()], ["VERIFIED"] * 6)
         e.close()
 
-    def test_a_model_error_stops_the_run_and_invents_nothing(self):
+    def test_a_failing_model_with_no_alternative_goes_to_the_founder_and_invents_nothing(self):
         os.environ["CYNQRA_S1_MODEL_CMD"] = fake_model_cmd()
         e = engine_to_running(self.tmp.path, mode="live")
         os.environ["CYNQRA_S1_MODEL_CMD"] = fake_model_cmd(fail=True)
-        e._intel = None
-        r = e.run_until_idle()[-1]
-        self.assertEqual(r["did"], "error")
-        self.assertEqual(e.meta["phase"], "stopped_error")
-        self.assertIn("Nothing was invented", e.meta["notice"])
-        self.assertEqual(e.tasks()[0]["status"], "ASSIGNED")
+        steps = [r["did"] for r in e.run_until_idle()]
+        self.assertEqual(steps[:2], ["assigned", "model_error_retry"], "one failed call is retried")
+        self.assertIn("escalated", steps, "a model down after repeated failures is replaced, or the founder decides")
+        d = e.pending_decisions()[0]
+        self.assertIn("stopped answering", d["problem"])
+        self.assertIn("No other model in the registry is available", d["problem"])
+        t = e.task("t_01")
+        self.assertEqual((t["status"], t["outputs"]), ("FAILED", []))
+        self.assertFalse(any((e.paths["workspaces"] / "w_pm" / "t_01" / "out").iterdir()), "nothing was invented")
+        os.environ["CYNQRA_S1_MODEL_CMD"] = fake_model_cmd()  # the model is back
+        e.decide(d["id"], "approve")
+        run_journey(e)
+        self.assertEqual(e.meta["phase"], "accepted")
         e.close()
 
     def test_plan_rules_are_the_platforms(self):
@@ -64,14 +83,16 @@ class LiveModeTests(unittest.TestCase):  # A15
             {"id": "t_01", "workstream_id": "w", "kind": "code", "owner_worker_id": "w_eng_a", "title": "a", "risk_tier": "HIGH"},
             {"id": "t_02", "workstream_id": "w", "kind": "review_merge", "owner_worker_id": "w_cto", "title": "b", "dependencies": ["t_01"]},
             {"id": "t_03", "workstream_id": "w", "kind": "deploy", "owner_worker_id": "w_cto", "title": "c", "dependencies": ["t_02"]}]}
-        fixture = roles.instantiate(roles.FIXTURE_M1)
-        p = validate_plan(good, fixture)
+        fixture = roles.instantiate(M1_ROLES)
+        p = planner.enrich(planner.validate_plan(good, fixture), fixture)
         self.assertEqual(p["tasks"][0]["risk_tier"], "LOW", "the model cannot set its own risk tier")
+        self.assertEqual(p["tasks"][0]["tools"], ["write_file", "run_tests"], "tools come from the task type")
+        self.assertTrue(p["milestones"][0]["derived"], "milestones the model left out are derived and marked")
         bad_owner = {"tasks": [dict(good["tasks"][0], owner_worker_id="w_pm")] + good["tasks"][1:]}
         for bad in ({"tasks": []}, bad_owner, {"tasks": good["tasks"][:2]},
                     {"tasks": [dict(good["tasks"][0], dependencies=["t_09"])] + good["tasks"][1:]}):
             with self.assertRaises(IntelligenceError):
-                validate_plan(bad, fixture)
+                planner.validate_plan(bad, fixture)
 
     def test_adapter_copy_matches_the_spike_adapter(self):
         spike = POC.parent / "02_harness" / "spikes" / "model_adapter.py"
@@ -141,6 +162,14 @@ class DemoProductTests(unittest.TestCase):
         r = run_unittests(self.tmp.path)
         self.assertTrue(r["passed"], r["output"])
         self.assertEqual(r["ran"], 16)
+
+    def test_the_restaurant_product_passes_its_twenty(self):
+        for f in ("t_07/attempt2/forecast.py", "t_07/test_forecast.py", "t_08/data.py", "t_08/test_data.py",
+                  "t_09/app.py", "t_09/index.html", "t_09/test_app.py", "t_11/test_acceptance.py"):
+            shutil.copy(RESTAURANT / f, self.tmp.path)
+        r = run_unittests(self.tmp.path)
+        self.assertTrue(r["passed"], r["output"])
+        self.assertEqual(r["ran"], 20)
 
 
 if __name__ == "__main__":

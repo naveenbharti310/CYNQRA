@@ -16,7 +16,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-from .verification import NO_WINDOW, clean_env, python_exe, run_unittests
+from .testrunner import NO_WINDOW, clean_env, python_exe, run_unittests
 
 STAGES = ["BUILD", "TEST", "PACKAGE", "PREVIEW", "VERIFY", "APPROVAL", "DEPLOY", "HEALTH_CHECK", "SMOKE_TEST", "LIVE"]
 _PROCS: list[subprocess.Popen] = []

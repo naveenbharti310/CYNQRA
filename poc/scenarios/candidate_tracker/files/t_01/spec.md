@@ -26,3 +26,8 @@ company only.
 ## Open product rule
 
 What stuck means is a product rule and goes to the founder as a decision (task t_02).
+
+## Requirements covered
+
+r_01: internal to one company, for the founder and two recruiters. r_06: no public careers site and no
+applicant-facing route.

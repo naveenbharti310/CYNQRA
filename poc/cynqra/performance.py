@@ -16,6 +16,8 @@ Replacement Engine must look at the alternatives.
 """
 from __future__ import annotations
 
+from .roles import BUILD_TYPES
+
 THRESHOLDS = {
     "min_verifications": 2,     # judge quality only after this many verifications on this worker and model
     "acceptance_rate": 0.5,     # below this, alternatives are evaluated
@@ -36,7 +38,7 @@ def scorecard(store, worker_id: str, model_id: str | None, reg=None) -> dict:
     mine = lambda r: r.get("worker_id") == worker_id and (model_id is None or r.get("model_id") == model_id)  # noqa: E731
     ver = [v for v in store.all("verification") if mine(v) and v.get("reviewer_type") == "service"]
     passed = [v for v in ver if v["verdict"] == "VERIFIED"]
-    code = [v for v in ver if (tasks.get(v["task_id"]) or {}).get("kind") == "code"]
+    code = [v for v in ver if (tasks.get(v["task_id"]) or {}).get("kind") in BUILD_TYPES]
     calls = [c for c in store.all("call") if c.get("worker") == worker_id
              and (model_id is None or c.get("model_id") == model_id)]
     errors = [c for c in store.all("call_error") if mine(c)]

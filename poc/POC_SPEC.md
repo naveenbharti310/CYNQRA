@@ -4,6 +4,13 @@ Written 26 September 2026 by the acting CEO, CTO, CPO and COO. Owner: CTO.
 Authority: D-36, the founder's instruction of 26 September to build an end to end POC
 with screen mockups, tested code and a product demo video.
 
+Since 27 September the founder's product definition (Cynqra Product Flows and Architecture
+v1) governs the build and supersedes this spec where they differ: the organization is
+synthesized from the objective behind a workforce gate (A3's fixed template is now a test
+fixture), the roadmap is a second gate, and the budget is in US dollars.
+../CYNQRA_PRODUCT_ALIGNMENT.md records every change. The acceptance table below maps each
+criterion to the tests that hold it today.
+
 ## What the POC is, and what it is not
 
 It is the Book 1 demo sentence made runnable on one machine: "I typed an objective,
@@ -104,21 +111,21 @@ names are the real ones; run `python -m unittest -v` inside poc/tests to see eac
 
 | ID | Acceptance | Where it is tested |
 | --- | --- | --- |
-| A1 | A company and objective are created and confirmed, with version and confirmation recorded [1, 2] | test_journey: test_objective_confirmed_and_versioned |
+| A1 | A company and objective are created and submitted, with version and submission recorded [1, 2] | test_journey: test_objective_submitted_and_decomposed |
 | A2 | Inferred fields are flagged and editable before confirmation (D-31); a change during a run pauses it (D-30) | test_controls: ObjectiveTests |
-| A3 | Exactly the fixed template is instantiated, no fifth worker [3] | test_journey: test_exactly_the_fixed_template |
+| A3 | The organization is the approved proposal, from the catalog, with nobody hired before the founder approves [3] | test_journey: test_workforce_synthesized_then_approved; test_product_flow: GateTests |
 | A4 | Every task, worker and decision answers who owns, depends, approves [4] | test_journey: test_graph_answers_owner_dependency_approver; test_core: PolicyTests.test_graph_query |
 | A5 | Every task carries the twelve fields and a risk tier set by the platform, not the model [5] | test_journey: test_every_task_has_the_twelve_fields; test_live_and_deploy: test_plan_rules_are_the_platforms |
 | A6 | Workers write only inside their workspace, only through the Gateway, only allowlisted tools [6] | test_controls: GatewayTests; test_failure_paths: WriteRefusedTests |
 | A7 | Handoff, Blocker, Escalation and Approval are stamped protocol objects; one dependency resolves without the founder [7] | test_core: ProtocolTests; test_journey: test_blocker_resolved_without_the_founder; test_failure_paths: InvalidProtocolTests |
 | A8 | Completed and verified are separate states; a defect is caught before verified; prior tests rerun; three failures escalate [8] | test_journey: test_defect_caught_before_verified, test_completed_is_separate_from_verified; test_failure_paths: VerificationFailsThreeTimesTests |
 | A9 | The inbox shows problem, evidence, recommendation, cost, risk, confidence, what would change it; approve, edit, reject, request evidence [9] | test_controls: DecisionTests |
-| A10 | Budget warnings at 50, 80, 95; hard stop and founder alert at the cap [10] | test_controls: BudgetTests; test_failure_paths: test_budget_breaker_refused_stops_the_run |
+| A10 | Budget warnings at 50, 80, 95; hard stop and founder alert at the cap, in US dollars [10] | test_controls: BudgetTests; test_product_flow: BudgetEngineTests; test_failure_paths: test_budget_breaker_refused_stops_the_run |
 | A11 | Events are append only; every task replays actor, authority, policy decision, context, intelligence, tool, result, verification [11] | test_core: EventStoreTests; test_journey: test_replay_is_complete_for_every_task |
 | A12 | Deploy record, health and smoke check, live URL, rollback, export manifest [12] | test_journey: test_deployment_record_and_export; test_live_and_deploy: DeployServiceTests; test_failure_paths: LiveSmokeFailsTests |
 | A13 | MEDIUM goes to the founder (D-17), production deploy goes to the founder (D-21), Prohibited is denied (D-27) | test_core: PolicyTests; test_journey: test_prohibited_action_denied_without_the_founder, test_founder_only_sees_what_needs_them |
 | A14 | The kill switch freezes all workers mid run | test_controls: KillSwitchTests |
-| A15 | Live mode reaches the model only through the adapter, over the real provider wire formats, and stops on a model error | test_live_and_deploy: LiveModeTests; test_adapter |
+| A15 | Live mode reaches the model only through the adapter, over the real provider wire formats; a model error invents nothing and goes to the Replacement Engine, then the founder | test_live_and_deploy: LiveModeTests; test_adapter |
 | A16 | The whole journey runs through the web UI in a real browser | test_server: BrowserEndToEnd (runs when Node and Playwright are present) |
 
 Not automated, stated plainly: a run against a real Claude model (no key in this

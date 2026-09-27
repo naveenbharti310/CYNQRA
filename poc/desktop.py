@@ -268,11 +268,11 @@ def http(url: str, body=None, timeout: float = 30.0):
 def scripted_journey(d: Path) -> str:
     """The engine's machinery on this machine: workers' tests run in a subprocess, the product is deployed as
     a process and health-checked. The workers' words are the demo script here; no model is involved."""
-    from cynqra.engine import Engine
+    from cynqra.engine import DEFAULT_SCENARIO, Engine, scenarios
     e = Engine(d)
     try:
-        e.create_company("Self test", "demo")
-        e.draft_objective(e.demo_messy)
+        e.create_company("Self test", "demo", DEFAULT_SCENARIO)
+        e.draft_objective(next(x["messy"] for x in scenarios() if x["id"] == DEFAULT_SCENARIO))
         e.submit_objective()
         for gate in ("approve_workforce", "approve_roadmap"):  # the founder's two approvals of the canonical flow
             d = [x for x in e.pending_decisions() if x["kind"] == gate][0]
@@ -404,8 +404,6 @@ def window_test(args) -> int:
 
 
 # ------------------------------------------------------------------------- real model checks --
-# Cynqra's own kinds of work, small enough for a quick check of a model on this machine.
-from cynqra.probe import CHECK_HANDOFF, CHECK_OBJECTIVE, CHECK_TASK  # noqa: E402,F401 - shared with the registry's probe
 
 
 def prepare_model(desk: Desktop, model_id: str, gpu: str | None) -> None:
@@ -437,96 +435,43 @@ def prepare_model(desk: Desktop, model_id: str, gpu: str | None) -> None:
 
 
 def check_model(args) -> int:
-    """A real model on this machine does Cynqra's two kinds of work: a structured answer, and code that
-    passes its own tests (fixing it from the failures for up to three rounds)."""
-    from cynqra.engine import OBJECTIVE_FIELDS
-    from cynqra.intelligence import IntelligenceError, ModelSource
-    from cynqra.verification import failure_summary, run_unittests
+    """A real model on this machine does Cynqra's calibration work (probe.py): a structured answer, and code that
+    passes its own tests, fixed from the failures for up to three rounds. The model is registered in the app's
+    registry first, so the check is also its first measured record there."""
+    from cynqra.probe import probe
     desk = Desktop(Path(args.data) if args.data else data_dir())
-    ok = False
     result = {"model": args.check_model, "platform": platform.platform(), "ram_gb": desk.runtime.ram_gb, "passed": False}
     t0 = time.time()
     try:
         prepare_model(desk, args.check_model, args.gpu)
         result["accel"] = desk.runtime.status["accel"]
         result["ready_s"] = round(time.time() - t0)
-        src = ModelSource()
-        data, u = src.structure_objective(CHECK_OBJECTIVE)
-        empty = [k for k in OBJECTIVE_FIELDS if not str(data.get(k) or "").strip()]
-        # The objective contract lets a model leave a field it finds no support for, for the founder to fill on
-        # the confirm screen; one such field is acceptable, more means the model did not do the job.
-        complete = len(empty) <= 1
-        result.update(objective_fields_filled=len(OBJECTIVE_FIELDS) - len(empty), objective_left_for_founder=empty)
-        print(f"  objective: {len(OBJECTIVE_FIELDS) - len(empty)} of {len(OBJECTIVE_FIELDS)} fields"
-              + (f", left for the founder: {', '.join(empty)}" if empty else "")
-              + f"; {u['tokens_in']} tokens in, {u['tokens_out']} out, {u['latency_s']:.0f} s{speed(u)}", flush=True)
-        calls = [u]
-        objective = {k: str(data.get(k) or "") for k in OBJECTIVE_FIELDS}
-        work = Path(tempfile.mkdtemp(prefix="cynqra_check_"))
-        feedback, previous, passed = "", {}, False
-        for rnd in range(3):
-            try:
-                out, u = src.work(CHECK_TASK, worker="w_eng_a", objective=objective, rules=[], handoff=CHECK_HANDOFF,
-                                  inbox={}, feedback=feedback, previous=previous, repo_files=[])
-            except IntelligenceError as exc:
-                print(f"  code round {rnd + 1}: model error {str(exc)[:300]}")
-                break
-            files = {k: v for k, v in (out.get("files") or {}).items() if isinstance(v, str) and k.endswith(".py")
-                     and "/" not in k}
-            for name in out.get("delete") or []:  # as in the engine: a reply carries only the files it changes
-                if isinstance(name, str) and "/" not in name and (work / name).is_file():
-                    (work / name).unlink()
-            for name, text in files.items():
-                (work / name).write_text(text, encoding="utf-8")
-            files = {p.name: p.read_text(encoding="utf-8") for p in sorted(work.glob("*.py"))}
-            rep = run_unittests(work)
-            calls.append(u)
-            if not files:  # show exactly what the model wrote, so a format problem is visible, not guessed at
-                raw = getattr(src, "last_text", "")
-                result.setdefault("unreadable_replies", []).append(raw[:6000])
-                print("  the reply had no readable files; it began:\n" + "\n".join("    | " + ln for ln in raw[:1500].splitlines()))
-            cut = out.get("cut_off")
-            print(f"  code round {rnd + 1}: {sorted(files)}" + (f" (reply cut off while writing {cut})" if cut else "")
-                  + f"; {rep['ran']} tests, {len(rep['failed'])} failed; "
-                  f"{u['tokens_in']} tokens in, {u['tokens_out']} out, {u['latency_s']:.0f} s{speed(u)}", flush=True)
-            if rep["passed"] and not cut:
-                passed = True
-                break
-            previous = files
-            if cut:
-                feedback = (f"Your reply was longer than the output limit and was cut off while writing {cut}. Send "
-                            "only the files still missing or unfinished, each one complete and short.")
-            elif not files:
-                feedback = "Your reply contained no files. Every file must be in the === FILE: name === layout."
-            else:
-                feedback = failure_summary(rep) + "\n" + rep["output"][-1500:]
-        shutil.rmtree(work, ignore_errors=True)
-        ok = complete and passed
-        secs = sum(c["latency_s"] for c in calls)
-        result.update(passed=ok, objective_complete=complete, code_passed=passed, rounds=len(calls) - 1, seconds=round(secs),
-                      tokens_in=sum(c["tokens_in"] for c in calls), tokens_out=sum(c["tokens_out"] for c in calls),
-                      read_tps=max((c.get("read_tps") or 0) for c in calls), write_tps=max((c.get("write_tps") or 0) for c in calls))
-    except (ModelRuntimeError, IntelligenceError) as exc:
+        m = desk.app.registry.register({"runtime": "llama", "ref": args.check_model})
+        r = probe(desk.app.registry, m["id"], log=lambda line: print(line, flush=True))
+        usages = [r["objective"]["usage"]] + [x["usage"] for x in r["code_rounds"]] if r.get("objective") else []
+        result.update(passed=r["passed"], objective_complete=r.get("objective_passed", False),
+                      code_passed=r.get("code_passed", False), objective=r.get("objective"), code_rounds=r["code_rounds"],
+                      rounds=len(r["code_rounds"]), seconds=round(sum(u.get("latency_s") or 0 for u in usages)),
+                      tokens_in=sum(u.get("tokens_in") or 0 for u in usages),
+                      tokens_out=sum(u.get("tokens_out") or 0 for u in usages),
+                      read_tps=max([u.get("read_tps") or 0 for u in usages] or [0]),
+                      write_tps=max([u.get("write_tps") or 0 for u in usages] or [0]))
+        if r.get("error"):
+            result["error"] = r["error"][:500]
+    except ModelRuntimeError as exc:
         print(f"  error: {exc}")
         result["error"] = str(exc)[:500]
     finally:
         desk.close()
-    result["outcome"] = "pass" if ok else "error" if result.get("error") else "quality"
+    result["outcome"] = "pass" if result["passed"] else "error" if result.get("error") else "quality"
     out = Path(os.environ["CYNQRA_REPORTS_DIR"]) / f"check_{args.check_model}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, indent=1), encoding="utf-8")
-    print(("PASS" if ok else "FAIL") + f": {BY_ID[args.check_model]['name']} on {platform.platform()}. "
+    print(("PASS" if result["passed"] else "FAIL") + f": {BY_ID[args.check_model]['name']} on {platform.platform()}. "
           f"Reading {result.get('read_tps', 0)} tokens/s, writing {result.get('write_tps', 0)} tokens/s. {out}")
     # 0 passed; 2 the model answered every call but its work fell short (a model's quality, not the app's);
     # 1 something broke on the way (download, llama-server, a call that errored)
     return {"pass": 0, "quality": 2}.get(result["outcome"], 1)
-
-
-def speed(u: dict) -> str:
-    if not u.get("write_tps"):
-        return ""
-    return (f"; reads {u['read_tps']} tokens/s, writes {u['write_tps']} tokens/s"
-            + (f", {u['cached']} prompt tokens reused from the server's cache" if u.get("cached") else ""))
 
 
 def e2e(args) -> int:
@@ -561,7 +506,7 @@ def e2e(args) -> int:
         if missing:
             api("/api/objective/fields", {"fields": {k: "none stated" for k in missing}})
         print(f"  objective: {obj['structured'].get('product')!r}; inferred {obj['inferred_fields']}", flush=True)
-        api("/api/objective/confirm", {})
+        api("/api/objective/submit", {})
         report["decisions"].append({"kind": "submit_objective", "action": "submit"})
         deadline = t0 + args.max_minutes * 60
         while time.time() < deadline:
@@ -590,12 +535,11 @@ def e2e(args) -> int:
             pend = [x for x in st["decisions"]["pending"] if not x.get("in_digest")] or st["decisions"]["pending"]
             if pend:
                 dd = pend[0]
-                edited = {"cap": st["budget"]["cap"] + 300} if dd["kind"] == "budget_breaker" else None
                 report["decisions"].append({"id": dd["id"], "kind": dd["kind"], "risk": dd.get("risk"),
                                             "task_id": dd.get("task_id"), "problem": dd.get("problem", "")[:300],
                                             "action": "approve"})
                 print(f"  {time.time() - t0:7.0f}s  approving {dd['kind']} {dd.get('task_id') or ''}", flush=True)
-                api(f"/api/decisions/{dd['id']}", {"action": "approve", "note": "", "edited": edited})
+                api(f"/api/decisions/{dd['id']}", {"action": "approve", "note": ""})
                 if dd["kind"] == "approve_roadmap":
                     api("/api/run/auto", {"on": True, "delay": 0})
                 continue

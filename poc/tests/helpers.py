@@ -12,12 +12,16 @@ POC = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(POC))
 
 from cynqra.engine import Engine  # noqa: E402
+from cynqra.intelligence import ModelSource  # noqa: E402
 
 SCENARIO = json.loads((POC / "scenarios" / "candidate_tracker" / "scenario.json").read_text(encoding="utf-8"))
+RESTAURANT = json.loads((POC / "scenarios" / "restaurant_forecast" / "scenario.json").read_text(encoding="utf-8"))
+# The M1 build's fixed organization: one instantiation of the role catalog, used where a test needs a small one.
+M1_ROLES = [{"role": "CTO", "quantity": 1}, {"role": "PM", "quantity": 1}, {"role": "Engineer", "quantity": 2}]
 FAKE_MODEL = POC / "tests" / "fake_model.py"
 MODEL_ENV = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CYNQRA_S1_MODEL_CMD", "CYNQRA_MODEL", "CYNQRA_EFFORT",
              "CYNQRA_OLLAMA_MODEL", "OLLAMA_HOST", "CYNQRA_LOCAL_BASE_URL", "CYNQRA_NUM_CTX", "CYNQRA_THINK",
-             "CYNQRA_TEMPERATURE", "CYNQRA_TIMEOUT", "CYNQRA_SELF_CHECKS", "CYNQRA_REPORTS_DIR", "CYNQRA_DATA_DIR",
+             "CYNQRA_TEMPERATURE", "CYNQRA_TIMEOUT", "CYNQRA_REPORTS_DIR", "CYNQRA_DATA_DIR",
              "CYNQRA_NUM_PREDICT", "CYNQRA_SEED", "CYNQRA_KEEP_ALIVE", "CYNQRA_LLAMA_SERVER", "CYNQRA_HF_BASE",
              "HF_TOKEN", "CYNQRA_HF_MODEL", "HF_ROUTER_URL", "CYNQRA_PRICE_PER_M")
 
@@ -41,6 +45,13 @@ def restore_env(saved: dict):
     os.environ.update(saved)
 
 
+def env_source() -> ModelSource:
+    """A model source bound to the model the environment names, as a live run's environment model is."""
+    src = ModelSource()
+    src.bind(lambda worker: ("environment", {}))
+    return src
+
+
 def fake_model_cmd(fail: bool = False) -> str:
     return f'"{sys.executable}" "{FAKE_MODEL}"' + (" --fail" if fail else "")
 
@@ -57,11 +68,14 @@ def engine_to_gates(e: Engine) -> Engine:
     return e
 
 
-def engine_to_running(folder: Path, cap: int = 120, mode: str = "demo") -> Engine:
-    e = Engine(folder)
-    e.create_company("Harbor Recruiting", mode)
-    e.draft_objective(SCENARIO["messy"])
-    e.set_guardrails(budget_cap=cap)
+def engine_to_running(folder: Path, mode: str = "demo", scenario: str = "candidate_tracker", budget_usd=None,
+                      governance: dict | None = None, **engine_kw) -> Engine:
+    e = Engine(folder, **engine_kw)
+    e.create_company("Harbor Recruiting", mode, scenario)
+    messy = RESTAURANT["messy"] if scenario == "restaurant_forecast" else SCENARIO["messy"]
+    e.draft_objective(messy)
+    if budget_usd is not None or governance:
+        e.set_guardrails(budget_usd=budget_usd, governance=governance)
     e.submit_objective()
     return engine_to_gates(e)
 

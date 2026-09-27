@@ -24,21 +24,22 @@ function loadPlaywright() {
   try {
     await page.goto(base + "/");
     await page.waitForSelector("#structure");
+    const scenarios = await page.$$eval("#scenario option", (o) => o.map((x) => x.value));
+    if (scenarios.join() !== "candidate_tracker,restaurant_forecast") errors.push(`demo scenarios offered: ${scenarios}`);
+    steps.push("two demo scenarios offered");
     await page.click("#structure");
-    await page.waitForSelector("#confirm");
+    await page.waitForSelector("#submit");
     steps.push("objective structured");
     const inferred = await page.$$eval(".field.inf", (els) => els.length);
     if (inferred !== 2) errors.push(`expected 2 inferred fields, saw ${inferred}`);
     await shot("01_objective");
     await page.fill("#f_priorities", "Seeing who is stuck first, then adding candidates");
-    await page.fill("#cap", "150");
     await page.fill("#usd", "7.5");
     await page.fill("#c_deadline", "two weeks");
-    await page.click("#confirm");
+    await page.click("#submit");
     await page.waitForSelector("#approve-workforce");
     const st = await page.evaluate(async () => (await (await fetch("/api/state")).json()));
-    if (st.budget.cap !== 150) errors.push(`budget cap edit was lost: ${st.budget.cap}`);
-    if (st.workforce.settings.budget_usd !== 7.5) errors.push(`dollar budget was lost: ${st.workforce.settings.budget_usd}`);
+    if (st.budget.settings.budget_usd !== 7.5) errors.push(`dollar budget was lost: ${st.budget.settings.budget_usd}`);
     if ((st.objective.founder_constraints || {}).deadline !== "two weeks") errors.push("constraint was lost");
     if (st.objective.structured.priorities !== "Seeing who is stuck first, then adding candidates") errors.push("objective edit was lost");
     if (st.meta.mode !== "demo") errors.push(`mode is ${st.meta.mode}, expected demo`);
@@ -65,7 +66,7 @@ function loadPlaywright() {
       await page.waitForTimeout(600);
     }
     let replay = "";
-    for (const v of ["company", "organization", "workforce", "work", "evolution", "audit", "delivery"]) {
+    for (const v of ["company", "organization", "workforce", "work", "performance", "audit", "delivery"]) {
       await page.click(`button[data-view="${v}"]`);
       await page.waitForTimeout(500);
       if (v === "audit") {

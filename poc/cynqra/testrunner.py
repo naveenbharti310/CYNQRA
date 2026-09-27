@@ -1,7 +1,5 @@
-"""Verification Service helpers: run tests, lint documents against the objective.
-
-Book 0 section 13 tiers: LOW gets automated checks, MEDIUM gets independent review, HIGH
-gets the founder. Verification is a platform service, not a fifth worker.
+"""Running a repository's unittest tests in a clean process, as the workers' own checks, the Verification
+Service, the merge and the release pipeline all do. The verdicts are the Verification Service's (verifier.py).
 """
 from __future__ import annotations
 
@@ -16,7 +14,6 @@ from pathlib import Path
 START = re.compile(r"^(\w+) \((\w+\.[\w.]+)\)")
 RESULT = re.compile(r"(?:^|\.\.\. )(ok|FAIL|ERROR|skipped.*|expected failure|unexpected success)$")
 SUMMARY = re.compile(r"^(FAIL|ERROR): (\w+) \((\w+[\w.]*)\)")  # the failure details printed after the run
-VERDICTS = ("VERIFIED", "REJECTED", "REQUIRES_REWORK", "REQUIRES_HUMAN", "INCONCLUSIVE")
 NO_WINDOW = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW: tests and apps open no console on Windows
 
 
@@ -108,38 +105,3 @@ def failure_summary(report: dict) -> str:
     if not report["ran"]:
         return "unittest found no tests: write unittest.TestCase classes with test_ methods in test_*.py files."
     return "The tests failed without naming a failing test; the output is below."
-
-
-_STOP = {"a", "an", "the", "and", "or", "of", "to", "no", "not", "for", "in", "on", "with", "can", "set",
-         "one", "is", "are", "be", "who", "all", "only", "ones", "their", "them", "it", "its", "that"}
-
-
-def _terms(text: str) -> set[str]:
-    words = re.findall(r"[a-z]+", (text or "").lower())
-    return {w for w in words if len(w) > 3 and w not in _STOP}
-
-
-def lint_documents(files: dict[str, str], objective: dict) -> dict:
-    """Coverage lint derived from the confirmed objective, for any objective.
-
-    1. Every constraint must be echoed: its key words appear in the documents, so the
-       spec states what is out of scope instead of silently dropping it.
-    2. The success criteria must be covered: at least two thirds of its key words appear.
-    3. Documents must not be empty.
-    This is a floor, not a review. MEDIUM work also gets an independent review.
-    """
-    text = "\n".join(files.values()).lower()
-    findings = []
-    if not text.strip():
-        findings.append({"rule": "not_empty", "why": "no document content"})
-    for part in re.split(r"[;,]|\band\b", objective.get("constraints", "") or ""):
-        terms = _terms(part)
-        if terms and not any(t in text for t in terms):
-            findings.append({"rule": "constraint_echoed", "why": f"constraint not addressed: {part.strip()}"})
-    crit = _terms(objective.get("success_criteria", ""))
-    if crit:
-        covered = {t for t in crit if t in text}
-        if len(covered) < max(1, round(len(crit) * 2 / 3)):
-            findings.append({"rule": "success_covered",
-                             "why": f"success criteria not covered: {sorted(crit - covered)}"})
-    return {"passed": not findings, "findings": findings}

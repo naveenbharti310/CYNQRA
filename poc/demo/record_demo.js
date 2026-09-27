@@ -108,7 +108,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sleep(500);
 
   // ---------- 01 objective ----------
-  const messy = (await state()).demo_messy;
+  const messy = (await state()).scenarios.find((x) => x.id === "candidate_tracker").messy;
   await page.fill("#messy", "");
   await chapter("01", "Objective", "One sentence in. Seven fields out.");
   await click("#messy");
@@ -116,7 +116,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.locator("#messy").pressSequentially(messy, { delay: 24 });
   await sleep(900);
   await click("#structure");
-  await page.waitForSelector("#confirm");
+  await page.waitForSelector("#submit");
   await sleep(600);
   await spot([".field.inf >> nth=0", ".field.inf >> nth=1"], "amber");
   await say("Cynqra structures it into seven fields and marks the two it guessed, so nothing is silently assumed.", "Objective", 5200);
@@ -125,38 +125,51 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await moveTo(".field.inf >> nth=1");
   await say("Every field stays editable before anything starts.", "", 3000);
   await clear();
-  await moveTo("#cap");
-  await spot("#cap");
-  await say("Guardrails: a budget cap in work units. Autonomy stays at low risk only.", "Guardrails", 3800);
+  await moveTo("#usd");
+  await spot("#usd");
+  await say("The budget, in US dollars, is a hard cap. Constraints are optional. The founder names the outcome, not the team.", "Budget", 4600);
   await clear();
-  await click("#confirm");
-  await D("caption", "Confirming the objective is founder decision 1.", "Decision 1");
-  await page.waitForSelector("#approve-plan");
-  await sleep(2600);
+  await click("#submit");
+  await D("caption", "Submitting the objective is founder decision 1.", "Decision 1");
+  await page.waitForSelector("#approve-workforce");
+  await sleep(2400);
 
-  // ---------- 02 organization and plan ----------
-  await chapter("02", "Organization and plan", "A fixed team, a concrete plan, nothing starts until you approve.");
+  // ---------- 02 workforce, roadmap and budget ----------
+  await chapter("02", "Workforce, roadmap and budget", "Cynqra builds the organization the objective needs. You approve it.");
   await spot(".wiz-left .card");
-  await say("A fixed organization: CTO, PM and two engineers. Verification is a platform service, not a worker.", "Organization", 5200);
+  await say("The objective became requirements by area, grouped into workstreams with a critical path.", "Requirements", 4600);
+  await spot(".wiz-right .card");
+  await say("From its role catalog Cynqra proposes a CTO, a PM and two engineers, each with the reason and the requirements it covers. Verification is a platform service, not a worker.", "Workforce", 6200);
+  await clear();
+  await click("#approve-workforce");
+  await D("caption", "Approving the workforce is founder decision 2.", "Decision 2");
+  await page.waitForSelector("#approve-plan");
+  await sleep(1400);
+  await spot(".wiz-left .card >> nth=0");
+  await say("The Intelligence Router gives every worker a model from measured evidence. Here the registry holds only the demo script.", "Intelligence", 5000);
   await spot(".plan-table");
-  await say("Six tasks with owners, dependencies and checks. The platform sets every risk tier, not the model.", "Plan", 5200);
+  await say("Milestones and tasks with owners, acceptance criteria and verification gates. The platform sets every risk tier, not the model.", "Roadmap", 5200);
+  await spot(".wiz-left .card >> nth=1");
+  await say("The budget in dollars, in layers: inference, tools, infrastructure, verification and the reserve.", "Budget", 4600);
   await clear();
   await click("#approve-plan");
   await waitFor((st) => st.auto.on, "the UI to start the run");
   await api("/api/run/auto", { on: false });
-  await D("caption", "Approving the plan is founder decision 2.", "Decision 2");
+  await D("caption", "Approving the roadmap and budget is founder decision 3.", "Decision 3");
   await page.waitForSelector("header.top");
   await sleep(2200);
 
   // ---------- 03 work and decisions ----------
   await chapter("03", "The organization works", "Workers build, verification checks, you only see what needs you.");
   await api("/api/run/auto", { on: true, delay: 1.8 });
+  await nav("work");
+  await page.waitForSelector(".tape");
   await sleep(700);
   await spot(".tape");
   await say("Workers act only through the Tool Gateway, inside their own workspace. Every message between them is a stamped protocol object.", "Protocol", 5600);
   await clear();
   await waitFor((st) => (st.tasks || []).find((t) => t.id === "t_01" && t.status === "VERIFIED"), "t_01 verified");
-  await say("The PM's spec is checked against the confirmed objective before anyone builds on it.", "Verification", 3600);
+  await say("The PM's documents are checked against their types' rules and the objective before anyone builds on them.", "Verification", 3800);
   await waitFor((st) => (st.decisions.pending || []).some((d) => d.kind === "decision"), "product rule decision");
   await sleep(900);
   await spot("header.top .pill.amber");
@@ -171,7 +184,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await say("The founder can edit the rule before approving. Every answer is kept with its label.", "Inbox", 4000);
   await clear();
   await click('.dcard button[data-decide="approve"]');
-  await D("caption", "Founder decision 3. The engineers start building.", "Decision 3");
+  await D("caption", "Founder decision 4. The engineers start building.", "Decision 4");
   await sleep(1500);
   await nav("work");
   await waitFor((st) => hasEvent(st, (e) => e.event_type === "verification.completed" && e.payload.verdict === "REQUIRES_REWORK"), "rework");
@@ -188,10 +201,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await nav("decisions");
   await page.waitForSelector(".dcard");
   await spot(".dcard .dgrid > div >> nth=2");
-  await say("Merging to main is MEDIUM. The CTO proposes with evidence: the full suite passes on the release candidate.", "Decision 4", 5400);
+  await say("Merging to main is MEDIUM. The CTO proposes with evidence: the full suite passes on the release candidate.", "Decision 5", 5400);
   await clear();
   await click('.dcard button[data-decide="approve"]');
-  await D("caption", "Founder decision 4. Main runs the full suite again after the merge.", "Decision 4");
+  await D("caption", "Founder decision 5. Main runs the full suite again after the merge.", "Decision 5");
   await waitFor((st) => (st.decisions.pending || []).some((d) => d.kind === "deploy"), "deploy decision");
   await sleep(900);
   await page.waitForSelector(".dcard .deny");
@@ -201,7 +214,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await say("The CTO also tried to email the recruiters. Policy denied it outright. Nothing for the founder to do.", "Policy", 5600);
   await clear();
   await click('.dcard button[data-decide="approve"]');
-  await D("caption", "Founder decision 5. Deploying.", "Decision 5");
+  await D("caption", "Founder decision 6. Deploying.", "Decision 6");
   await sleep(800);
 
   // ---------- 04 live ----------
@@ -250,7 +263,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await say("The transition record states the problem, the change, the result, the cost and the founder interventions.", "Delivery", 4600);
   await clear();
   await click('.view button[data-decide="approve"]');
-  await D("caption", "Accepting delivery is founder decision 6.", "Decision 6");
+  await D("caption", "Accepting delivery is founder decision 7.", "Decision 7");
   await waitFor((st) => st.meta.phase === "accepted", "accepted");
   await sleep(1400);
   await spot(".two .card >> nth=0");
@@ -265,19 +278,19 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await nav("company");
   await sleep(500);
   await spot(".tiles");
-  await say("Six founder decisions for the whole build. Everything else the organization handled, and the record shows it.", "Company", 5200);
+  await say("Seven founder decisions for the whole build. Everything else the organization handled, and the record shows it.", "Company", 5200);
   await clear();
   await D("caption", "");
 
   // ---------- end card ----------
   const st = await state();
-  const m = st.metrics, b = st.budget;
+  const m = st.metrics;
   const dep = (st.deployments || []).slice(-1)[0] || {};
   const tiles = [
     [m.founder_interventions, "founder decisions, start to live"],
     [m.tasks_verified, `of ${m.tasks_total} tasks verified`],
     [(dep.test_ids || []).length, "product tests passing in the release"],
-    [b.spent, `of ${b.cap} work units spent`],
+    [(st.workers || []).length, "workers synthesized from the objective"],
     [m.defects_caught_before_verified, "defect caught before verified"],
     [m.blockers_cleared_without_founder, "Blocker cleared without the founder"],
     [m.actions_stopped_by_policy, "prohibited action stopped by policy"],

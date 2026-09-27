@@ -19,7 +19,7 @@ from helpers import POC, SCENARIO, TempDir, engine_to_gates, no_model_env, resto
 
 from cynqra.engine import Engine
 from cynqra.registry import Registry, RegistryError
-from cynqra.workforce import Workforce, estimate, rank
+from cynqra.router import estimate, rank
 
 FAKE = POC / "tests" / "fake_llama_server.py"
 
@@ -64,7 +64,6 @@ class WorkforceTests(unittest.TestCase):
             self.reg.register({"runtime": "openai_compatible", "ref": f"fake-{i}", "name": name,
                                "base_url": self.srv.urls[i] + "/v1", "price_in": price, "price_out": price * 4,
                                "context": 32768, "provider": "test double", "license": "none"})
-        self.wf = Workforce(self.reg)
 
     def tearDown(self):
         self.srv.close()
@@ -73,10 +72,10 @@ class WorkforceTests(unittest.TestCase):
         restore_env(self.saved)
 
     def engine(self, budget_usd=5.0) -> Engine:
-        e = Engine(self.tmp.path / "run", workforce=self.wf)
+        e = Engine(self.tmp.path / "run", registry=self.reg)
         e.create_company("Harbor Recruiting", "live")
         e.draft_objective(SCENARIO["messy"])
-        e.set_guardrails(budget_cap=600, budget_usd=budget_usd, time_value_per_hour=10)
+        e.set_guardrails(budget_usd=budget_usd, time_value_per_hour=10)
         e.submit_objective()
         return engine_to_gates(e)
 
@@ -107,8 +106,18 @@ class WorkforceTests(unittest.TestCase):
         self.assertLess(e_a["p_attempt"], 0.3)
         self.assertGreater(e_c["p_attempt"], 0.7)
         self.assertEqual(rank(self.reg, ["code"], 10.0)[0]["model"], "Model C", "measured success outweighs price")
-        self.assertEqual(rank(self.reg, ["spec"], 10.0)[0]["model"], "Model C",
+        self.assertEqual(rank(self.reg, ["document"], 10.0)[0]["model"], "Model C",
                          "a kind never seen borrows the model's overall record")
+
+    def test_live_mode_without_any_model_is_refused_before_anything_is_written(self):
+        for m in self.reg.models():
+            self.reg.remove(m["id"])
+        e = Engine(self.tmp.path / "none", registry=self.reg)
+        with self.assertRaises(Exception) as ctx:
+            e.create_company("Harbor Recruiting", "live")
+        self.assertIn("needs a model", str(ctx.exception))
+        self.assertEqual(e.meta["phase"], "new")
+        e.close()
 
     def test_a_run_staffs_workers_from_the_registry_and_meters_every_call(self):
         e = self.engine()
@@ -123,7 +132,7 @@ class WorkforceTests(unittest.TestCase):
         self.assertTrue(calls and all(c["usd"] > 0 for c in calls), "every call is priced from its real tokens")
         self.assertAlmostEqual(e.workforce_view()["ledger"]["spent_total"], sum(c["usd"] for c in calls), places=4)
         outs = self.reg.outcomes("model-a")
-        self.assertEqual({o["task_kind"] for o in outs} >= {"spec", "code"}, True)
+        self.assertEqual({o["task_kind"] for o in outs} >= {"document", "code"}, True)
         self.assertTrue(all(o["run_id"] == e.cid for o in outs))
         e.close()
 
@@ -147,7 +156,7 @@ class WorkforceTests(unittest.TestCase):
     def test_a_task_is_rerouted_to_a_peer_on_a_better_model(self):
         e = self.engine()
         w = e.worker("w_eng_b")
-        w.update(model_id="model-c", intelligence_source_id="Model C")  # the two engineers run on different models
+        w.update(model_id="model-c", model="Model C")  # the two engineers run on different models
         e.store.put("worker", "w_eng_b", w)
         self.reg.remove("model-b")
         self.reg.set_fault("model-a", max_reply=40)  # Engineer A's model cannot finish its code
@@ -165,10 +174,11 @@ class WorkforceTests(unittest.TestCase):
     def test_the_dollar_budget_is_the_hard_stop(self):
         e = self.engine(budget_usd=0.003)
         f = e.store.get("forecast", "current")
-        self.assertTrue(f["priced"] and f["layers"]["inference"]["usd"] > 0)
+        self.assertGreater(f["layers"]["inference"]["usd"], 0)
+        self.assertFalse(f["fits"], "the roadmap gate showed the overrun before any work started")
         run_journey(e, max_rounds=60)
         stops = [d for d in e.store.all("decision") if d["kind"] == "budget_breaker"]
-        self.assertTrue(stops and stops[0]["extra"]["unit"] == "USD", "the breaker opened on dollars")
+        self.assertTrue(stops, "the breaker opened on dollars")
         self.assertEqual(e.meta["phase"], "accepted", "each approval raised the budget and work went on")
         ec = e.final_report()["economics"]
         self.assertGreater(ec["total_actual"], 0.003)

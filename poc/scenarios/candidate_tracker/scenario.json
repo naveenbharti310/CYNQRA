@@ -1,6 +1,11 @@
 {
   "id": "candidate_tracker",
+  "title": "Candidate tracker",
+  "about": "A four-worker organization (CTO, PM, two engineers) builds an internal recruiting tracker: a spec, one product rule for the founder, two code tasks (the first fails verification and is reworked, the second raises a Blocker), a merge and a deploy.",
   "note": "Prepared script for demo mode. Every word a worker says in demo mode comes from this file, and the product shows that. Code in files/ is real and is tested and deployed for real.",
+  "settings": {
+    "self_checks": 0
+  },
   "messy": "Build me an internal tracker so my two recruiters can log candidates, set a stage, and I can see who is stuck. No public careers site.",
   "objective": {
     "product": "Internal candidate tracker",
@@ -152,19 +157,13 @@
       {
         "id": "t_01",
         "workstream_id": "ws_spec",
-        "kind": "spec",
+        "kind": "document",
         "owner_worker_id": "w_pm",
         "title": "Product spec and acceptance checks",
         "inputs": "Confirmed objective",
         "expected_output": "spec.md and acceptance.md",
         "dependencies": [],
-        "tools": [
-          "write_file"
-        ],
-        "budget": 10,
         "deadline_day": 1,
-        "verification_method": "Coverage lint against the confirmed objective",
-        "risk_tier": "LOW",
         "milestone_id": "m_1",
         "acceptance_criteria": [
           "spec.md names the users and the internal-only constraint",
@@ -173,6 +172,10 @@
         "requirement_ids": [
           "r_01",
           "r_06"
+        ],
+        "documents": [
+          "product_spec",
+          "acceptance"
         ]
       },
       {
@@ -186,11 +189,7 @@
         "dependencies": [
           "t_01"
         ],
-        "tools": [],
-        "budget": 5,
         "deadline_day": 1,
-        "verification_method": "Founder review (D-17)",
-        "risk_tier": "MEDIUM",
         "milestone_id": "m_1",
         "acceptance_criteria": [
           "The founder has decided what stuck means"
@@ -211,14 +210,7 @@
           "t_01",
           "t_02"
         ],
-        "tools": [
-          "write_file",
-          "run_tests"
-        ],
-        "budget": 20,
         "deadline_day": 2,
-        "verification_method": "Automated tests, prior tests rerun",
-        "risk_tier": "LOW",
         "milestone_id": "m_2",
         "acceptance_criteria": [
           "Create, set stage from the closed list, list all and filter stuck work as the acceptance checks say",
@@ -240,14 +232,7 @@
         "dependencies": [
           "t_03"
         ],
-        "tools": [
-          "write_file",
-          "run_tests"
-        ],
-        "budget": 20,
         "deadline_day": 3,
-        "verification_method": "Automated tests, prior tests rerun",
-        "risk_tier": "LOW",
         "milestone_id": "m_2",
         "acceptance_criteria": [
           "GET /health and GET / answer 200",
@@ -272,14 +257,7 @@
           "t_03",
           "t_04"
         ],
-        "tools": [
-          "run_tests",
-          "merge_to_main"
-        ],
-        "budget": 10,
         "deadline_day": 4,
-        "verification_method": "Full test run on main after the founder approves the merge",
-        "risk_tier": "MEDIUM",
         "milestone_id": "m_3",
         "acceptance_criteria": [
           "Every test passes on main after the merge"
@@ -301,13 +279,7 @@
         "dependencies": [
           "t_05"
         ],
-        "tools": [
-          "deploy_production"
-        ],
-        "budget": 10,
         "deadline_day": 4,
-        "verification_method": "Health check and smoke test on the live URL",
-        "risk_tier": "HIGH",
         "milestone_id": "m_3",
         "acceptance_criteria": [
           "Health and smoke checks pass on the live URL"
@@ -424,7 +396,7 @@
         "result": "proposal",
         "problem": "Release 1 is verified on the integration branch and not yet on main.",
         "recommendation": "Approve the merge to main. The full suite passes on the release candidate, including the store tests rerun from t_03.",
-        "cost": "2 work units",
+        "cost": "no model cost: a test run and a merge on this machine",
         "confidence": "high",
         "what_would_change_this": "Any failing test, or a change to store.py after t_03 was verified."
       }
@@ -434,7 +406,7 @@
         "result": "proposal",
         "problem": "Release 1 is merged and verified. It is not live, so recruiters cannot use it yet.",
         "recommendation": "Approve. Deploy release 1, then run the health check and the smoke test.",
-        "cost": "4 work units, local host",
+        "cost": "no model cost: a local release on the company's own host",
         "confidence": "high",
         "what_would_change_this": "A failing smoke test, or any review comment still open.",
         "side_action": {

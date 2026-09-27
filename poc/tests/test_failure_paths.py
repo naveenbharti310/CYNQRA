@@ -17,20 +17,21 @@ from cynqra.intelligence import ScriptedSource
 
 class FaultySource(ScriptedSource):
     def __init__(self):
-        super().__init__()
+        super().__init__("candidate_tracker")
         self.faults = {}  # task id -> function(call_index, good_result) -> result
 
-    def work(self, task, call_index=0, **kw):
-        res, usage = super().work(task, call_index=call_index, **kw)
+    def work(self, task, worker="system", call_index=0, **kw):
+        res, usage = super().work(task, worker=worker, call_index=call_index, **kw)
         f = self.faults.get(task["id"])
         return (f(call_index, res) if f else res), usage
 
 
-def start(folder, src, cap=120) -> Engine:
+def start(folder, src, **guardrails) -> Engine:
     e = Engine(folder, intelligence=src)
     e.create_company("Harbor Recruiting")
     e.draft_objective(SCENARIO["messy"])
-    e.set_guardrails(budget_cap=cap)
+    if guardrails:
+        e.set_guardrails(**guardrails)
     e.submit_objective()
     return engine_to_gates(e)
 
@@ -73,6 +74,10 @@ class InvalidProtocolTests(Base):
         d = self.e.pending_decisions()[0]
         self.assertEqual((d["kind"], d["severity"]), ("escalation", "SEV-2"))
         self.assertIn("invalid protocol objects", d["problem"])
+        self.assertIn("No other model in the registry is available", d["problem"],
+                      "the Replacement Engine looked for another intelligence before asking the founder")
+        v = self.e.store.all("violation")
+        self.assertEqual([(x["worker_id"], x["model_id"]) for x in v], [("w_pm", "scripted-candidate_tracker")] * 3)
         self.assertIn("Escalation", [p["kind"] for p in self.e.store.all("protocol")])
 
     def test_founder_retries_and_the_run_finishes(self):
@@ -105,10 +110,11 @@ class VerificationFailsThreeTimesTests(Base):
         self.assertIn("test_list_returns_all", self.d["problem"], "the founder sees which test failed")
         self.assertNotIn("t_03", [a["task_id"] for a in self.e.store.all("artifact")], "failed code never integrated")
 
-    def test_evolution_recommends_a_review(self):
-        ev = self.e.evolution()
-        self.assertTrue(ev["title"].startswith("Review"), ev)
-        self.assertIn("recommendation only", ev["status"])
+    def test_the_replacement_engine_decided_before_the_founder(self):
+        ev = self.e.store.all("evaluation")
+        self.assertEqual([(x["task_id"], x["decision"], x["forced"]) for x in ev][-1], ("t_03", "escalate", True))
+        card = [c for c in self.e.snapshot()["performance"] if c["worker_id"] == "w_eng_a"][0]["overall"]
+        self.assertEqual((card["quality"]["verifications"], card["quality"]["acceptance_rate"]), (3, 0.0))
 
     def test_a_fixed_retry_recovers(self):
         self.buggy = False
@@ -200,11 +206,12 @@ class FounderSaysNoTests(Base):
         self.assertTrue(self.e.live_url(), "the product stays live")
 
     def test_budget_breaker_refused_stops_the_run(self):
-        self.e = start(self.tmp.path, self.src, cap=30)
+        self.e = start(self.tmp.path, self.src, budget_usd=0.01, governance={"compute_usd_per_hour": 36})
         d = approve_until(self.e, "budget_breaker")
         self.e.decide(d["id"], "reject")
         self.assertEqual(self.e.meta["phase"], "stopped")
         self.assertIn("budget cap", self.e.meta["notice"])
+        self.assertEqual(self.e.step()["did"], "idle")
 
     def test_graph_rejects_unknown_questions(self):
         self.e = start(self.tmp.path, self.src)

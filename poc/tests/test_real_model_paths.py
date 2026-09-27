@@ -12,18 +12,19 @@ import unittest
 import urllib.error
 import urllib.request
 
-from helpers import SCENARIO, TempDir, approve, no_model_env, restore_env
+from helpers import M1_ROLES, SCENARIO, TempDir, approve, no_model_env, restore_env
 from test_failure_paths import FaultySource, approve_until, start
 
 from cynqra import deploy, roles
 from cynqra.engine import Engine, EngineError
-from cynqra.intelligence import IntelligenceError, ModelSource, ScriptedSource, validate_plan
+from cynqra.intelligence import IntelligenceError, ModelSource, ScriptedSource, ask
+from cynqra.planner import validate_plan
 from cynqra.server import App, make_server
-from cynqra.verification import run_unittests
+from cynqra.testrunner import run_unittests
 
 
 
-FIXTURE = roles.instantiate(roles.FIXTURE_M1)
+FIXTURE = roles.instantiate(M1_ROLES)
 
 
 def plan_copy() -> dict:
@@ -37,11 +38,21 @@ class PlanValidationTests(unittest.TestCase):
             t["id"] = f"task-{i}"
             t["dependencies"] = [f"task-{d[-1]}" for d in t["dependencies"]]
         plan["tasks"][2]["dependencies"] = "task-1, task-2"
-        plan["tasks"][0]["budget"] = "ten"
+        plan["tasks"][0]["deadline_day"] = "2.0"
+        plan["tasks"][0]["budget_usd"] = 999  # money is the Budget Engine's, never the model's
         out = validate_plan(plan, FIXTURE)
         self.assertEqual([t["id"] for t in out["tasks"]], [f"t_0{i}" for i in range(1, 7)])
         self.assertEqual(out["tasks"][2]["dependencies"], ["t_01", "t_02"])
-        self.assertEqual(out["tasks"][0]["budget"], 10)
+        self.assertEqual(out["tasks"][0]["deadline_day"], 2)
+        self.assertNotIn("budget_usd", out["tasks"][0])
+
+    def test_a_document_task_writes_only_what_its_owner_writes(self):
+        plan = plan_copy()
+        plan["tasks"][0]["documents"] = ["runbook", "product_spec"]
+        self.assertEqual(validate_plan(plan, FIXTURE)["tasks"][0]["documents"], ["product_spec"])
+        plan["tasks"][0]["documents"] = []
+        out = validate_plan(plan, FIXTURE)["tasks"][0]
+        self.assertEqual((out["documents"], out["documents_derived"]), (["product_spec"], True))
 
     def test_the_rubric_still_refuses_a_wrong_owner(self):
         plan = plan_copy()
@@ -50,22 +61,27 @@ class PlanValidationTests(unittest.TestCase):
             validate_plan(plan, FIXTURE)
 
     def test_a_refused_plan_is_retried_once_with_the_reason(self):
-        src = ModelSource.__new__(ModelSource)
-        src.label = "stub"
+        src = ModelSource()
         bad = plan_copy()
         bad["tasks"] = bad["tasks"][:-1]
         prompts = []
-        answers = iter([bad, plan_copy()])
+        answers = iter([bad, plan_copy(), bad])
 
         def call(prompt, max_tokens=0, **_):
             prompts.append(prompt)
-            return next(answers), {"tokens_in": 1, "tokens_out": 1, "units": 1, "estimated": False, "label": "stub"}
+            return next(answers), {"tokens_in": 10, "tokens_out": 5, "latency_s": 1.0, "label": "stub"}
 
         src._call = call
-        plan, usage = src.plan({"product": "x"})
+        req = {"requirements": [{"id": "r_01", "area": "product", "text": "x"}]}
+        ask_plan = lambda: ask(lambda fb: src.plan({"product": "x"}, FIXTURE, req, feedback=fb),  # noqa: E731
+                               lambda d: validate_plan(d, FIXTURE))
+        plan, usage = ask_plan()
         self.assertEqual(len(plan["tasks"]), 6)
-        self.assertIn("previous answer was refused", prompts[1])
-        self.assertEqual(usage["units"], 2)
+        self.assertIn("previous answer was refused: plan needs exactly 1 deploy task", prompts[1])
+        self.assertEqual((usage["tokens_in"], usage["tokens_out"]), (20, 10), "both calls are metered")
+        answers = iter([bad, bad])
+        with self.assertRaises(IntelligenceError):
+            ask_plan()
 
 
 class WorkerReplyTests(unittest.TestCase):
@@ -139,7 +155,7 @@ class WorkerReplyTests(unittest.TestCase):
                     content = {k: v for k, v in content.items() if k != "acceptance_check"}
                 return content, usage
 
-        self.e = start(self.tmp.path, BadAssign())
+        self.e = start(self.tmp.path, BadAssign("candidate_tracker"))
         self.e.run_until_idle()
         self.e.decide(self.e.pending_decisions()[0]["id"], "approve")
         steps = self.e.run_until_idle()
@@ -154,7 +170,7 @@ class WorkerReplyTests(unittest.TestCase):
                 return ({k: v for k, v in content.items() if k != "acceptance_check"} if task["id"] == "t_03"
                         else content), usage
 
-        self.e = start(self.tmp.path, NeverAssign())
+        self.e = start(self.tmp.path, NeverAssign("candidate_tracker"))
         self.e.run_until_idle()
         self.e.decide(self.e.pending_decisions()[0]["id"], "approve")
         self.e.run_until_idle()
@@ -179,11 +195,11 @@ class PromptContentTests(unittest.TestCase):
         seen = {}
 
         class Spy(ScriptedSource):
-            def plan(self, objective, note="", **kw):
+            def plan(self, objective, *a, **kw):
                 seen.update(objective)
-                return super().plan(objective, note, **kw)
+                return super().plan(objective, *a, **kw)
 
-        e = Engine(self.tmp.path, intelligence=Spy())
+        e = Engine(self.tmp.path, intelligence=Spy("candidate_tracker"))
         e.create_company("Harbor Recruiting")
         e.draft_objective(SCENARIO["messy"])
         e.submit_objective()
@@ -211,7 +227,7 @@ class OutageTests(unittest.TestCase):
                     raise IntelligenceError("HTTP 529 from provider: overloaded")
                 return super().work(task, **kw)
 
-        e = start(self.tmp.path, Flaky())
+        e = start(self.tmp.path, Flaky("candidate_tracker"))
         self.assertEqual(e.run_until_idle()[-1]["did"], "error")
         self.assertEqual(e.meta["phase"], "stopped_error")
         with self.assertRaises(EngineError):
@@ -228,19 +244,19 @@ class OutageTests(unittest.TestCase):
         class NoPlan(ScriptedSource):
             ok = False
 
-            def plan(self, objective, note="", **kw):
+            def plan(self, objective, *a, **kw):
                 if not NoPlan.ok:
                     raise IntelligenceError("network error: timed out")
-                return super().plan(objective, note, **kw)
+                return super().plan(objective, *a, **kw)
 
-        e = Engine(self.tmp.path, intelligence=NoPlan())
+        e = Engine(self.tmp.path, intelligence=NoPlan("candidate_tracker"))
         e.create_company("Harbor Recruiting")
         e.draft_objective(SCENARIO["messy"])
         e.submit_objective()
         with self.assertRaises(IntelligenceError):
             approve(e, "approve_workforce")
         self.assertEqual(e.meta["phase"], "stopped_error")
-        self.assertIn("Planning failed", e.meta["notice"])
+        self.assertIn("The roadmap failed", e.meta["notice"])
         NoPlan.ok = True
         e.resume()
         self.assertEqual(e.meta["phase"], "planning")
@@ -270,7 +286,7 @@ class SlowModelTests(unittest.TestCase):
                     release.wait(10)
                 return super().work(task, **kw)
 
-        e = start(self.tmp.path, Slow())
+        e = start(self.tmp.path, Slow("candidate_tracker"))
         e.step()  # assign t_01
         worker = threading.Thread(target=e.step)
         worker.start()
@@ -332,13 +348,16 @@ class ServerTests(unittest.TestCase):
     def test_the_guide_knows_what_just_happened(self):
         self.post("/api/company", {"name": "Harbor Recruiting", "mode": "demo"})
         self.post("/api/objective/draft", {"messy": SCENARIO["messy"]})
-        self.post("/api/objective/confirm")
+        self.post("/api/objective/submit")
         wf = self.app.engine.pending_decisions()[0]["id"]
         self.post(f"/api/decisions/{wf}", {"action": "approve"})
-        self.assertEqual(self.app.state()["last_step"], {"did": "workforce approved"})
+        self.assertEqual(self.app.state()["last_step"], {"did": "approved", "decision": wf, "kind": "approve_workforce"})
+        plan = self.app.engine.pending_decisions()[0]["id"]
+        self.post(f"/api/decisions/{plan}", {"action": "reject", "note": "Split it"})
+        self.assertEqual(self.app.state()["last_step"]["did"], "rejected_with_reason")
         plan = self.app.engine.pending_decisions()[0]["id"]
         self.post(f"/api/decisions/{plan}", {"action": "approve"})
-        self.assertEqual(self.app.state()["last_step"], {"did": "roadmap approved"})
+        self.assertEqual(self.app.state()["last_step"]["kind"], "approve_roadmap")
         code, body = self.post("/api/run/step")
         self.assertEqual((code, body["did"]), (200, "assigned"))
         self.assertEqual(self.app.state()["last_step"]["task"], "t_01")

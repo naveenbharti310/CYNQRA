@@ -31,15 +31,21 @@ install. Data lives in poc/data. New run archives the old one; nothing is delete
 
 ## Two modes
 
-Demo. The workers' words come from a prepared scenario (an internal candidate tracker for
-a recruiting firm). Every screen says it is demo mode. The code the workers hand over is
-still written to disk, tested for real, merged for real and deployed for real on your
-machine.
+Demo. The workers' words come from a prepared scenario; the first screen offers two. The
+candidate tracker: an internal recruiting tool built by a CTO, a PM and two engineers. The
+restaurant covers forecast: a 14-day forecast and prep plan built by nine workers (CEO, CTO,
+PM, Data Scientist, backend and frontend engineers, designer, DevOps, QA). Every screen says
+it is demo mode. The script stands in the run's model registry as its only model, so the
+demo is staffed, routed and metered like a live run. The documents and code the workers hand
+over are still written to disk, verified for real (tests, document rules, the forecast's
+backtest), merged for real and deployed for real on your machine.
 
-Live. A real model does the thinking through the same adapter the spikes use. Set
-ANTHROPIC_API_KEY (default model claude-sonnet-5) or OPENAI_API_KEY (default gpt-4o-mini)
-before starting, then choose Live in the first screen. Set CYNQRA_MODEL to pick another
-model. A model error stops the run and says so. Nothing is invented to fill the gap.
+Live. Real models do the thinking. The run is staffed from the model registry (Models, on
+the first screen); when the registry offers none, the model the environment names is
+registered and used: set ANTHROPIC_API_KEY (default model claude-sonnet-5) or OPENAI_API_KEY
+(default gpt-4o-mini) before starting, or CYNQRA_MODEL to pick another. A model that stops
+answering is replaced by another that passes its regression check, or the founder decides.
+Nothing is invented to fill the gap.
 
 ## Real model test
 
@@ -61,10 +67,10 @@ Without a key, `--allow-cmd` accepts a command model, such as tests/model_bridge
 hands each prompt to a person or another model through files. Such a run is labelled
 unmeasured. The 26 September run in live_reports/ was done this way; its README says what it
 proves and what it does not. Optional: CYNQRA_MODEL to pick the model, CYNQRA_EFFORT (low to max) to set effort.
-Live mode starts with a 600 work unit budget (one unit is 1000 real tokens); demo mode
-starts with 120.
+Every run's budget is in US dollars (5 by default; set it on the objective screen). A hosted
+model is priced at its list price, a model on this machine at the machine time you state.
 
-## What you will see, about five minutes in demo mode
+## What you will see, about five minutes in demo mode (candidate tracker)
 
 1. Objective. Structure the sentence into seven fields. Two are marked inferred. Edit,
    set the dollar budget and any constraints, submit. Cynqra decomposes it into seven
@@ -81,6 +87,11 @@ starts with 120.
 5. Delivery. The product is live on a local URL, with the final report: artifacts, budget
    forecast against actual, every worker's scorecard and every intelligence change. Open it,
    add a candidate. Download the export bundle. Replay any task in Audit.
+
+The restaurant forecast runs the same flow with nine workers and fourteen tasks: seven
+documents checked against their types, a product rule on the prep margin, the Data
+Scientist's first forecast rejected by the platform's backtest and reworked, and a deploy
+proposed by DevOps.
 
 Try also: the kill switch, a low budget cap (the breaker stops work at 100 percent),
 editing the objective mid run (the run pauses for your reconfirmation), and rejecting a
@@ -105,18 +116,31 @@ TEST_REPORT.md holds the last full run and its coverage.
 | research/ | Which open model and runtime to use, and why (September 2026) |
 | live_check.py | The real model test of the whole journey, with a spend cap and a written report |
 | live_reports/ | Reports of real model runs, with what each one proves |
-| cynqra/engine.py | The orchestrator: journey, gateway, decisions, verification, delivery, replay, export |
+| cynqra/engine.py | The orchestrator: the run's state, the founder's gates, the step loop; implements the run contract |
+| cynqra/run.py | The run contract: what every engine may ask of the run, and nothing more |
+| cynqra/objective.py | Objective Intelligence: the objective structured and decomposed into requirements |
+| cynqra/synthesis.py | Workforce Synthesizer: the organization the objective needs, and its gate |
+| cynqra/roles.py | The catalog: roles, task types and their verifiers, document types |
+| cynqra/router.py | Intelligence Router: a model for every worker, from measured evidence |
+| cynqra/planner.py | Execution Planner: milestones, tasks, owners, accountability, verification gates |
+| cynqra/budget.py, settings.py | Budget Engine: the dollar forecast in layers, the ledger, the breaker; the project's settings |
+| cynqra/gateway.py | Every worker action: identity, policy, budget, target check, execute, sanitize, audit |
+| cynqra/execution.py | Each task's lifecycle, Handoff to verified |
+| cynqra/verifier.py | Verification Service: documents, tests, the forecast backtest, defect escapes |
+| cynqra/testrunner.py | Test runner in a clean process, with a cleaned environment |
+| cynqra/performance.py, replacement.py | Performance Engine and Replacement Engine: keep, reroute or replace |
+| cynqra/delivery.py | Delivery, final report, replay, the organization graph, export |
+| cynqra/registry.py, probe.py | The model registry, and the calibration work every model does |
 | cynqra/policy.py | D-27 risk rubric and D-28 authority matrix as code |
 | cynqra/protocol.py | Handoff, Blocker, Escalation, Approval as stamped, hashed objects |
 | cynqra/db.py | SQLite store; events are append only, enforced by triggers |
 | cynqra/deploy.py | BUILD to LIVE with health, smoke and rollback |
-| cynqra/verification.py | Test runner and document lint, with a cleaned environment |
-| cynqra/intelligence.py | Demo source and live model source; the platform validates every plan |
+| cynqra/intelligence.py | Prompts and transport: the scripted source and the model source |
 | cynqra/model_adapter.py | Byte for byte copy of 02_harness/spikes/model_adapter.py |
 | cynqra/server.py | HTTP API and static UI |
 | cynqra/runtime.py | The desktop app's model: catalog, verified download, llama-server start and GPU fallback |
 | ui/ | The web app, vanilla HTML, CSS and JS, fonts bundled |
-| scenarios/candidate_tracker | The demo scenario and the real product code the workers hand over |
+| scenarios/ | The demo scenarios and the real documents and code the workers hand over |
 | design/ | High level screen mockups, copied from the design canvas |
 | tests/ | Unit, journey, failure path, provider wire, API and browser tests |
 | demo/ | The guided demo (record_replay.py, build_demo.py, guided/) and how the demo video is recorded |

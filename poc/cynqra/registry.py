@@ -13,6 +13,11 @@ Runtimes
   hf                  Hugging Face Inference Providers (HF_TOKEN), e.g. zai-org/GLM-4.7 or moonshotai/Kimi-K2.5.
   openai_compatible   any server that speaks OpenAI's chat completions: base_url, and the name of the environment
                       variable that holds its key. The key itself is never stored.
+  environment         the model this process's environment names (model_adapter.resolve(): the desktop app's
+                      running model, a local server, or a provider key). One entry, so a run with a single
+                      configured model is staffed, metered and measured exactly like one with many.
+  scripted            the demo's prepared script: no model and no cost; every word is labelled as scripted. It
+                      lives only in a demo run's own registry and never in the one that learns across projects.
 
 Faults, for proving replacement on real models: offline (calls fail as if the model were unreachable) and
 max_reply (the model's replies are capped, so its real output runs out of room). Both are recorded and shown.
@@ -27,7 +32,21 @@ from pathlib import Path
 
 from .db import Store, now
 
-RUNTIMES = ("llama", "hf", "openai_compatible")
+RUNTIMES = ("llama", "hf", "openai_compatible", "environment", "scripted")
+# USD per million tokens, input and output: first-party list prices, checked 26 Sep 2026. They price a hosted model
+# the environment names; a hosted model not listed is priced at the most expensive row, so a cap errs on the safe side.
+# A model on this machine costs its machine time; a shell command model is a bridge or a test double, not priced.
+LIST_PRICES = {
+    "claude-sonnet-5": (2.00, 10.00),
+    "claude-sonnet-4-6": (3.00, 15.00),
+    "claude-haiku-4-5": (1.00, 5.00),
+    "claude-opus-5": (5.00, 25.00),
+    "claude-opus-5-5": (4.00, 20.00),
+    "claude-opus-4-8": (5.00, 25.00),
+    "claude-fable-5-1": (10.00, 50.00),
+    "gpt-4o-mini": (0.15, 0.60),
+}
+WORST_PRICE = (10.00, 50.00)
 DOWN_AFTER_ERRORS = 2  # consecutive failed calls before a model counts as unavailable
 DOWN_FOR_S = 600
 
@@ -112,7 +131,24 @@ class Registry:
             raise RegistryError("an openai_compatible model needs base_url")
         elif runtime == "hf" and os.environ.get("HF_TOKEN"):
             facts = hf_facts(ref)
-        m = {"runtime": runtime, "ref": ref, "local": runtime == "llama", "provider": "", "version": "", "context": 0,
+        elif runtime == "environment":
+            from . import model_adapter
+            r = model_adapter.resolve()
+            if r is None:
+                raise RegistryError("this environment names no model: start one in the desktop app, or set a local "
+                                    "model server or a provider key")
+            facts = {"name": r["label"], "provider": r["kind"], "local": bool(r.get("local")),
+                     "hardware": "this machine" if r.get("local") else "hosted"}
+            try:  # the price the environment states: CYNQRA_PRICE_PER_M="in,out" (USD per million tokens)
+                facts["price_in"], facts["price_out"] = (float(x) for x in os.environ["CYNQRA_PRICE_PER_M"].split(","))
+            except (KeyError, ValueError):
+                if not (r.get("local") or r["kind"] == "cmd"):
+                    facts["price_in"], facts["price_out"] = LIST_PRICES.get(r["label"], WORST_PRICE)
+        elif runtime == "scripted":
+            facts = {"name": f"Scripted demo ({ref})", "provider": "Cynqra demo script", "local": True,
+                     "hardware": "no model", "license": "not a model"}
+        m = {"runtime": runtime, "ref": ref, "local": runtime in ("llama", "scripted"), "provider": "", "version": "",
+             "context": 0,
              "license": "", "commercial_use": "", "params": "", "hardware": "hosted" if runtime != "llama" else "",
              "price_in": 0.0, "price_out": 0.0, "compute_usd_per_hour": 0.0, "base_url": "", "api_key_env": "",
              "effort": "", "json_schema": True, "tools": False, "mcp": False, "modalities": ["text"],
@@ -135,11 +171,14 @@ class Registry:
             # The regression gate: a new model, or a new version of a known one, is unverified until its calibration
             # work passes (probe.py). A failed check makes it unavailable to the router.
             same = old is not None and str(old.get("version") or "") == str(m.get("version") or "")
+            if runtime == "scripted":  # a replay of a prepared script has no version to check
+                m["regression"] = {"status": "not applicable", "version": "", "at": now(), "previous_version": None}
             m.update({"status": "active", "fault": (old or {}).get("fault") or {}, "health": {"errors": 0, "down_until": 0},
                       "registered_at": (old or {}).get("registered_at") or now(),
-                      "regression": (old or {}).get("regression") if same and (old or {}).get("regression")
-                      else {"status": "unverified", "version": m.get("version") or "", "at": now(),
-                            "previous_version": (old or {}).get("version") if old and not same else None}})
+                      "regression": m.get("regression") or ((old or {}).get("regression") if same and (old or {}).get(
+                          "regression") else {"status": "unverified", "version": m.get("version") or "", "at": now(),
+                                              "previous_version": (old or {}).get("version") if old and not same
+                                              else None})})
             self.store.put("model", m["id"], m)
         return m
 
@@ -179,6 +218,10 @@ class Registry:
             return False, "HF_TOKEN is not set"
         elif m["runtime"] == "openai_compatible" and m.get("api_key_env") and not os.environ.get(m["api_key_env"]):
             return False, f"{m['api_key_env']} is not set"
+        elif m["runtime"] == "environment":
+            from . import model_adapter
+            if model_adapter.resolve() is None:
+                return False, "the environment names no model now"
         if (m.get("regression") or {}).get("status") == "failed":
             return False, "failed its regression check"
         h = m.get("health") or {}
@@ -202,6 +245,8 @@ class Registry:
                          "CYNQRA_NUM_PREDICT": str(m.get("predict") or 8192), "CYNQRA_THINK": m.get("think") or None})
         elif m["runtime"] == "hf":
             base.update({"kind": "hf", "CYNQRA_HF_MODEL": m["ref"]})
+        elif m["runtime"] in ("environment", "scripted"):
+            base = {"label": m["name"]}  # no overlay: the environment's own settings, or no call at all (scripted)
         else:
             base.update({"kind": "local", "local": False, "CYNQRA_LOCAL_BASE_URL": m["base_url"].rstrip("/"),
                          "CYNQRA_MODEL": m["ref"],

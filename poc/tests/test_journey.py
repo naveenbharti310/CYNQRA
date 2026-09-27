@@ -11,7 +11,7 @@ import zipfile
 from helpers import TempDir, engine_to_running, no_model_env, restore_env, run_journey
 
 TWELVE = ["objective_id", "owner_worker_id", "context", "inputs", "expected_output", "dependencies", "tools",
-          "budget", "deadline_day", "verification_method", "authority_policy_id", "status"]
+          "budget_usd", "deadline_day", "verification_gate", "authority_policy_id", "status"]
 
 
 class JourneyTests(unittest.TestCase):
@@ -72,7 +72,7 @@ class JourneyTests(unittest.TestCase):
                          {"w_cto": "founder", "w_pm": "w_cto", "w_eng_a": "w_pm", "w_eng_b": "w_pm"},
                          "reporting lines generated from the roles present")
         org = self.e.store.get("organization", "org_1")
-        self.assertEqual((org["template"], org["status"]), ("synthesized", "active"))
+        self.assertEqual((org["proposal"], org["status"]), (prop["id"], "active"))
 
     def test_roadmap_and_budget_approved_separately(self):  # Stages 5, 6 and 7
         plan = self.e.store.get("plan", "plan_1")
@@ -84,7 +84,10 @@ class JourneyTests(unittest.TestCase):
         self.assertEqual(self.e.task("t_03")["accountable"], "w_pm")
         f = self.e.store.get("forecast", "current")
         self.assertEqual(set(f["layers"]), {"inference", "tools", "infrastructure", "verification", "reserve"})
-        self.assertEqual(f["units_total"], 75)
+        self.assertTrue(f["fits"])
+        self.assertEqual({r["task_id"] for r in f["tasks"]}, {t["id"] for t in self.e.tasks()})
+        self.assertEqual(self.e.task("t_01")["kind"], "document")
+        self.assertEqual(self.e.task("t_01")["documents"], ["product_spec", "acceptance"])
         kinds = [d["kind"] for d in self.e.store.all("decision")][:2]
         self.assertEqual(kinds, ["approve_workforce", "approve_roadmap"])
 
@@ -171,15 +174,80 @@ class JourneyTests(unittest.TestCase):
         for t in ("transition.proposed", "transition.approved", "transition.executed", "outcome.recorded"):
             self.assertIn(t, types)
 
-    def test_budget_warned_at_fifty(self):  # A10, happy path
-        b = self.e.budget()
-        self.assertEqual(b["warned"], [50])
-        self.assertLess(b["spent"], b["cap"])
+    def test_the_orchestrator_implements_the_run_contract(self):
+        from cynqra.run import Run
+        self.assertIsInstance(self.e, Run)
+        members = [k for k in Run.__dict__ if not k.startswith("_")] + list(Run.__annotations__)
+        self.assertEqual([k for k in members if not hasattr(self.e, k)], [])
 
-    def test_evolution_is_view_only(self):
-        ev = self.e.evolution()
-        self.assertIn("recommendation only", ev["status"])
-        self.assertEqual(ev["title"], "Keep the organization as it is")
+    def test_the_script_is_staffed_and_metered_like_a_model(self):  # WORKER is not MODEL, even in the demo
+        view = self.e.workforce_view()
+        self.assertEqual(view["models_in_use"], {"scripted-candidate_tracker": ["w_cto", "w_pm", "w_eng_a", "w_eng_b"]})
+        self.assertEqual([m["runtime"] for m in view["registry"]], ["scripted"])
+        calls = self.e.store.all("call")
+        self.assertTrue(calls and all(c["model_id"] == "scripted-candidate_tracker" for c in calls))
+        L = self.e.snapshot()["budget"]["ledger"]
+        self.assertEqual((L["spent_total"], L["state"], L["warned"]), (0.0, "ok", []),
+                         "a script costs nothing, and this machine's time is not priced by default")
+        econ = self.e.final_report()["economics"]
+        self.assertEqual((econ["total_actual"], econ["cap_usd"]), (0.0, 5.0))
+
+
+class RestaurantJourneyTests(unittest.TestCase):
+    """The second demo: a nine-worker organization, seven documents, a forecast the platform backtests (its first
+    method fails and is reworked), a store, an app, acceptance tests, a merge and a deploy by DevOps."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.saved = no_model_env()
+        cls.tmp = TempDir()
+        cls.e = engine_to_running(cls.tmp.path, scenario="restaurant_forecast")
+        cls.answered = run_journey(cls.e)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.e.close()
+        cls.tmp.cleanup()
+        restore_env(cls.saved)
+
+    def test_accepted_and_the_forecast_is_live(self):
+        self.assertEqual(self.e.meta["phase"], "accepted")
+        self.assertEqual([t["status"] for t in self.e.tasks()], ["VERIFIED"] * 14)
+        with urllib.request.urlopen(self.e.live_url() + "/api/forecast", timeout=5) as r:
+            f = json.loads(r.read())
+        self.assertEqual(len(f["days"]), 14)
+        self.assertTrue(all(d["prep"] >= d["covers"] for d in f["days"]))
+
+    def test_the_organization_was_synthesized_for_the_objective(self):
+        roles = sorted(w["role"] for w in self.e.workers())
+        self.assertEqual(roles, sorted(["CEO", "CTO", "PM", "DataScientist", "BackendEngineer", "FrontendEngineer",
+                                        "Designer", "DevOps", "QA"]))
+        self.assertEqual(self.e.worker("w_ceo")["reports_to"], "founder")
+        self.assertEqual(self.e.worker("w_ds")["reports_to"], "w_ceo")
+        self.assertEqual(self.e.worker("w_devops")["reports_to"], "w_pm")
+
+    def test_the_backtest_rejected_the_first_forecast(self):
+        vs = [v for v in self.e.store.all("verification") if v["task_id"] == "t_07"]
+        self.assertEqual([v["verdict"] for v in vs], ["REQUIRES_REWORK", "VERIFIED"])
+        self.assertFalse(vs[0]["checks"]["backtest"]["passed"])
+        self.assertEqual(vs[0]["checks"]["failed"], [], "its own tests passed: only the backtest caught it")
+        self.assertLess(vs[1]["checks"]["backtest"]["model_mae"], vs[1]["checks"]["backtest"]["baseline_mae"])
+        self.assertIn("backtest", self.e.task("t_07")["verification_gate"])
+
+    def test_documents_by_type_reached_the_repository(self):
+        docs = sorted(p.name for p in (self.e.paths["main"] / "docs").iterdir())
+        self.assertEqual(docs, ["DECISIONS.md", "acceptance.md", "architecture.md", "business_brief.md", "design.md",
+                                "method.md", "product_spec.md", "runbook.md", "test_plan.md"])
+        self.assertIn("plus 10 percent", (self.e.paths["main"] / "docs" / "DECISIONS.md").read_text())
+
+    def test_the_founder_saw_only_what_needed_them(self):
+        self.assertEqual([d["kind"] for d in self.answered], ["decision", "review_merge", "deploy", "accept_delivery"])
+        self.assertEqual(self.answered[2]["source"], "w_devops", "DevOps proposed the deploy")
+        self.assertEqual(self.e.metrics()["founder_interventions"], 7)
+
+    def test_every_task_replays_completely(self):
+        for t in self.e.tasks():
+            self.assertTrue(self.e.replay(t["id"])["complete"], t["id"])
 
 
 if __name__ == "__main__":

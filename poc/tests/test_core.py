@@ -1,4 +1,4 @@
-"""Unit tests: event store, policy, protocol objects, verification helpers."""
+"""Unit tests: event store, policy, protocol objects, the test runner and the verifiers."""
 from __future__ import annotations
 
 import os
@@ -11,9 +11,11 @@ from helpers import POC, TempDir  # noqa: F401  (sets sys.path)
 from cynqra import policy
 from cynqra.db import Store, digest
 from cynqra.protocol import ProtocolError, build
-from cynqra.verification import clean_env, failure_summary, lint_documents, run_unittests
+from cynqra.testrunner import clean_env, failure_summary, run_unittests
+from cynqra.verifier import backtest, check_documents, lint_documents
 
 FILES = POC / "scenarios" / "candidate_tracker" / "files"
+RESTAURANT = POC / "scenarios" / "restaurant_forecast" / "files"
 
 
 class EventStoreTests(unittest.TestCase):  # A11
@@ -253,6 +255,52 @@ class VerificationHelperTests(unittest.TestCase):  # A8
         self.assertFalse(bad["passed"])
         self.assertEqual({f["rule"] for f in bad["findings"]}, {"constraint_echoed", "success_covered"})
         self.assertFalse(lint_documents({"a.md": ""}, obj)["passed"])
+
+
+class VerifierTests(unittest.TestCase):  # Stage 9: each task type's verifier
+    def setUp(self):
+        self.tmp = TempDir()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    OBJ = {"constraints": "No public careers site",
+           "success_criteria": "A recruiter can create a candidate, set a stage, list all candidates, and filter stuck ones"}
+
+    def test_documents_need_their_sections_numbered_checks_and_requirement_ids(self):
+        task = {"documents": ["product_spec", "acceptance"], "requirement_ids": ["r_01", "r_06"]}
+        docs = {p.name: p.read_text(encoding="utf-8") for p in (FILES / "t_01").iterdir()}
+        self.assertTrue(check_documents(docs, task, self.OBJ)["passed"])
+        spec = docs["spec.md"].replace("## Out of scope", "## Later")
+        r = check_documents({"spec.md": spec, "acceptance.md": "1. one\n2. two\n"}, task, self.OBJ)
+        self.assertEqual({f["rule"] for f in r["findings"]}, {"product_spec_sections", "acceptance_sections"})
+        r = check_documents(docs, {**task, "requirement_ids": ["r_01", "r_09"]}, self.OBJ)
+        self.assertEqual([f["why"] for f in r["findings"]], ["requirements not cited: r_09"])
+
+    def test_the_objective_lint_applies_only_to_briefs_and_specifications(self):
+        method = "## Method\nWeekday means.\n## Evaluation\nBacktest. r_03"
+        task = {"documents": ["method"], "requirement_ids": ["r_03"]}
+        self.assertTrue(check_documents({"method.md": method}, task, self.OBJ)["passed"])
+
+    def test_no_document_is_not_a_pass(self):
+        self.assertFalse(check_documents({"x.py": "print(1)"}, {"documents": ["design"]}, self.OBJ)["passed"])
+
+    def test_the_backtest_rejects_a_flat_forecast_and_accepts_the_weekday_mean(self):
+        shutil.copy(RESTAURANT / "t_07/attempt1/forecast.py", self.tmp.path)
+        flat = backtest(self.tmp.path)
+        self.assertFalse(flat["passed"])
+        self.assertGreater(flat["model_mae"], flat["baseline_mae"])
+        shutil.copy(RESTAURANT / "t_07/attempt2/forecast.py", self.tmp.path)
+        weekday = backtest(self.tmp.path)
+        self.assertTrue(weekday["passed"], weekday)
+        self.assertLess(weekday["model_mae"], weekday["baseline_mae"])
+
+    def test_the_backtest_refuses_a_missing_or_broken_forecast(self):
+        self.assertIn("missing", backtest(self.tmp.path)["why"])
+        (self.tmp.path / "forecast.py").write_text("def forecast(history, horizon):\n    return [-1] * horizon\n")
+        self.assertIn("non-negative", backtest(self.tmp.path)["why"])
+        (self.tmp.path / "forecast.py").write_text("def forecast(history, horizon):\n    raise RuntimeError('x')\n")
+        self.assertIn("forecast() failed", backtest(self.tmp.path)["why"])
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@
 const S = {
   st: null, view: "company", worker: null, replayTask: null, replay: null, replayKey: "",
   seen: -1, sig: "", err: "", busy: false, graph: null, mode: "demo", shown: new Set(), guide: true, modelOpen: false,
-  regOpen: false, probes: {},
+  regOpen: false, probes: {}, scenario: "candidate_tracker",
 };
 /* Cards animate in only the first time they appear; a repaint must not replay it for every card. */
 const fresh = (key) => { if (S.shown.has(key)) return ""; S.shown.add(key); return "fresh"; };
@@ -25,10 +25,11 @@ const KIND_TITLE = {
 const AREA_TITLE = { product: "Product", functional: "Functional", non_functional: "Non-functional", ai_ml: "AI and ML", data: "Data",
   design: "Design", security: "Security", qa: "QA", devops: "DevOps", deployment: "Deployment" };
 const CONSTRAINTS = [["deadline", "Deadline"], ["geography", "Geography"], ["technology", "Technology"], ["compliance", "Compliance"], ["risk_tolerance", "Risk tolerance"]];
-const SERVICE_TITLE = { orchestrator: "Orchestrator", verification: "Verification", founder: "Founder", budget: "Budget Engine",
-  workforce_synthesizer: "Workforce Synthesizer", execution_planner: "Execution Planner", replacement_engine: "Replacement Engine" };
+const SERVICE_TITLE = { orchestrator: "Orchestrator", verification: "Verification", founder: "Founder", budget_engine: "Budget Engine",
+  workforce_synthesizer: "Workforce Synthesizer", execution_planner: "Execution Planner", replacement_engine: "Replacement Engine",
+  objective_intelligence: "Objective Intelligence", intelligence_router: "Intelligence Router" };
 const VIEWS = [["company", "Company"], ["organization", "Organization"], ["workforce", "Workforce"], ["work", "Work"],
-  ["decisions", "Decisions"], ["models", "Models"], ["evolution", "Evolution"], ["audit", "Audit"], ["delivery", "Delivery"]];
+  ["decisions", "Decisions"], ["models", "Models"], ["performance", "Performance"], ["audit", "Audit"], ["delivery", "Delivery"]];
 const wt = (id) => { const w = ((S.st && S.st.workers) || []).find((x) => x.id === id); return w ? w.title : SERVICE_TITLE[id] || id; };
 
 async function api(path, body) {
@@ -139,13 +140,17 @@ function wizard() {
     <div class="row"><button class="btn sm" data-reg-open="1">Models (${regModels().length})</button>${guideToggle()}${modePill()}</div></div>`;
   if (phase === "workforce") return `<div class="wiz">${top}${workforceStep()}</div>`;
   if (phase === "planning") return `<div class="wiz">${top}${planStep()}</div>`;
+  const scen = scenario();
   const modeChoice = phase === "new" ? `
       <label class="lbl" for="coname">Project name</label>
-      <input type="text" id="coname" value="Harbor Recruiting">
+      <input type="text" id="coname" value="${esc(scen ? scen.title : "My project")}">
       ${isDesktop() ? "" : `<div class="modes" role="radiogroup" aria-label="Intelligence">
         <label class="mode ${S.mode === "demo" ? "on" : ""}" id="m-demo"><input type="radio" name="mode" value="demo" ${S.mode === "demo" ? "checked" : ""}>Demo: scripted workers</label>
         <label class="mode ${S.mode === "live" ? "on" : ""}" id="m-live"><input type="radio" name="mode" value="live" ${S.mode === "live" ? "checked" : ""}>Live: real models</label>
-      </div>`}` : "";
+      </div>
+      ${S.mode === "demo" ? `<label class="lbl" for="scenario">Demo scenario</label>
+        <select id="scenario" data-keep="no">${(st.scenarios || []).map((x) => `<option value="${esc(x.id)}" ${x.id === S.scenario ? "selected" : ""}>${esc(x.title)}</option>`).join("")}</select>
+        <p class="small muted" style="margin:0">${esc(scen ? scen.about : "")}</p>` : ""}`}` : "";
   const right = obj ? objectiveCard(obj) : `<div class="card" style="flex:1;display:flex;align-items:center;justify-content:center"><p class="muted">Your structured objective appears here.</p></div>`;
   return `<div class="wiz">${top}<div class="wiz-body">
     <div class="wiz-left">
@@ -154,17 +159,19 @@ function wizard() {
       <p class="lede">You give the outcome, the budget and any constraints, not the team. Cynqra works out the requirements, the organization that delivers them, the intelligence for each worker, the roadmap and the budget, and asks you at two gates.</p>
       ${modeChoice}
       <label class="lbl" for="messy">Your objective</label>
-      <textarea class="big" id="messy">${esc(obj ? obj.statement : st.demo_messy)}</textarea>
+      <textarea class="big" id="messy">${esc(obj ? obj.statement : scen ? scen.messy : "")}</textarea>
       <div class="row"><button class="btn primary" id="structure" ${S.busy ? "disabled" : ""}>${obj ? "Structure it again" : "Structure my objective"}</button></div>
       <div class="err" role="alert">${esc(S.err)}</div>
       <p class="small muted" style="margin:0">${isDesktop() ? `Every word the workers write comes from ${esc(rt().model_name || "the model")}, running on this computer, or from the models in the registry. On a laptop each step takes minutes; the Work view shows what the model is doing.`
-        : "Demo mode: the words the workers write come from a prepared script, and every screen says so. Code is still written, tested and deployed for real. Live mode staffs every worker from the model registry."}</p>
+        : "Demo mode: the words the workers write come from a prepared script, which stands in the run's model registry as its only model, and every screen says so. Code is still written, tested, backtested and deployed for real. Live mode staffs every worker from the model registry."}</p>
     </div>
     <div class="wiz-right">${right}</div></div></div>`;
 }
 
+const scenario = () => ((S.st && S.st.scenarios) || []).find((x) => x.id === ((S.st.meta || {}).scenario || S.scenario));
+
 function objectiveCard(obj) {
-  const st = S.st, s = wfv().settings || { budget_usd: 5, time_value_per_hour: 10 };
+  const st = S.st, s = st.budget.settings;
   const fields = Object.keys(FIELD_LABELS).map((k) => {
     const inf = obj.inferred_fields.includes(k);
     return `<div class="field ${inf ? "inf" : ""}"><div class="between caps"><span>${FIELD_LABELS[k]}</span>
@@ -179,13 +186,12 @@ function objectiveCard(obj) {
     <div class="fields">${fields}
       <div class="field" style="border-style:dashed"><div class="caps">Budget</div>
         <div class="between"><label for="usd">Budget, US dollars (hard cap)</label><input type="number" id="usd" data-keep="no" min="0" step="0.5" value="${esc(s.budget_usd)}" style="width:110px"></div>
-        <div class="between"><label for="tv">Value of an hour, US dollars</label><input type="number" id="tv" data-keep="no" min="0" step="1" value="${esc(s.time_value_per_hour)}" style="width:110px"></div>
-        <div class="between"><label for="cap">Safety cap, work units</label><input type="number" id="cap" data-keep="no" min="20" value="${esc(st.budget.cap)}" style="width:110px"></div></div>
+        <div class="between"><label for="tv">Value of an hour, US dollars</label><input type="number" id="tv" data-keep="no" min="0" step="1" value="${esc(s.time_value_per_hour)}" style="width:110px"></div></div>
       <div class="field" style="border-style:dashed"><div class="caps">Constraints, optional</div>${cons}</div>
     </div>
     <div class="between" style="margin-top:auto;padding-top:14px;border-top:1px solid var(--line)">
       <span class="small muted">Cynqra decomposes it into requirements and proposes the workforce. Submitting counts as one founder intervention.</span>
-      <button class="btn dark" id="confirm" ${S.busy ? "disabled" : ""}>Submit to Cynqra</button></div></div>`;
+      <button class="btn dark" id="submit" ${S.busy ? "disabled" : ""}>Submit to Cynqra</button></div></div>`;
 }
 
 function orgChart(workers) {
@@ -237,9 +243,9 @@ const allowOverride = () => !!(wfv().settings || {}).allow_workforce_override;
 function budgetTable(f) {
   if (!f) return "";
   const rows = Object.entries(f.layers).map(([k, v]) => `<tr><td>${esc(k.charAt(0).toUpperCase() + k.slice(1))}</td><td class="mono">${usd(v.usd)}</td><td class="small">${esc(v.basis)}</td></tr>`).join("");
-  const byw = Object.entries(f.by_worker || {}).map(([w, v]) => `<span class="pill grey">${esc(wt(w))} ${f.priced ? usd(v.usd) : v.units + " units"}</span>`).join(" ");
+  const byw = Object.entries(f.by_worker || {}).map(([w, v]) => `<span class="pill grey">${esc(wt(w))} ${usd(v.usd)}</span>`).join(" ");
   return `<div class="tscroll"><table class="tbl"><thead><tr><th>Layer</th><th>USD</th><th>Basis</th></tr></thead><tbody>${rows}
-    <tr><td><b>Project total</b></td><td class="mono"><b>${usd(f.total_usd)}</b></td><td class="small">against the hard cap of ${usd(f.cap_usd)}${f.priced ? "" : `; ${f.units_total} work units`}</td></tr></tbody></table></div>
+    <tr><td><b>Project total</b></td><td class="mono"><b>${usd(f.total_usd)}</b></td><td class="small">against the hard cap of ${usd(f.cap_usd)}${f.spent_before_usd ? `, ${usd(f.spent_before_usd)} of it already spent on planning` : ""}</td></tr></tbody></table></div>
     <div class="small">By worker: ${byw}</div>${(f.warnings || []).map((w) => `<div class="notice small">${esc(w)}</div>`).join("")}`;
 }
 
@@ -250,16 +256,16 @@ function planStep() {
   const ms = (plan.milestones || []).map((m) => `<tr class="ms"><td colspan="6"><b>${esc(m.name)}</b> <span class="muted small">day ${esc(m.due_day)}</span></td></tr>
     ${tasks.filter((t) => t.milestone_id === m.id).map((t) => `<tr><td class="mono">${esc(t.id)}</td><td>${esc(t.title)}<div class="small muted">${esc((t.acceptance_criteria || []).join("; "))}</div></td>
       <td>${esc(wt(t.owner_worker_id))}<div class="small muted">accountable: ${esc(wt(t.accountable))}</div></td><td>${riskPill(t.risk_tier)}</td>
-      <td class="mono small">${esc((t.dependencies || []).join(", ") || "none")}</td><td class="small">${esc(t.verification_gate || t.verification_method)}</td></tr>`).join("")}`).join("");
-  const staffed = (wfv().workers || []).map((w) => `<div class="kv"><span>${esc(w.title)}</span><span>${esc(w.model)} · ${pctx((w.candidates[0] || {}).p_task)} · ${usd((w.candidates[0] || {}).expected_usd)}</span></div>`).join("")
-    || (st.workers || []).map((w) => `<div class="kv"><span>${esc(w.title)}</span><span>${esc(w.intelligence_source_id)}</span></div>`).join("");
+      <td class="mono small">${esc((t.dependencies || []).join(", ") || "none")}</td><td class="small">${esc(t.verification_gate)}${t.documents ? `<div class="muted">${esc(t.documents.join(", "))}</div>` : ""}</td></tr>`).join("")}`).join("");
+  const staffed = (wfv().workers || []).map((w) => { const c = (w.candidates || []).find((x) => x.model_id === w.model_id) || {};
+    return `<div class="kv"><span>${esc(w.title)}</span><span>${esc(w.model)} · ${pctx(c.p_task)} · ${usd(c.expected_usd)}</span></div>`; }).join("");
   return `<div class="wiz-body">
     <div class="wiz-left">
       ${steps(2)}
       <h1 class="hero">The roadmap and the budget.</h1>
       <p class="lede">The approved organization, a model for every worker, the roadmap in milestones with owners and acceptance criteria, and the budget built on it. Nothing starts until you approve.</p>
       <div class="card stack"><div class="caps">Intelligence for each worker</div>${staffed}
-        <span class="small muted">${wfv().active ? "Chosen by the Intelligence Router from measured evidence: probability of passing verification, expected cost." : "Demo mode: one scripted source for every worker."}</span></div>
+        <span class="small muted">Chosen by the Intelligence Router from the registry's measured evidence: the chance of passing verification, expected cost and time.${regModels().length === 1 ? " The registry holds one model, so every worker runs on it." : ""}</span></div>
       <div class="card stack"><div class="caps">Budget</div>${budgetTable(st.forecast)}</div>
       <div class="err" role="alert">${esc(S.err)}</div>
     </div>
@@ -393,13 +399,14 @@ function statusPill() {
 }
 
 function shell() {
-  const st = S.st, b = st.budget, pct = Math.min(100, Math.round((100 * b.spent) / Math.max(1, b.cap)));
+  const st = S.st, cap = st.budget.settings.budget_usd, spent = st.budget.ledger.spent_total;
+  const pct = cap ? Math.min(100, Math.round((100 * spent) / cap)) : 100;
   const pend = (st.decisions.pending || []).filter((d) => !d.in_digest).length;
   const nav = VIEWS.map(([k, label]) => `<button class="nav ${S.view === k ? "on" : ""}" data-view="${k}"${S.view === k ? ' aria-current="page"' : ""}>
     <span>${label}</span>${k === "decisions" && pend ? `<span class="badge">${pend}</span>` : ""}</button>`).join("");
   const running = st.meta.phase === "running";
   const views = { company: vCompany, organization: vOrg, workforce: vWorkforce, work: vWork, decisions: vDecisions, models: vModels,
-    evolution: vEvolution, audit: vAudit, delivery: vDelivery };
+    performance: vPerformance, audit: vAudit, delivery: vDelivery };
   return `<div class="shell">
     <nav class="side" aria-label="Main"><div class="brand"><span class="wordmark">Cynqra</span><span class="small muted">${esc(st.company ? st.company.name : "")}</span></div>
       ${nav}
@@ -411,7 +418,7 @@ function shell() {
       <header class="top"><h1>${VIEWS.find((v) => v[0] === S.view)[1]}</h1>
         <div class="row small" style="gap:20px">
           <div class="row" style="gap:8px"><span>Budget</span><div class="meter ${pct >= 95 ? "bad" : pct >= 80 ? "warn" : ""}" role="img" aria-label="Budget ${pct} percent used"><i style="width:${pct}%"></i></div>
-            <span class="mono">${b.spent} / ${b.cap}</span></div>
+            <span class="mono">${usd(spent)} / ${usd(cap)}</span></div>
           <span>Founder interventions <b class="mono">${st.metrics.founder_interventions ?? 0}</b></span>
           ${modelActivity()}${statusPill()}
           <button class="btn sm" id="step" ${!running || st.auto.on || S.busy ? "disabled" : ""}>Step</button>
@@ -429,7 +436,7 @@ function stage() {
   const wf = !!st.organization;
   const org = st.organization && st.organization.status === "active";
   const cls = (done, now, work) => done ? "done" : now ? "now" : work ? "work" : "";
-  const build = by("spec").concat(by("decision"), by("code"));
+  const build = by("document").concat(by("decision"), by("code"), by("forecast"));
   return [
     ["Objective", cls(obj)], ["Workforce", cls(wf, !wf && obj)], ["Roadmap and budget", cls(org, !org && wf)],
     ["Build", cls(ver(build), waiting(build), org)], ["Verify", cls(ver(by("review_merge")), waiting(by("review_merge")), ver(build))],
@@ -501,7 +508,7 @@ function vOrg() {
         <div class="row"><select id="gq"><option value="approves">Who approves</option><option value="owns">Who owns</option><option value="depends">What depends on</option></select>
           <input type="text" id="gs" value="merge_to_main" aria-label="Action type or task id" style="flex:1"><button class="btn sm" id="ask">Ask</button></div>${ans}</div></div>
     <div class="card side-panel stack"><div><span class="caps">Worker ${esc(w.id)}</span><h2 style="font-size:22px">${esc(w.title)}</h2></div>
-      <div class="kv"><span>${w.model_id ? "Model, chosen by the workforce engine" : "Intelligence"}</span><span>${esc(w.intelligence_source_id)}</span></div>
+      <div class="kv"><span>Model, chosen by the Intelligence Router</span><span>${esc(w.model || "not yet")}</span></div>
       <div class="kv"><span>Capabilities</span><span>${esc((w.capabilities || []).join(", "))}</span></div>
       <div class="kv"><span>Reports to</span><span>${esc(wt(w.reports_to))}</span></div>
       <div class="kv"><span>Current work</span><span>${esc(cur)}</span></div>
@@ -513,10 +520,10 @@ function vOrg() {
 /* ---------------------------------------------------------------- the AI workforce and the model registry -- */
 const wfv = () => (S.st && S.st.workforce) || {};
 const regModels = () => wfv().registry || [];
-const wfSettings = () => (regModels().length ? wfv().settings : null);
 const usd = (v) => (v === null || v === undefined ? "n/a" : `$${Number(v).toFixed(Number(v) < 1 ? 4 : 2)}`);
 const pctx = (v) => (v === null || v === undefined ? "n/a" : `${Math.round(v * 100)}%`);
-const RUNTIME = { llama: "This computer (llama.cpp)", hf: "Hugging Face Inference Providers", openai_compatible: "OpenAI-compatible server" };
+const RUNTIME = { llama: "This computer (llama.cpp)", hf: "Hugging Face Inference Providers", openai_compatible: "OpenAI-compatible server",
+  environment: "The model this environment names", scripted: "Demo script (not a model)" };
 
 function candTable(rows, chosen, compact) {
   if (!rows || !rows.length) return "";
@@ -529,8 +536,7 @@ function candTable(rows, chosen, compact) {
 
 function vWorkforce() {
   const wf = wfv();
-  if (!wf.active) return `<div class="card stack"><h2 style="font-size:18px">One model for every worker</h2><p class="muted">${esc(wf.why || "")}.
-    Register models in <button class="btn sm" data-view="models">Models</button> and start a live run: Cynqra then chooses a model for each worker, meters it and replaces it when it fails.</p></div>`;
+  if (!wf.active) return `<div class="card"><p class="muted" style="margin:0">No workers yet.</p></div>`;
   const L = wf.ledger || {}, s = wf.settings || {};
   const alloc = Object.values(L.allocated || {}).reduce((a, b) => a + b, 0);
   const tile = (v, l) => `<div class="tile"><b>${v}</b><span>${l}</span></div>`;
@@ -539,7 +545,8 @@ function vWorkforce() {
         <span class="pill teal">${esc(w.model)}</span></div>
       <div class="kv"><span>Budget allocated, spent</span><span class="mono">${usd(w.budget.allocated)}, ${usd(w.budget.spent)}</span></div>
       <div class="kv"><span>Verified, first pass, reworks</span><span class="mono">${w.performance.verified || 0}, ${w.performance.first_pass || 0}, ${w.performance.reworks || 0}</span></div>
-      <details><summary class="small">The staffing choice: every available model, scored for this role</summary>${candTable(w.candidates, (w.candidates[0] || {}).model_id, true)}</details></div>`).join("");
+      <div class="small muted">${esc(w.why)}</div>
+      <details><summary class="small">The staffing choice: every available model, scored for this worker's work</summary>${candTable(w.candidates, w.model_id, true)}</details></div>`).join("");
   const reps = (wf.replacements || []).map((r) => `<div class="card stack rep">
       <div class="between"><b>${esc(r.task_id)}: ${esc(r.role)} ${esc(r.worker_id)} moved from ${esc(modelName(r.from))} to ${esc(modelName(r.to))}</b><span class="small muted">${esc(r.at)}</span></div>
       <span class="small">Why: ${esc(r.reason)}</span>
@@ -548,16 +555,11 @@ function vWorkforce() {
       <details><summary class="small">The choice: every other available model</summary>${candTable(r.candidates, r.to)}</details></div>`).join("")
     || `<p class="muted small">No worker has been replaced in this run.</p>`;
   const ledger = (L.events || []).slice(-8).reverse().map((e) => `<div class="list-row small"><span>${e.what === "allocated" ? `Allocated ${e.tasks} tasks` : `${esc(e.task)}: released ${usd(e.released)} from ${esc(modelName(e.from))}, drew ${usd(e.drawn)} for ${esc(modelName(e.to))}`}</span><span class="mono">reserve ${usd(e.reserve)}</span></div>`).join("");
-  const inUse = {};
-  (wf.workers || []).forEach((w) => (inUse[w.model] = inUse[w.model] || []).push(w.title));
-  const reuse = Object.entries(inUse).map(([m, ws]) => `<div class="kv"><span>${esc(m)}</span><span>${esc(ws.join(", "))}</span></div>`).join("");
-  const evals = (S.st.evaluations || []).slice().reverse().map((e) => `<div class="list-row small"><span><b>${esc(e.decision)}</b> ${esc(e.task_id)}, ${esc(wt(e.worker_id))}: ${esc(e.why)}${e.regression_check ? ` · regression check: ${esc(e.regression_check)}` : ""}${e.why_kept ? ` · ${esc(e.why_kept)}` : ""}</span><span class="mono">${esc(e.at.slice(11, 19))}</span></div>`).join("");
+  const reuse = Object.entries(wf.models_in_use || {}).map(([m, ws]) => `<div class="kv"><span>${esc(modelName(m))}</span><span>${esc(ws.map(wt).join(", "))}</span></div>`).join("");
   return `<div class="tiles">${tile(usd(s.budget_usd), "Budget")}${tile(usd(alloc), "Allocated to tasks")}${tile(usd(L.spent_total), "Spent")}
       ${tile(usd(L.reserve), "Reserve for retries and replacements")}${tile(`$${esc(s.time_value_per_hour)}/h`, "Value of an hour")}${tile((wf.replacements || []).length, "Replacements")}</div>
-    <div class="two"><div class="card stack"><h2 style="font-size:17px">Models in use</h2><span class="small muted">One model can power many workers; workers with the same title can run on different models.</span>${reuse}</div>
-      <div class="card stack"><h2 style="font-size:17px">Replacement Engine</h2><span class="small muted">Keep, reroute or replace, each with its reason.</span>${evals || '<p class="muted small">No evaluation yet.</p>'}</div></div>
+    <div class="card stack"><h2 style="font-size:17px">Models in use</h2><span class="small muted">Worker is not model: one model can power many workers, and workers with the same title can run on different models.</span>${reuse}</div>
     <div class="grid2">${workers}</div>
-    ${scorecards()}
     <h2 style="font-size:18px;margin:10px 0 4px">Replacements</h2>${reps}
     <div class="card"><h2 style="font-size:17px;margin-bottom:6px">Budget ledger</h2>${ledger || '<p class="muted small">Nothing allocated yet.</p>'}</div>`;
 }
@@ -590,8 +592,8 @@ function finalReport() {
       <tr><td><b>Total</b></td><td class="mono">${usd(ec.total_forecast)}</td><td class="mono">${usd(ec.total_actual)}</td><td class="mono">cap ${usd(ec.cap_usd)}</td></tr></tbody></table></div></div>
       <div><span class="caps">By worker</span><div class="tscroll"><table class="tbl"><thead><tr><th>Worker</th><th>Forecast</th><th>Actual</th></tr></thead><tbody>${byw}</tbody></table></div></div></div>
     <span class="caps">Intelligence changes</span>${changes}
-    <div class="small">First pass ${pctx(f.metrics.first_pass_rate)}, reworks ${esc(f.metrics.reworks)}, defect escapes ${esc(f.metrics.defect_escapes)}, false rejections ${esc(f.metrics.false_rejections)}, verification ${esc(f.metrics.verification_seconds)} s.</div></div>
-    ${scorecards()}`;
+    <div class="small">First pass ${pctx(f.metrics.first_pass_rate)}, reworks ${esc(f.metrics.reworks)}, defect escapes ${esc(f.metrics.defect_escapes)}, false rejections ${esc(f.metrics.false_rejections)}, verification ${esc(f.metrics.verification_seconds)} s.
+      Every worker's scorecard is in <button class="btn sm" data-view="performance">Performance</button>.</div></div>`;
 }
 
 function modelName(id) { const m = regModels().find((x) => x.id === id); return m ? m.name : id; }
@@ -688,7 +690,7 @@ function vDecisions() {
   const card = (d, big) => {
     const extra = d.kind === "decision" ? `<label class="lbl" for="edit_${d.id}">Edit the rule before approving (optional)</label>
         <textarea class="note" id="edit_${d.id}">${esc(d.recommendation)}</textarea>` : d.kind === "budget_breaker" ?
-      `<label class="lbl" for="cap_${d.id}">New cap, work units</label><input type="number" id="cap_${d.id}" value="${esc(st.budget.cap + 60)}">` : "";
+      `<label class="lbl" for="usd_${d.id}">New budget, US dollars</label><input type="number" id="usd_${d.id}" step="0.5" value="${esc((Math.max(st.budget.settings.budget_usd, st.budget.ledger.spent_total) * 1.5).toFixed(2))}">` : "";
     const side = d.extra && d.extra.side_action ? `<div class="deny"><span class="h">${esc(d.extra.side_action.status.toUpperCase())} · external_message</span><span class="small">${esc(d.extra.side_action.summary)} ${esc(d.extra.side_action.reason)}</span></div>` : "";
     return `<div class="dcard ${fresh("d:" + d.id)}"><div class="between"><span class="mono small muted">${esc(d.id)} · from ${esc(wt(d.source))}</span>${riskPill(d.risk)}</div>
       <h2>${esc(KIND_TITLE[d.kind] || d.kind)}${d.task_id ? `: ${esc(d.task_id)}` : ""}</h2>
@@ -711,16 +713,13 @@ function vDecisions() {
         <div class="card stack"><h3 style="font-size:15px">Stopped by policy, nothing for you to do</h3>${denied}</div></div></div>`;
 }
 
-function vEvolution() {
-  const ev = S.st.evolution;
-  if (!ev) return `<div class="card"><p class="muted">No organization yet.</p></div>`;
-  const rows = ev.workers.map((w) => `<tr><td>${esc(w.title)}</td><td class="mono">${w.verified || 0}</td><td class="mono">${w.first_pass || 0}</td><td class="mono">${w.reworks || 0}</td><td class="mono">${w.blockers || 0}</td></tr>`).join("");
-  return `<p class="small muted" style="margin:0">View only in the MVP (Book 1 P1). Nothing here changes the organization by itself.</p>
-    <div class="two"><div class="card stack"><span class="caps">Organizational review</span><h2 class="serif" style="font-size:26px">${esc(ev.title)}</h2>
-      <div><span class="caps">Recommendation</span><p style="margin:4px 0 0">${esc(ev.recommendation)}</p></div>
-      <div><span class="caps">What would change this</span><p style="margin:4px 0 0">${esc(ev.change)}</p></div>
-      <span class="pill grey" style="align-self:flex-start">Status: ${esc(ev.status)}</span></div>
-    <div class="card"><h2 style="font-size:17px;margin-bottom:8px">Worker performance</h2><table class="plan-table"><thead><tr><th>Worker</th><th>Verified</th><th>First pass</th><th>Reworks</th><th>Blockers</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+function vPerformance() {
+  const st = S.st;
+  if (!(st.performance || []).length) return `<div class="card"><p class="muted">No organization yet.</p></div>`;
+  const evals = (st.evaluations || []).slice().reverse().map((e) => `<div class="list-row small"><span><b>${esc(e.decision)}</b> ${esc(e.task_id)}, ${esc(wt(e.worker_id))} on ${esc(modelName(e.model_id))}: ${esc(e.why)}${e.regression_check ? ` · regression check: ${esc(e.regression_check)}` : ""}${e.why_kept ? ` · ${esc(e.why_kept)}` : ""}</span><span class="mono">${esc(e.at.slice(11, 19))}</span></div>`).join("");
+  return `<p class="small muted" style="margin:0">Intelligence is measured on the work itself, per worker and per model it ran on: quality, reliability, efficiency, cost, fit and stability. The Replacement Engine reads these signals.</p>
+    ${scorecards()}
+    <div class="card stack"><h2 style="font-size:17px">Replacement Engine</h2><span class="small muted">Every evaluation, and whether it kept the model, rerouted the task to a peer or replaced the model, with the reason.</span>${evals || '<p class="muted small">No evaluation yet: no worker has crossed a threshold.</p>'}</div>`;
 }
 
 async function loadReplay() {
@@ -794,24 +793,26 @@ function vDelivery() {
 /* ---------- events ---------- */
 function bind() {
   $$("[data-view]").forEach((b) => b.onclick = () => { S.view = b.dataset.view; S.err = ""; if (S.view === "audit") loadReplay().then(() => paint(true)); paint(true); });
-  $$(".mode input").forEach((r) => r.onchange = () => { if (r.checked) S.mode = r.value; $$(".mode").forEach((m) => m.classList.toggle("on", m.contains(r) && r.checked)); });
+  $$(".mode input").forEach((r) => r.onchange = () => { if (r.checked) S.mode = r.value; paint(true); });
+  const sc = $("#scenario");
+  if (sc) sc.onchange = () => { S.scenario = sc.value; const x = scenario(); if (x) { $("#messy").value = x.messy; $("#coname").value = x.title; } paint(true); };
   const on = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
   on("structure", () => {
     const isNew = S.st.meta.phase === "new", name = isNew ? $("#coname").value : "", messy = $("#messy").value;
     const mode = isDesktop() ? "live" : ((($("input[name=mode]:checked") || {}).value) || S.mode);
     act(async () => {
-      if (isNew) await api("/api/company", { name, mode });
+      if (isNew) await api("/api/company", { name, mode, scenario: S.scenario });
       await api("/api/objective/draft", { messy });
     });
   });
-  on("confirm", () => {
+  on("submit", () => {
     const fields = {}; $$("[data-field]").forEach((i) => fields[i.dataset.field] = i.value);
     const constraints = {}; $$("[data-constraint]").forEach((i) => constraints[i.dataset.constraint] = i.value);
-    const cap = Number($("#cap").value), usd = Number($("#usd").value), tv = Number($("#tv").value);
+    const usd = Number($("#usd").value), tv = Number($("#tv").value);
     act(async () => {
       await api("/api/objective/fields", { fields });
-      await api("/api/objective/guardrails", { budget_cap: cap, budget_usd: usd, time_value_per_hour: tv, constraints });
-      await api("/api/objective/confirm", {});
+      await api("/api/objective/guardrails", { budget_usd: usd, time_value_per_hour: tv, constraints });
+      await api("/api/objective/submit", {});
     });
   });
   on("approve-workforce", (ev) => {
@@ -872,10 +873,10 @@ function bind() {
   if (rt) rt.onchange = () => { S.replayTask = rt.value; S.replayKey = ""; loadReplay().then(() => paint(true)); };
   $$("[data-decide]").forEach((b) => b.onclick = () => {
     const id = b.dataset.id, action = b.dataset.decide, d = (S.st.decisions.pending || []).find((x) => x.id === id) || {};
-    const noteEl = document.getElementById(`note_${id}`), editEl = document.getElementById(`edit_${id}`), capEl = document.getElementById(`cap_${id}`);
+    const noteEl = document.getElementById(`note_${id}`), editEl = document.getElementById(`edit_${id}`), usdEl = document.getElementById(`usd_${id}`);
     const edited = {}, note = noteEl ? noteEl.value : "";
     if (editEl && editEl.value.trim() && editEl.value.trim() !== (d.recommendation || "").trim()) edited.recommendation = editEl.value.trim();
-    if (capEl) edited.cap = Number(capEl.value);
+    if (usdEl) edited.budget_usd = Number(usdEl.value);
     act(() => api(`/api/decisions/${id}`, { action, note, edited }));
   });
 }

@@ -36,9 +36,11 @@ unchanged; they still see the same four workers.
    overlays the environment for that call, on that thread. Without a route, nothing changed.
 2. **A model registry** (`cynqra/registry.py`): models as facts, calls metered, verifications recorded as
    outcomes. It sits beside the runs, so learning carries across projects.
-3. **A workforce engine** (`cynqra/workforce.py`): scoring, staffing, allocation, the ledger.
-4. **Engine hooks** (`cynqra/engine.py`): staff at organization time, allocate after the plan, meter each call,
-   record each verification, replace instead of escalating when another model fits.
+3. **A workforce engine**: scoring, staffing, allocation, the ledger. Since the rebuild these are the
+   Intelligence Router (`cynqra/router.py`) and the Budget Engine (`cynqra/budget.py`).
+4. **Engine hooks**: staff at organization time, allocate after the plan, meter each call, record each
+   verification, replace instead of escalating when another model fits. Since the rebuild: the orchestrator
+   (`engine.py`), the Verification Service (`verifier.py`) and the Replacement Engine (`replacement.py`).
 5. **Routing in `ModelSource`** (`cynqra/intelligence.py`): each call is sent through the calling worker's
    current model. The prompts are the same.
 
@@ -47,7 +49,9 @@ unchanged; they still see the same four workers.
 ### Data
 
 `model` (one per registered model): `id`, `name`, `version`, `provider`, `runtime` (`llama` on this machine,
-`hf` for Hugging Face Inference Providers, `openai_compatible` for any compatible server), `ref` (catalog id,
+`hf` for Hugging Face Inference Providers, `openai_compatible` for any compatible server, `environment` for
+the model the environment names, priced at its list price, and `scripted` for a demo's prepared script, which
+stands in a demo run's own registry so the demo is staffed and metered like any run), `ref` (catalog id,
 Hugging Face id with its provider, or served name), `local`, `hardware`, `context`, `license`, `params`,
 `price_in`/`price_out` (USD per million tokens), `compute_usd_per_hour` (for a model on this machine),
 `base_url`, `api_key_env` (the variable's name; a key is never stored), `effort`, `json_schema`, `tools`,
@@ -85,10 +89,11 @@ failed calls in a row mark it down for ten minutes).
 ### Probe
 
 `cynqra/probe.py`. A newly registered model does two pieces of Cynqra's real work: structure a founder's
-sentence into the seven fields (verified when all are filled), and write a small module and its tests from a
+sentence into the seven fields (verified when at most one is left for the founder to fill), and write a small module and its tests from a
 precise handoff, fixing it from the failing tests for up to three rounds (each round verified by running the
 tests). Every round is an outcome with its real tokens, time and cost. It is how selection starts from evidence
-instead of a name.
+instead of a name. The desktop app's `--check-model` runs the same probe on a registered model, so a machine
+check is also that model's first measured record.
 
 ## 4. The AI worker
 
@@ -109,7 +114,8 @@ files, the protocol objects keep flowing between the same workers.
 
 ## 5. The workforce selection engine
 
-For a model *m* and a kind of task *k* (plan, spec, decision, assign, code, review_merge, deploy, objective):
+For a model *m* and a kind of work *k* (a task type from the catalog: document, decision, code, forecast,
+review_merge, deploy; or coordination work: objective, plan, assign):
 
 - **p**, the chance one attempt passes verification: *m*'s verified over attempts on *k*, pulled toward *m*'s
   record on all kinds with the weight of two samples: `p = (verified_k + 2 * p_m) / (attempts_k + 2)`,
@@ -136,7 +142,10 @@ Triggers:
 2. four replies in a row run past the model's output limit;
 3. the model stops answering (two failed calls in a row).
 
-What happens, in `engine._replace_or_escalate`:
+What happens, in the Replacement Engine (`replacement.evaluate`; the steps below are the forced path, and since
+the product definition's flow the Performance Engine's thresholds can trigger it earlier, where keeping the
+model is a valid answer, a task can be rerouted to a peer of the same role, and every successor passes a
+regression check first):
 1. The failure is recorded as outcomes against the model, with the failing tests.
 2. Every other available model is scored for this task's kind, with the updated evidence, against the budget
    left: the reserve plus what the failing model left unspent of this task's allocation.
@@ -170,9 +179,10 @@ The founder sets a USD budget and the value of an hour. After the plan is approv
 expected cost on its owner's model; the rest is the **reserve** for retries and replacements. Every call is
 charged in dollars to its worker and task (hosted: tokens at the provider's price; on this machine: seconds at
 the stated rate per hour). A task past its allocation draws on the reserve. A replacement releases the failing
-model's unspent allocation and draws the successor's expected cost. The Workforce view shows the budget,
-allocations, spend, reserve and each move in the ledger. The older work-unit cap and its breaker still stand as
-the hard stop.
+model's unspent allocation and draws the successor's expected cost. The workers' own test runs and the Verification Service are
+charged as this machine's time. The Workforce view shows the budget, allocations, spend, reserve and each move
+in the ledger. The dollar cap is the hard stop: when spending reaches it the breaker opens and all work pauses
+until the founder raises the cap or stops the run.
 
 ## 9. The proof of concept: run it
 
@@ -219,3 +229,53 @@ run is pending.
   to load). Hosted models have no such limit.
 - **The prior is uniform.** Probes give each model real evidence before its first project; with more runs the
   record, not the prior, decides.
+
+## 12. Direction: Cynqra supplies the intelligence
+
+Decided with the founder on 27 September, to build next. Intelligence will be abundant; what is scarce is
+knowing which intelligence to use for which work. If each founder had to bring keys, Cynqra could only route
+among the few models that founder happened to hold, and the router would have little to choose from. So Cynqra
+supplies the intelligence, and the founder sets the outcome and a budget in dollars:
+
+```
+                       CYNQRA
+                         │
+   Budget Engine ──▶ Intelligence Router ◀── Intelligence Registry
+   (dollars left)   (per worker, per task    (models, prices, measured
+                     type: lowest cost per    scorecards per task type,
+                     verified task)           pooled across runs)
+                         │                          ▲
+            ┌────────────┴────────────┐             │ outcomes: passed or failed,
+         Worker A                 Worker B          │ cost, time, retries
+           CTO                 Data Scientist       │
+            └────────────┬────────────┘             │
+                         │            Verification Service
+                         │                          ▲
+                Intelligence Gateway ───────────────┘
+        (holds credentials in a vault, meters $ per worker and task)
+       ┌──────────┬──────────┬───────────┬─────────────┐
+     OpenAI   Anthropic   Bedrock   Open-weight    Founder's own
+   connection connection connection (hosted/local) key (optional)
+
+   Performance Engine ──▶ Replacement Engine: keep / reroute / replace the model
+   (the worker's identity, role, authority and history stay)
+```
+
+- **The Gateway holds the connections.** Cynqra's own provider accounts, hosted open-weight models and, as an
+  option, a founder's key for a company that must use a particular provider. Credentials live in a vault and are
+  added only as a call leaves; no worker, prompt, log or export ever holds one. Every call is metered in dollars
+  to the company, the worker, the task and the layer.
+- **The Registry becomes a service.** Models, prices and scorecards pooled across every run, so each project
+  starts from everything Cynqra has measured. What is pooled is the task type, the outcome, the cost and the
+  time, never the work itself.
+- **The loop closes on verification.** Every verified or rejected attempt updates its model's record for that
+  task type; the Router reads only that record.
+- **New models join on evidence.** A new model or version runs the calibration work (the probe) and the
+  regression gate, then earns work as its record justifies.
+
+What exists now: the Router, the Registry (per installation), the probe and regression gate, the Budget Engine,
+the Performance and Replacement Engines, and per-call routing and metering. What this direction adds: the
+Gateway as a service with its vault and connections, and the Registry as a shared service. Business questions
+for the founder: reselling terms with each provider, prepaid credit or billing after use, and the data-handling
+commitments for calls that pass through Cynqra.
+

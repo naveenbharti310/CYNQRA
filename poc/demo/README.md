@@ -1,6 +1,6 @@
 # Cynqra product demo video
 
-Cynqra_POC_demo.mp4 sits next to the project folder. It is 3 minutes 36 seconds,
+Cynqra_POC_demo.mp4 sits next to the project folder. It was 3 minutes 36 seconds,
 1920 x 1080, 30 frames a second, silent with on screen captions. Every screen in it is the real POC doing the real work in demo
 mode: the objective is structured, the organization runs, verification catches the
 seeded defect, the PM clears the Blocker, policy denies the email, the release is built,
@@ -8,16 +8,23 @@ tested and deployed to a local URL, and the live product is used. Nothing is moc
 The only additions are a presentation layer (overlay.js): pointer, captions, highlights,
 chapter cards and the window that shows the live product.
 
+The script (record_demo.js) follows the current canonical flow: objective, workforce gate,
+roadmap and budget gate, the work, delivery. The video beside the project folder was recorded
+from the 26 September build, before the workforce gate and the dollar budget; re-record it with
+`make_video.py` on a machine with ffmpeg. The storyboard below is the current script's.
+
 ## Storyboard
 
 | Time | Chapter | What you see |
 | --- | --- | --- |
-| 0:00 | Title | Type one objective. Approve a handful of decisions. Walk away with a live product. |
-| 0:08 | 01 Objective | One messy sentence typed, seven fields out, two marked inferred, budget cap, decision 1 |
-| 0:38 | 02 Organization and plan | Fixed team, Verification Service outside it, six tasks with platform set risk, decision 2 |
-| 0:56 | 03 The organization works | Protocol tape, spec verified, product rule card anatomy, decision 3, defect caught and reworked, Blocker raised and cleared without the founder, merge card, decision 4, production deploy card with the denied email, decision 5 |
-| 2:20 | 04 Live and handed over | Ten deployment stages, the live candidate tracker used (flagged, stuck, filter), transition record, decision 6, export bundle, replay 8 of 8, company tiles |
-| 3:26 | End | Six founder decisions, 6 of 6 tasks verified, 16 product tests, 68 of 120 work units, one defect caught, one Blocker cleared, one action stopped, ten stages |
+| Chapter | What you see |
+| --- | --- |
+| Title | Type one objective. Approve a handful of decisions. Walk away with a live product. |
+| 01 Objective | One messy sentence typed, seven fields out, two marked inferred, the dollar budget, decision 1 |
+| 02 Workforce, roadmap and budget | Requirements and workstreams, the synthesized organization with the reason for each role (decision 2), a model for every worker, the roadmap and the budget in layers (decision 3) |
+| 03 The organization works | Protocol tape, documents verified, product rule card anatomy (decision 4), defect caught and reworked, Blocker raised and cleared without the founder, merge card (decision 5), production deploy card with the denied email (decision 6) |
+| 04 Live and handed over | Ten deployment stages, the live candidate tracker used, transition record, decision 7, export bundle, replay, company tiles |
+| End | Seven founder decisions, tasks verified, product tests, workers synthesized, one defect caught, one Blocker cleared, one action stopped, ten stages |
 
 ## Make it again
 

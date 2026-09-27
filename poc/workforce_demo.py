@@ -73,8 +73,8 @@ def run(args) -> int:
         missing = [k for k, v in obj["structured"].items() if not str(v).strip()]
         if missing:
             api("/api/objective/fields", {"fields": {k: "none stated" for k in missing}})
-        api("/api/objective/guardrails", {"budget_cap": 5000, "budget_usd": args.budget_usd, "time_value_per_hour": 10})
-        api("/api/objective/confirm", {})
+        api("/api/objective/guardrails", {"budget_usd": args.budget_usd, "time_value_per_hour": 10})
+        api("/api/objective/submit", {})
         st = api("/api/state")
         prop = st["proposal"]
         rep["workforce_proposal"] = {"roles": prop["roles"], "summary": prop["summary"]}

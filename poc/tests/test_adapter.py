@@ -13,11 +13,11 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from helpers import TempDir, engine_to_running, no_model_env, restore_env, run_journey
+from helpers import TempDir, engine_to_running, env_source, no_model_env, restore_env, run_journey
 
 import fake_model
 from cynqra import model_adapter
-from cynqra.intelligence import IntelligenceError, ModelSource, _parse_json
+from cynqra.intelligence import IntelligenceError, _parse_json
 
 RETIRED = "claude-sonnet-4-20250514"
 
@@ -142,18 +142,18 @@ class AnthropicWireTests(ProviderBase):
     def test_truncated_reply_is_an_error_not_a_short_answer(self):
         self.p.mode = "truncated"
         with self.assertRaises(IntelligenceError) as ctx:
-            ModelSource()._call("Convert the founder objective: anything")
+            env_source()._call("Convert the founder objective: anything")
         self.assertIn("truncated", str(ctx.exception))
 
     def test_refusal_is_an_error_not_an_empty_answer(self):
         self.p.mode = "refusal"
         with self.assertRaises(IntelligenceError) as ctx:
-            ModelSource()._call("Convert the founder objective: anything")
+            env_source()._call("Convert the founder objective: anything")
         self.assertIn("refused", str(ctx.exception))
 
     def test_transient_overload_is_retried(self):
         self.p.mode = "overloaded_once"
-        data, _ = ModelSource()._call("Convert the founder objective: a tracker")
+        data, _ = env_source()._call("Convert the founder objective: a tracker")
         self.assertEqual(data["product"], "Internal candidate tracker")
         self.assertEqual(len(self.p.requests), 2)
 
@@ -165,7 +165,7 @@ class AnthropicWireTests(ProviderBase):
 
     def test_effort_is_passed_through_and_validated(self):
         os.environ["CYNQRA_EFFORT"] = "low"
-        ModelSource()._call("Convert the founder objective: a tracker")
+        env_source()._call("Convert the founder objective: a tracker")
         self.assertEqual(self.p.requests[-1]["body"]["output_config"], {"effort": "low"})
         os.environ["CYNQRA_EFFORT"] = "turbo"
         self.assertIn("CYNQRA_EFFORT", model_adapter.complete("x")["error"])
@@ -176,30 +176,33 @@ class AnthropicWireTests(ProviderBase):
     def test_retired_model_is_an_error_not_a_reply(self):
         os.environ["CYNQRA_MODEL"] = RETIRED
         with self.assertRaises(IntelligenceError) as ctx:
-            ModelSource()._call("Convert the founder objective: anything")
+            env_source()._call("Convert the founder objective: anything")
         self.assertIn("HTTP 404", str(ctx.exception))
 
-    def test_provider_outage_stops_the_run(self):
+    def test_a_provider_outage_goes_to_the_founder_when_no_other_model_can_work(self):
         e = engine_to_running(self.tmp.path, mode="live")
         self.p.mode = "http500"
-        e._intel = None
-        self.assertEqual(e.run_until_idle()[-1]["did"], "error")
-        self.assertEqual(e.meta["phase"], "stopped_error")
-        self.assertIn("Nothing was invented", e.meta["notice"])
+        steps = [r["did"] for r in e.run_until_idle()]
+        self.assertIn("model_error_retry", steps)
+        self.assertIn("escalated", steps)
+        d = e.pending_decisions()[0]
+        self.assertIn("HTTP 500", d["problem"])
+        self.assertIn("No other model in the registry is available", d["problem"])
+        self.assertFalse(e.registry.availability(e.registry.get("environment"))[0], "the outage is on its record")
         e.close()
 
     def test_one_retry_for_prose_then_json(self):
         self.p.mode = "prose_once"
-        data, usage = ModelSource()._call("Convert the founder objective: a tracker")
+        data, usage = env_source()._call("Convert the founder objective: a tracker")
         self.assertEqual(data["product"], "Internal candidate tracker")
         self.assertEqual(len(self.p.requests), 2)
         self.assertTrue(self.p.requests[1]["body"]["messages"][0]["content"].endswith("Reply with only one JSON object."))
-        self.assertGreaterEqual(usage["units"], 1)
+        self.assertGreater(usage["tokens_in"], 0)
 
     def test_prose_twice_is_refused(self):
         self.p.mode = "prose"
         with self.assertRaises(IntelligenceError) as ctx:
-            ModelSource()._call("Convert the founder objective: a tracker")
+            env_source()._call("Convert the founder objective: a tracker")
         self.assertIn("did not return a JSON object", str(ctx.exception))
 
 
@@ -210,7 +213,7 @@ class LiveCheckRunnerTests(ProviderBase):
     def test_runner_drives_the_journey_and_checks_the_product(self):
         import live_check
         os.environ["ANTHROPIC_API_KEY"] = "test-key-not-real"
-        rep = live_check.run(live_check.SCENARIO["messy"], 5.0, 4000, self.tmp.path / "run", log=lambda *a: None)
+        rep = live_check.run(live_check.SCENARIO["messy"], 5.0, self.tmp.path / "run", log=lambda *a: None)
         self.assertEqual(rep["outcome"], "PASS", rep.get("reason"))
         self.assertEqual(rep["health"]["status"], 200)
         self.assertTrue(rep["product_tests"]["ran"] and rep["product_tests"]["passed"])
@@ -219,13 +222,13 @@ class LiveCheckRunnerTests(ProviderBase):
 
     def test_runner_refuses_without_a_key_and_the_spend_cap_stops_it(self):
         import live_check
-        rep = live_check.run("anything", 5.0, 4000, self.tmp.path / "a", log=lambda *a: None)
+        rep = live_check.run("anything", 5.0, self.tmp.path / "a", log=lambda *a: None)
         self.assertEqual(rep["outcome"], "UNRUN")
         os.environ["CYNQRA_S1_MODEL_CMD"] = "echo"
-        self.assertEqual(live_check.run("x", 5.0, 4000, self.tmp.path / "b", log=lambda *a: None)["outcome"], "UNRUN")
+        self.assertEqual(live_check.run("x", 5.0, self.tmp.path / "b", log=lambda *a: None)["outcome"], "UNRUN")
         del os.environ["CYNQRA_S1_MODEL_CMD"]
         os.environ["ANTHROPIC_API_KEY"] = "test-key-not-real"
-        rep = live_check.run(live_check.SCENARIO["messy"], 0.0001, 4000, self.tmp.path / "c", log=lambda *a: None)
+        rep = live_check.run(live_check.SCENARIO["messy"], 0.0001, self.tmp.path / "c", log=lambda *a: None)
         self.assertEqual(rep["outcome"], "UNRUN")
         self.assertIn("spend cap", rep["reason"])
 
@@ -234,9 +237,10 @@ class OpenAIWireTests(ProviderBase):
     def test_openai_format_and_precedence(self):
         os.environ["OPENAI_API_KEY"] = "sk-test-not-real"
         os.environ["ANTHROPIC_API_KEY"] = "test-key-not-real"
-        src = ModelSource()
-        self.assertEqual(src.label, "gpt-4o-mini", "OpenAI is used first when both keys are present")
-        data, usage = src._call("Plan the work for this organization")
+        from cynqra import model_adapter as ma
+        self.assertEqual(ma.resolve()["label"], "gpt-4o-mini", "OpenAI is used first when both keys are present")
+        data, usage = env_source()._call("Plan the work for this organization")
+        self.assertEqual(usage["label"], "gpt-4o-mini")
         self.assertIn("tasks", data)
         self.assertFalse(usage["estimated"])
         r = self.p.requests[0]
