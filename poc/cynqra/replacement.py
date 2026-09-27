@@ -6,7 +6,8 @@ of three things, and records why:
   keep      no alternative is expected to do better, or no better one passes its regression check
   reroute   the task moves to another worker of the same role whose model is expected to do better; both workers
             keep their identities
-  replace   the worker gets another model; its identity, role, authority, history and workspace stay
+  replace   the worker is bound to another intelligence; its identity, role, authority, history and workspace
+            stay (binding.py keeps the previous binding in its history)
 
 Before a new intelligence continues the work it passes a regression check (probe.regression_check): its verified
 record on this kind of work for its current version, or the calibration work of that kind done now. A model that
@@ -15,16 +16,21 @@ continue.
 
 Triggers:
   forced     a task failed verification three times, replies kept overflowing, or the model stopped answering;
-             the founder decides only when no alternative passes, or the task has had its replacements
+             the founder decides only when no alternative passes, or the task has had its replacements. The failing
+             intelligence's fallback (registry fallback_id) is tried first when it is available and fits.
   evidence   the Performance Engine's thresholds were crossed earlier (performance.below); keep is an answer
+  version    the intelligence a worker is bound to reports a new version: it continues only after its regression
+             check passes (the binding then pins the new version); otherwise it is unavailable and replaced
 """
 from __future__ import annotations
 
 import shutil
 
-from . import budget, performance, roles, router
+from . import binding, budget, performance, roles
 from . import settings as project_settings
 from .db import now
+from .intelligence import IntelligenceError
+from .intelligence_layer import router
 from .probe import regression_check
 
 MAX_REPLACEMENTS = 2  # intelligence changes per task before the founder decides
@@ -50,7 +56,7 @@ def evaluate(run, t: dict, why: str, forced: bool) -> dict:
     reg, s = run.registry, project_settings.get(run.store)
     wid = t["owner_worker_id"]
     w = run.worker(wid)
-    old = w["model_id"]
+    old = run.model_of(wid)
     left = budget.left_for(run.store, t["id"])
     _, rows = router.choose(reg, s, [t["kind"]], budget_left=left, exclude={old})
     try:
@@ -60,9 +66,10 @@ def evaluate(run, t: dict, why: str, forced: bool) -> dict:
     options = []  # (score, action, payload); a reroute first among equals, it changes no intelligence
     peers = []
     for p in run.workers():
-        if p["id"] == wid or p["role"] != w["role"] or not p.get("model_id") or p["model_id"] == old:
+        pm = run.model_of(p["id"])
+        if p["id"] == wid or p["role"] != w["role"] or not pm or pm == old:
             continue
-        m = reg.get(p["model_id"])
+        m = reg.get(pm)
         if not reg.availability(m)[0]:
             continue
         e = router.estimate(reg, m, t["kind"], s["time_value_per_hour"])
@@ -74,12 +81,15 @@ def evaluate(run, t: dict, why: str, forced: bool) -> dict:
         options.append((best_peer[0], 0, "reroute", best_peer[2]))
     options += [(r["score"], 1, "replace", r) for r in rows if r["fits_budget"]]
     options.sort(key=lambda o: (o[0], o[1]))
+    fallback = _fallback_of(reg, old)
+    if forced and fallback:  # the failing intelligence names its fallback: that is tried first
+        options.sort(key=lambda o: o[2] != "replace" or o[3]["model_id"] != fallback)
     if not forced:  # evidence-triggered: change only when an alternative is expected to do better
         options = [o for o in options if current is None or o[0] < current["score"]]
     tried = []
     for _, _, action, payload in options:
-        model_id = payload["model_id"]
-        check = regression_check(reg, model_id, t["kind"])
+        model_id = payload["model_id"] if action == "replace" else run.model_of(payload["id"])
+        check = regression_check(run.supply, model_id, t["kind"])
         if check.get("usd"):
             run.spend(wid, t["id"], check["usd"], "verification")
         tried.append({"model_id": model_id, "action": action, "regression": check["evidence"], "passed": check["passed"]})
@@ -103,15 +113,23 @@ def evaluate(run, t: dict, why: str, forced: bool) -> dict:
     return {"did": "kept", "task": t["id"]}
 
 
+def _fallback_of(reg, model_id: str | None) -> str | None:
+    try:
+        fb = reg.get(model_id).get("fallback_id") if model_id else None
+        return fb if fb and reg.availability(reg.get(fb))[0] else None
+    except Exception:  # noqa: BLE001 - a removed intelligence has no fallback
+        return None
+
+
 def _swap(run, t: dict, best: dict, rows: list, why: str, regression: str) -> dict:
     wid = t["owner_worker_id"]
     w = run.worker(wid)
-    old = w["model_id"]
+    old = run.model_of(wid)
     reg = run.registry
     spent = budget.ledger(run.store)["spent"].get(t["id"], 0.0)
     prior = [o for o in reg.outcomes(old) if o["run_id"] == run.cid and o["task_id"] == t["id"]]
-    w.update({"model_id": best["model_id"], "model": best["model"]})
-    run.store.put("worker", wid, w)
+    binding.bind(run, wid, reg.get(best["model_id"]), reason=why, by="replacement_engine", candidates=rows,
+                 task_id=t["id"])
     e = router.estimate(reg, reg.get(best["model_id"]), t["kind"],
                         project_settings.get(run.store)["time_value_per_hour"])
     budget.reallocate(run.store, t["id"], old, e)
@@ -147,7 +165,7 @@ def _reroute(run, t: dict, peer: dict, why: str) -> dict:
     budget.move(run.store, t["id"], frm, peer["id"])
     n = run.count("replacement") + 1
     rep = {"id": f"rep_{n:03d}", "task_id": t["id"], "worker_id": frm, "to_worker": peer["id"], "role": peer["role"],
-           "from": run.model_of(frm), "to": peer["model_id"], "reason": why[:400], "attempts": t["attempts"],
+           "from": run.model_of(frm), "to": run.model_of(peer["id"]), "reason": why[:400], "attempts": t["attempts"],
            "usd_spent_by_previous": round(budget.ledger(run.store)["spent"].get(t["id"], 0.0), 4), "candidates": [],
            "rerouted": True, "at": now(), "inherited": ["task specification and handoff", "workspace files",
                                                         "test results"]}
@@ -193,21 +211,42 @@ def model_failed(run, t: dict, exc) -> dict | None:
     out = None
     s = project_settings.get(run.store)
     for w in run.workers():
-        if w.get("model_id") != exc.model_id:
+        if run.model_of(w["id"]) != exc.model_id:
             continue
         mine = [x for x in run.tasks() if x["owner_worker_id"] == w["id"] and x["status"] != "VERIFIED"]
         target = t if t["owner_worker_id"] == w["id"] else (mine[0] if mine else None)
         if target is not None:
             out = evaluate(run, target, f"{m['name']} stopped answering: {exc}", forced=True)
-        w = run.worker(w["id"])
-        if w.get("model_id") == exc.model_id:  # no open task, or its task went to a peer: the worker moves too
-            best, _ = router.choose(reg, s, roles.staffing_kinds(w["role"]), exclude={exc.model_id})
-            if best:
-                w.update({"model_id": best["model_id"], "model": best["model"]})
-                run.store.put("worker", w["id"], w)
-                run.event("worker.model_assigned", "worker", w["id"], {"role": w["role"], "model_id": best["model_id"],
-                          "model": best["model"], "why": f"{m['name']} is down"}, actor="intelligence_router")
-    sys_ = run.store.get("workforce", "system")
-    if sys_ and sys_.get("model_id") == exc.model_id:
-        run.store.put("workforce", "system", {"model_id": None})  # chosen again on the next call
+        if run.model_of(w["id"]) == exc.model_id:  # no open task, or its task went to a peer: the worker moves too
+            best, rows = router.choose(reg, s, roles.staffing_kinds(w["role"]), exclude={exc.model_id})
+            fb = _fallback_of(reg, exc.model_id)
+            pick = next((r for r in rows if r["model_id"] == fb), None) if fb else None
+            pick = pick or best
+            if pick:
+                binding.bind(run, w["id"], reg.get(pick["model_id"]), reason=f"{m['name']} is down", by="intelligence_router",
+                             candidates=rows)
+    # the control plane's own binding is chosen again on its next call, since its intelligence is unavailable
     return out or {"did": "model_replaced", "task": t["id"], "model": exc.model_id}
+
+
+def version_changed(run, worker_id: str, exc) -> None:
+    """The intelligence a worker is bound to reports a new version. It continues only after its regression check on
+    the worker's kind of work passes; the binding then pins the new version. A failed check makes the intelligence
+    unavailable, and the call fails like any model error, so the worker is rebound."""
+    reg = run.registry
+    entry = reg.get(exc.model_id)
+    open_tasks = [x for x in run.tasks() if x["owner_worker_id"] == worker_id and x["status"] != "VERIFIED"]
+    kind = open_tasks[0]["kind"] if open_tasks else "objective"
+    check = regression_check(run.supply, exc.model_id, kind)
+    if check.get("usd"):
+        run.spend(worker_id, open_tasks[0]["id"] if open_tasks else "objective", check["usd"], "verification")
+    run.event("intelligence.version_changed", "worker", worker_id, {"intelligence_id": exc.model_id,
+              "from": exc.pinned, "to": exc.current, "regression_check": check["evidence"], "passed": check["passed"]},
+              actor="replacement_engine")
+    if not check["passed"]:
+        reg.set_regression(exc.model_id, False, f"version {exc.current}: {check['evidence']}")
+        raise IntelligenceError(f"{entry['name']} changed version to {exc.current or 'unversioned'} and failed its "
+                                f"regression check ({check['evidence']})", model_id=exc.model_id)
+    binding.bind(run, worker_id, entry, by="replacement_engine",
+                 reason=f"version {exc.pinned or 'unversioned'} to {exc.current or 'unversioned'}, regression check "
+                        f"passed: {check['evidence']}")

@@ -188,7 +188,7 @@ class AnthropicWireTests(ProviderBase):
         d = e.pending_decisions()[0]
         self.assertIn("HTTP 500", d["problem"])
         self.assertIn("No other model in the registry is available", d["problem"])
-        self.assertFalse(e.registry.availability(e.registry.get("environment"))[0], "the outage is on its record")
+        self.assertFalse(e.registry.availability(e.registry.get(e.model_of("w_pm")))[0], "the outage is on its record")
         e.close()
 
     def test_one_retry_for_prose_then_json(self):

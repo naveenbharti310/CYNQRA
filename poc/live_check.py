@@ -6,8 +6,9 @@
   python poc/live_check.py --max-usd 5 --objective "one founder sentence"
 
 Every model call goes through cynqra/model_adapter.py against the provider's real API.
-The run is staffed from a registry holding the model the environment names, priced at its list
-price (registry.LIST_PRICES, or CYNQRA_PRICE_PER_M), and --max-usd is the run's budget: the
+The run is staffed from the intelligence the environment names, connected as a provider with its
+credential referencing the environment variable and priced at its list price
+(intelligence_layer.adapters.LIST_PRICES, or CYNQRA_PRICE_PER_M), and --max-usd is the run's budget: the
 Budget Engine's breaker is the spend cap. A shell command model (CYNQRA_S1_MODEL_CMD) is refused
 unless --allow-cmd is given; then the report says so, tokens are estimated, no dollars are
 counted and counts_as_measured_result is false. tests/model_bridge.py is such a command.
@@ -122,7 +123,7 @@ def run(objective: str, max_usd: float, data_dir: Path, log=print, allow_cmd: bo
     try:
         e.create_company("Live check", "live")
         e.set_guardrails(budget_usd=max_usd)
-        model = e.registry.get("environment")
+        model = e.registry.get(e.intelligence_for("system"))
         log(f"model: {resolved['label']} ({resolved['kind']}), "
             + (f"${model['price_in']}/${model['price_out']} per M tokens, budget ${max_usd:.2f}" if measured
                else "command model: tokens estimated, no dollars counted"))

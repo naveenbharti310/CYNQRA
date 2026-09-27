@@ -5,7 +5,7 @@
 const S = {
   st: null, view: "company", worker: null, replayTask: null, replay: null, replayKey: "",
   seen: -1, sig: "", err: "", busy: false, graph: null, mode: "demo", shown: new Set(), guide: true, modelOpen: false,
-  regOpen: false, probes: {}, scenario: "candidate_tracker",
+  regOpen: false, probes: {}, sup: null, scenario: "candidate_tracker",
 };
 /* Cards animate in only the first time they appear; a repaint must not replay it for every card. */
 const fresh = (key) => { if (S.shown.has(key)) return ""; S.shown.add(key); return "fresh"; };
@@ -29,7 +29,7 @@ const SERVICE_TITLE = { orchestrator: "Orchestrator", verification: "Verificatio
   workforce_synthesizer: "Workforce Synthesizer", execution_planner: "Execution Planner", replacement_engine: "Replacement Engine",
   objective_intelligence: "Objective Intelligence", intelligence_router: "Intelligence Router" };
 const VIEWS = [["company", "Company"], ["organization", "Organization"], ["workforce", "Workforce"], ["work", "Work"],
-  ["decisions", "Decisions"], ["models", "Models"], ["performance", "Performance"], ["audit", "Audit"], ["delivery", "Delivery"]];
+  ["decisions", "Decisions"], ["intelligence", "Intelligence"], ["performance", "Performance"], ["audit", "Audit"], ["delivery", "Delivery"]];
 const wt = (id) => { const w = ((S.st && S.st.workers) || []).find((x) => x.id === id); return w ? w.title : SERVICE_TITLE[id] || id; };
 
 async function api(path, body) {
@@ -53,7 +53,7 @@ async function refresh(force) {
   try {
     const st = await api("/api/state?window=1");  // ?window=1: the desktop app knows its window is open
     S.st = st;
-    if (S.view === "models" || S.regOpen) { try { S.probes = (await api("/api/models")).probes || {}; } catch (e) { /* keep */ } }
+    if (S.view === "intelligence" || S.regOpen || !S.sup) { try { S.sup = await api("/api/intelligence"); S.probes = S.sup.probes || {}; } catch (e) { /* keep */ } }
     toasts(st.events || []);
     if (S.view === "audit") await loadReplay();
     paint(force);
@@ -65,7 +65,7 @@ function signature() {
   const ev = st.events || [];
   return [ev.length ? ev[ev.length - 1].seq : 0, st.meta.phase, st.meta.frozen, st.auto.on, S.view, S.worker,
     S.replayTask, S.replayKey, S.err, S.busy, S.guide, JSON.stringify(S.graph), (st.decisions.pending || []).map((d) => d.id).join(),
-    S.modelOpen, rtSignature(), S.regOpen, JSON.stringify(st.workforce || {}).length, JSON.stringify(S.probes).length].join("|");
+    S.modelOpen, rtSignature(), S.regOpen, JSON.stringify(st.workforce || {}).length, JSON.stringify(S.probes).length, JSON.stringify(S.sup || {}).length].join("|");
 }
 
 function paint(force) {
@@ -137,7 +137,7 @@ function steps(on) {
 function wizard() {
   const st = S.st, phase = st.meta.phase, obj = st.objective;
   const top = `<div class="wiz-top"><div class="row"><span class="wordmark">Cynqra</span><span class="muted small">${esc(st.company ? st.company.name : "New project")}</span></div>
-    <div class="row"><button class="btn sm" data-reg-open="1">Models (${regModels().length})</button>${guideToggle()}${modePill()}</div></div>`;
+    <div class="row"><button class="btn sm" data-reg-open="1">Intelligence (${regModels().filter((m) => m.available).length})</button>${guideToggle()}${modePill()}</div></div>`;
   if (phase === "workforce") return `<div class="wiz">${top}${workforceStep()}</div>`;
   if (phase === "planning") return `<div class="wiz">${top}${planStep()}</div>`;
   const scen = scenario();
@@ -405,7 +405,7 @@ function shell() {
   const nav = VIEWS.map(([k, label]) => `<button class="nav ${S.view === k ? "on" : ""}" data-view="${k}"${S.view === k ? ' aria-current="page"' : ""}>
     <span>${label}</span>${k === "decisions" && pend ? `<span class="badge">${pend}</span>` : ""}</button>`).join("");
   const running = st.meta.phase === "running";
-  const views = { company: vCompany, organization: vOrg, workforce: vWorkforce, work: vWork, decisions: vDecisions, models: vModels,
+  const views = { company: vCompany, organization: vOrg, workforce: vWorkforce, work: vWork, decisions: vDecisions, intelligence: vIntelligence,
     performance: vPerformance, audit: vAudit, delivery: vDelivery };
   return `<div class="shell">
     <nav class="side" aria-label="Main"><div class="brand"><span class="wordmark">Cynqra</span><span class="small muted">${esc(st.company ? st.company.name : "")}</span></div>
@@ -508,7 +508,7 @@ function vOrg() {
         <div class="row"><select id="gq"><option value="approves">Who approves</option><option value="owns">Who owns</option><option value="depends">What depends on</option></select>
           <input type="text" id="gs" value="merge_to_main" aria-label="Action type or task id" style="flex:1"><button class="btn sm" id="ask">Ask</button></div>${ans}</div></div>
     <div class="card side-panel stack"><div><span class="caps">Worker ${esc(w.id)}</span><h2 style="font-size:22px">${esc(w.title)}</h2></div>
-      <div class="kv"><span>Model, chosen by the Intelligence Router</span><span>${esc(w.model || "not yet")}</span></div>
+      <div class="kv"><span>Intelligence bound by the Intelligence Router</span><span>${esc(w.model || "not yet")}${w.binding && w.binding.version ? " · version " + esc(w.binding.version) : ""}</span></div>
       <div class="kv"><span>Capabilities</span><span>${esc((w.capabilities || []).join(", "))}</span></div>
       <div class="kv"><span>Reports to</span><span>${esc(wt(w.reports_to))}</span></div>
       <div class="kv"><span>Current work</span><span>${esc(cur)}</span></div>
@@ -519,11 +519,13 @@ function vOrg() {
 }
 /* ---------------------------------------------------------------- the AI workforce and the model registry -- */
 const wfv = () => (S.st && S.st.workforce) || {};
-const regModels = () => wfv().registry || [];
+const regModels = () => (S.sup && S.sup.intelligence) || wfv().registry || [];
+const supConns = () => (S.sup && S.sup.connections) || [];
+const connName = (id) => (supConns().find((c) => c.id === id) || {}).name || "a removed connection";
 const usd = (v) => (v === null || v === undefined ? "n/a" : `$${Number(v).toFixed(Number(v) < 1 ? 4 : 2)}`);
 const pctx = (v) => (v === null || v === undefined ? "n/a" : `${Math.round(v * 100)}%`);
-const RUNTIME = { llama: "This computer (llama.cpp)", hf: "Hugging Face Inference Providers", openai_compatible: "OpenAI-compatible server",
-  environment: "The model this environment names", scripted: "Demo script (not a model)" };
+const PTYPE = { openai_compatible: "OpenAI-compatible API", anthropic: "Anthropic API", local: "Local / self-hosted",
+  demo_script: "Demo script (not a provider)", bedrock: "AWS Bedrock" };
 
 function candTable(rows, chosen, compact) {
   if (!rows || !rows.length) return "";
@@ -546,7 +548,8 @@ function vWorkforce() {
       <div class="kv"><span>Budget allocated, spent</span><span class="mono">${usd(w.budget.allocated)}, ${usd(w.budget.spent)}</span></div>
       <div class="kv"><span>Verified, first pass, reworks</span><span class="mono">${w.performance.verified || 0}, ${w.performance.first_pass || 0}, ${w.performance.reworks || 0}</span></div>
       <div class="small muted">${esc(w.why)}</div>
-      <details><summary class="small">The staffing choice: every available model, scored for this worker's work</summary>${candTable(w.candidates, w.model_id, true)}</details></div>`).join("");
+      ${w.binding && (w.binding.history || []).length ? `<div class="small muted">Before: ${esc(w.binding.history.map((h) => `${h.intelligence} (${h.reason})`).join("; "))}. The worker is the same; only its intelligence changed.</div>` : ""}
+      <details><summary class="small">The staffing choice: every available intelligence, scored for this worker's work</summary>${candTable(w.candidates, w.model_id, true)}</details></div>`).join("");
   const reps = (wf.replacements || []).map((r) => `<div class="card stack rep">
       <div class="between"><b>${esc(r.task_id)}: ${esc(r.role)} ${esc(r.worker_id)} moved from ${esc(modelName(r.from))} to ${esc(modelName(r.to))}</b><span class="small muted">${esc(r.at)}</span></div>
       <span class="small">Why: ${esc(r.reason)}</span>
@@ -607,51 +610,78 @@ function perfRows(perf) {
     ${row("All", perf.overall)}${kinds.map(([k, s]) => row(k, s)).join("")}</tbody></table></div>`;
 }
 
-function vModels() {
-  const models = regModels();
-  const cards = models.map((m) => {
-    const pr = S.probes[m.id] || {}, o = m.performance.overall, f = m.fault || {};
-    return `<div class="card stack mcard">
-      <div class="between"><div><span class="caps">${esc(RUNTIME[m.runtime] || m.runtime)}</span><h2 style="font-size:19px">${esc(m.name)}</h2></div>
-        <span class="pill ${m.available ? "teal" : "warn"}">${m.available ? "Available" : esc(m.availability)}</span></div>
-      <div class="kv"><span>Serves</span><span class="mono small">${esc(m.ref)}</span></div>
-      <div class="kv"><span>Provider, licence</span><span>${esc(m.provider || "n/a")}, ${esc(m.license || "n/a")}</span></div>
-      <div class="kv"><span>Context, hardware</span><span>${esc(m.context || "n/a")} tokens, ${esc(m.hardware || "n/a")}</span></div>
-      <div class="kv"><span>Price</span><span class="mono">${m.local ? `$${m.compute_usd_per_hour}/h of this computer` : `$${m.price_in} in, $${m.price_out} out per M tokens`}</span></div>
-      <div class="kv"><span>Calls, errors, speed</span><span class="mono">${o.calls}, ${o.call_errors}, ${o.write_tps ? o.write_tps + " tokens/s" : "n/a"}</span></div>
-      <h3 style="font-size:14px;margin-top:4px">Measured on Cynqra's work</h3>${perfRows(m.performance)}
-      ${Object.keys(f).length ? `<div class="notice small">Fault set: ${f.offline ? "offline" : ""}${f.offline && f.max_reply ? ", " : ""}${f.max_reply ? `replies capped at ${f.max_reply} tokens` : ""}</div>` : ""}
+function connCard(c) {
+  const cr = c.credential || {}, offered = regModels().filter((m) => m.connection_id === c.id && m.status !== "retired");
+  const auth = cr.method === "env" ? `key in the environment variable ${cr.env_var}` : cr.method === "secret" ? "key kept in Cynqra's secrets file" : "no key";
+  return `<div class="card stack mcard">
+    <div class="between"><div><span class="caps">${esc(PTYPE[c.type] || c.type)}${c.server ? " · " + esc(c.server) : ""}</span><h2 style="font-size:18px">${esc(c.name)}</h2></div>
+      <span class="pill ${c.status === "connected" ? "teal" : "warn"}">${esc(c.status)}</span></div>
+    ${c.endpoint ? `<div class="kv"><span>Endpoint</span><span class="mono small">${esc(c.endpoint)}</span></div>` : ""}
+    <div class="kv"><span>Credential</span><span>${cr.method === "none" ? "none needed" : `${esc(auth)}: ${cr.present ? "present" : esc(cr.status || "missing")}`}</span></div>
+    <div class="kv"><span>Offers</span><span>${offered.length ? esc(offered.map((m) => m.name).join(", ")) : "nothing yet"}</span></div>
+    ${c.rate_limits && c.rate_limits.calls_per_minute ? `<div class="kv"><span>Rate limit</span><span>${esc(c.rate_limits.calls_per_minute)} calls per minute</span></div>` : ""}
+    <div class="kv"><span>Added</span><span>${esc(c.permission)}</span></div>
+    ${c.status_note ? `<p class="small muted" style="margin:0">${esc(c.status_note)}</p>` : ""}
+    <div class="row wrap" style="gap:8px"><button class="btn sm" data-discover="${esc(c.id)}">Discover again</button>
+      ${c.origin === "demo" ? "" : `<button class="btn sm" data-disconnect="${esc(c.id)}">Remove</button>`}</div></div>`;
+}
+
+function intelCard(m) {
+  const pr = S.probes[m.id] || {}, o = m.performance.overall, f = m.fault || {};
+  const others = regModels().filter((x) => x.id !== m.id && x.status !== "retired");
+  return `<div class="card stack mcard">
+    <div class="between"><div><span class="caps">${esc(connName(m.connection_id))}</span><h2 style="font-size:19px">${esc(m.name)}</h2></div>
+      <span class="pill ${m.available ? "teal" : "warn"}">${m.available ? "Available" : esc(m.availability)}</span></div>
+    <div class="kv"><span>Serves</span><span class="mono small">${esc(m.ref)}${m.version ? " · version " + esc(m.version) : ""}</span></div>
+    <div class="kv"><span>Provider, licence</span><span>${esc(m.provider || "n/a")}, ${esc(m.license || "n/a")}</span></div>
+    <div class="kv"><span>Context, hardware</span><span>${esc(m.context || "n/a")} tokens, ${esc(m.hardware || "n/a")}</span></div>
+    <div class="kv"><span>Price</span><span class="mono">${m.local ? `$${m.compute_usd_per_hour}/h of this computer` : `$${m.price_in} in, $${m.price_out} out per M tokens`}</span></div>
+    <div class="kv"><span>Regression check</span><span>${esc((m.regression || {}).status || "n/a")}</span></div>
+    <div class="kv"><span>Calls, errors, speed</span><span class="mono">${o.calls}, ${o.call_errors}, ${o.write_tps ? o.write_tps + " tokens/s" : "n/a"}</span></div>
+    <h3 style="font-size:14px;margin-top:4px">Measured on Cynqra's work</h3>${perfRows(m.performance)}
+    ${Object.keys(f).length ? `<div class="notice small">Fault set: ${f.offline ? "offline" : ""}${f.offline && f.max_reply ? ", " : ""}${f.max_reply ? `replies capped at ${f.max_reply} tokens` : ""}</div>` : ""}
+    <div class="row wrap" style="gap:8px">
+      <button class="btn sm" data-probe="${esc(m.id)}" ${pr.state === "running" ? "disabled" : ""}>${pr.state === "running" ? "Probing..." : "Probe it"}</button>
+      <button class="btn sm" data-fault-off="${esc(m.id)}" data-on="${f.offline ? "0" : "1"}">${f.offline ? "Bring back online" : "Take offline"}</button>
+      <input type="number" id="cap_${esc(m.id)}" min="0" step="10" placeholder="reply cap" value="${esc(f.max_reply || "")}" style="width:100px" aria-label="Reply cap in tokens">
+      <button class="btn sm" data-fault-cap="${esc(m.id)}">Set reply cap</button>
+      <select id="fb_${esc(m.id)}" aria-label="Fallback"><option value="">No fallback</option>${others.map((x) => `<option value="${esc(x.id)}" ${x.id === m.fallback_id ? "selected" : ""}>Fallback: ${esc(x.name)}</option>`).join("")}</select>
+      <button class="btn sm" data-fallback="${esc(m.id)}">Set fallback</button>
+      <button class="btn sm" data-retire="${esc(m.id)}">Retire</button></div>
+    ${pr.log && pr.log.length ? `<pre class="log">${esc(pr.log.join("\n"))}${pr.error ? "\n" + esc(pr.error) : ""}</pre>` : ""}</div>`;
+}
+
+function vIntelligence() {
+  const types = (S.sup && S.sup.provider_types) || [];
+  const models = regModels().filter((m) => m.status !== "retired");
+  const opts = types.map((t) => `<option value="${esc(t.type)}" ${t.implemented ? "" : "disabled"}>${esc(t.title)}${t.implemented ? "" : " (planned)"}</option>`).join("");
+  return `<div class="card stack"><h2 style="font-size:18px">Connect a provider</h2>
+      <p class="small muted" style="margin:0">Connect a source of intelligence once. Cynqra discovers the models it offers, measures them on its own work, and the Intelligence Router picks which one powers each worker. A worker never holds a key: the connection keeps a reference to its credential, and only the Intelligence Gateway reads it, for one call at a time. Name an environment variable, or keep the key in Cynqra's secrets file on this computer.</p>
       <div class="row wrap" style="gap:8px">
-        <button class="btn sm" data-probe="${esc(m.id)}" ${pr.state === "running" ? "disabled" : ""}>${pr.state === "running" ? "Probing..." : "Probe it"}</button>
-        <button class="btn sm" data-fault-off="${esc(m.id)}" data-on="${f.offline ? "0" : "1"}">${f.offline ? "Bring back online" : "Take offline"}</button>
-        <input type="number" id="cap_${esc(m.id)}" min="0" step="10" placeholder="reply cap" value="${esc(f.max_reply || "")}" style="width:100px" aria-label="Reply cap in tokens">
-        <button class="btn sm" data-fault-cap="${esc(m.id)}">Set reply cap</button>
-        <button class="btn sm" data-remove="${esc(m.id)}">Remove</button></div>
-      ${pr.log && pr.log.length ? `<pre class="log">${esc(pr.log.join("\\n"))}${pr.error ? "\\n" + esc(pr.error) : ""}</pre>` : ""}</div>`;
-  }).join("");
-  return `<div class="card stack"><h2 style="font-size:18px">Register a model</h2>
-      <p class="small muted" style="margin:0">A model brings facts, not scores. What it is good at is measured on Cynqra's own work, and the workforce engine reads only that. Keys stay in the environment: name the variable, never paste a key.</p>
+        <select id="c_type" aria-label="Provider type">${opts}</select>
+        <input type="text" id="c_name" placeholder="Name" style="width:160px" aria-label="Connection name">
+        <input type="text" id="c_endpoint" placeholder="Endpoint URL (blank: the provider's own)" style="flex:1;min-width:240px" aria-label="Endpoint">
+        <select id="c_server" aria-label="Local server"><option value="">Local server: n/a</option><option value="ollama">Ollama</option><option value="endpoint">A server at the endpoint</option><option value="llama">This computer</option></select></div>
       <div class="row wrap" style="gap:8px">
-        <select id="r_runtime" aria-label="Runtime"><option value="hf">Hugging Face (HF_TOKEN)</option><option value="llama">This computer (a downloaded model)</option><option value="openai_compatible">OpenAI-compatible server</option></select>
-        <input type="text" id="r_ref" placeholder="zai-org/GLM-4.7, or a catalog id" style="flex:1;min-width:220px" aria-label="Model reference">
-        <input type="text" id="r_name" placeholder="Display name" style="width:160px" aria-label="Name"></div>
-      <div class="row wrap" style="gap:8px">
-        <input type="number" id="r_in" step="0.01" placeholder="$ in / M" style="width:100px" aria-label="Price in">
-        <input type="number" id="r_out" step="0.01" placeholder="$ out / M" style="width:100px" aria-label="Price out">
-        <input type="number" id="r_hour" step="0.01" placeholder="$ / hour (local)" style="width:130px" aria-label="Compute price per hour">
-        <input type="number" id="r_ctx" placeholder="context" style="width:100px" aria-label="Context length">
-        <input type="text" id="r_provider" placeholder="provider" style="width:120px" aria-label="Provider">
-        <input type="text" id="r_license" placeholder="licence" style="width:110px" aria-label="Licence">
-        <input type="text" id="r_base" placeholder="base URL (OpenAI-compatible)" style="width:210px" aria-label="Base URL">
-        <input type="text" id="r_keyenv" placeholder="key variable name" style="width:150px" aria-label="Key environment variable">
-        <button class="btn primary sm" id="register">Register</button></div></div>
-    <div class="grid2">${cards || '<p class="muted">No models yet.</p>'}</div>`;
+        <select id="c_auth" aria-label="Authentication"><option value="env">Key in an environment variable</option><option value="secret">Key kept in Cynqra's secrets file</option><option value="none">No key</option></select>
+        <input type="text" id="c_env" placeholder="variable name, e.g. OPENAI_API_KEY" style="width:230px" aria-label="Environment variable">
+        <input type="password" id="c_secret" placeholder="key (secrets file only)" style="width:190px" aria-label="Key" autocomplete="off">
+        <input type="text" id="c_models" placeholder="models to offer (blank: all it lists)" style="flex:1;min-width:200px" aria-label="Models">
+        <input type="number" id="c_in" step="0.01" placeholder="$ in / M" style="width:95px" aria-label="Price in">
+        <input type="number" id="c_out" step="0.01" placeholder="$ out / M" style="width:95px" aria-label="Price out">
+        <input type="number" id="c_rpm" placeholder="calls / min" style="width:95px" aria-label="Rate limit">
+        <button class="btn primary sm" id="connect">Connect</button></div></div>
+    <h2 style="font-size:18px;margin:6px 0 0">Provider connections</h2>
+    <div class="grid2">${supConns().map(connCard).join("") || '<p class="muted">No provider connected yet.</p>'}</div>
+    <h2 style="font-size:18px;margin:6px 0 0">Intelligence Registry</h2>
+    <p class="small muted" style="margin:0">What each connection offers, with the facts its provider gives and what Cynqra has measured. Nothing here is a hand-made score.</p>
+    <div class="grid2">${models.map(intelCard).join("") || '<p class="muted">No intelligence registered yet.</p>'}</div>`;
 }
 
 function regScreen() {
-  return `<div class="wiz"><div class="wiz-top"><div class="row"><span class="wordmark">Cynqra</span><span class="muted small">Model registry</span></div>
+  return `<div class="wiz"><div class="wiz-top"><div class="row"><span class="wordmark">Cynqra</span><span class="muted small">Intelligence</span></div>
     <div class="row"><button class="btn sm primary" data-reg-close="1">Done</button></div></div>
-    <div class="view">${S.err ? `<div class="err" role="alert">${esc(S.err)}</div>` : ""}${vModels()}</div></div>`;
+    <div class="view">${S.err ? `<div class="err" role="alert">${esc(S.err)}</div>` : ""}${vIntelligence()}</div></div>`;
 }
 
 function graphAnswer(g) {
@@ -846,17 +876,24 @@ function bind() {
   $$("[data-worker]").forEach((b) => b.onclick = () => { S.worker = b.dataset.worker; paint(true); });
   $$("[data-reg-open]").forEach((b) => b.onclick = () => { S.regOpen = true; S.err = ""; paint(true); });
   $$("[data-reg-close]").forEach((b) => b.onclick = () => { S.regOpen = false; S.err = ""; paint(true); });
-  on("register", () => {
-    const v = (id) => ($("#" + id) || {}).value || "";
-    const spec = { runtime: v("r_runtime"), ref: v("r_ref").trim(), name: v("r_name").trim(), provider: v("r_provider").trim(),
-      license: v("r_license").trim(), base_url: v("r_base").trim(), api_key_env: v("r_keyenv").trim() };
-    [["price_in", "r_in"], ["price_out", "r_out"], ["compute_usd_per_hour", "r_hour"], ["context", "r_ctx"]].forEach(([k, id]) => { if (v(id) !== "") spec[k] = Number(v(id)); });
-    act(() => api("/api/models", spec));
+  on("connect", () => {
+    const v = (id) => (($("#" + id) || {}).value || "").trim();
+    const method = v("c_auth");
+    const spec = { type: v("c_type"), name: v("c_name"), endpoint: v("c_endpoint"), models: v("c_models"),
+      auth: method === "env" ? { method, env_var: v("c_env") } : method === "secret" ? { method, secret: v("c_secret") } : { method } };
+    if (v("c_server")) spec.server = v("c_server");
+    if (v("c_in") !== "" || v("c_out") !== "") spec.price_per_m = [Number(v("c_in") || 0), Number(v("c_out") || 0)];
+    if (v("c_rpm") !== "") spec.rate_limits = { calls_per_minute: Number(v("c_rpm")) };
+    const sec = $("#c_secret"); if (sec) sec.value = "";  // the key leaves the page with this request only
+    act(() => api("/api/connections", spec));
   });
-  $$("[data-probe]").forEach((b) => b.onclick = () => { const id = b.dataset.probe; act(async () => { S.probes[id] = await api(`/api/models/${id}/probe`, {}); }); });
-  $$("[data-fault-off]").forEach((b) => b.onclick = () => { const id = b.dataset.faultOff, on = b.dataset.on === "1"; act(() => api(`/api/models/${id}/fault`, { offline: on })); });
-  $$("[data-fault-cap]").forEach((b) => b.onclick = () => { const id = b.dataset.faultCap, n = Number(($("#cap_" + id) || {}).value || 0); act(() => api(`/api/models/${id}/fault`, { max_reply: n })); });
-  $$("[data-remove]").forEach((b) => b.onclick = () => { const id = b.dataset.remove; if (window.confirm("Remove this model from the registry? Its measured record is kept.")) act(() => api(`/api/models/${id}/remove`, {})); });
+  $$("[data-discover]").forEach((b) => b.onclick = () => { const id = b.dataset.discover; act(() => api(`/api/connections/${id}/discover`, {})); });
+  $$("[data-disconnect]").forEach((b) => b.onclick = () => { const id = b.dataset.disconnect; if (window.confirm("Remove this connection? Its credential is deleted and the intelligence it offered is retired; their measured record is kept.")) act(() => api(`/api/connections/${id}/remove`, {})); });
+  $$("[data-probe]").forEach((b) => b.onclick = () => { const id = b.dataset.probe; act(async () => { S.probes[id] = await api(`/api/intelligence/${id}/probe`, {}); }); });
+  $$("[data-fault-off]").forEach((b) => b.onclick = () => { const id = b.dataset.faultOff, on = b.dataset.on === "1"; act(() => api(`/api/intelligence/${id}/fault`, { offline: on })); });
+  $$("[data-fault-cap]").forEach((b) => b.onclick = () => { const id = b.dataset.faultCap, n = Number(($("#cap_" + id) || {}).value || 0); act(() => api(`/api/intelligence/${id}/fault`, { max_reply: n })); });
+  $$("[data-fallback]").forEach((b) => b.onclick = () => { const id = b.dataset.fallback, fb = ($("#fb_" + id) || {}).value || ""; act(() => api(`/api/intelligence/${id}/fallback`, { fallback_id: fb })); });
+  $$("[data-retire]").forEach((b) => b.onclick = () => { const id = b.dataset.retire; if (window.confirm("Retire this intelligence? Workers bound to it are moved by the Replacement Engine; its measured record is kept.")) act(() => api(`/api/intelligence/${id}/retire`, {})); });
   $$("[data-rt-start]").forEach((b) => b.onclick = () => { const model = b.dataset.rtStart; act(() => api("/api/runtime/start", { model })); });
   on("rt-cancel", () => act(() => api("/api/runtime/cancel", {})));
   on("rt-stop", () => act(() => api("/api/runtime/stop", {})));

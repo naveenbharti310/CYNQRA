@@ -1,10 +1,14 @@
 """The intelligence behind the workers: prompts and transport, nothing else.
 
-ModelSource     a real model per worker. Every call goes through model_adapter (ADR-4), the adapter the spikes use,
-                to the model the Intelligence Router assigned to that worker. A model error stops the step; nothing
-                is invented.
+ModelSource     real intelligence per worker. Every call goes to the Intelligence Gateway (intelligence_layer) for
+                the intelligence the worker is bound to; the source never knows the provider. A model error stops
+                the step; nothing is invented.
 ScriptedSource  the demo. Every word comes from scenarios/<id>/scenario.json and is labelled as scripted; the code it
                 hands over is real and is tested and deployed for real.
+
+Both are bound to an access point (the run, or the probe) that answers two questions:
+    intelligence_for(worker) -> the id of the intelligence bound to that worker
+    invoke(worker, request)  -> the Gateway's response for one call, with the intelligence id that answered
 
 Both answer the same questions with raw answers. Checking an answer is the engines' job (objective.py,
 synthesis.py, planner.py, execution.py): they validate it, and ask() gives the source one retry with the reason.
@@ -17,7 +21,7 @@ import os
 import re
 from pathlib import Path
 
-from . import model_adapter, roles
+from . import roles
 
 HERE = Path(__file__).resolve().parent
 SCENARIOS = HERE.parent / "scenarios"
@@ -246,14 +250,14 @@ class ScriptedSource:
     def __init__(self, scenario_id: str):
         self.dir = SCENARIOS / scenario_id
         self.data = json.loads((self.dir / "scenario.json").read_text(encoding="utf-8"))
-        self.router = None
+        self.access = None
 
-    def bind(self, router) -> None:
-        """The run's Intelligence Router: which registry model stands for the script for each worker."""
-        self.router = router
+    def bind(self, access) -> None:
+        """The run: which intelligence (the demo script, in the run's registry) is bound to each worker."""
+        self.access = access
 
     def _usage(self, worker: str = "system") -> dict:
-        model_id, _ = self.router(worker)
+        model_id = self.access.intelligence_for(worker)
         return {"tokens_in": 0, "tokens_out": 0, "estimated": True, "label": f"scripted ({self.dir.name})",
                 "latency_s": 0.0, "model_id": model_id}
 
@@ -307,18 +311,18 @@ class ScriptedSource:
 
 
 class ModelSource:
-    """Real models: each call goes to the model the worker runs on now, through the router the run binds."""
+    """Real intelligence: each call goes through the Intelligence Gateway to what the worker is bound to now."""
     kind = "model"
 
     def __init__(self):
-        self.router = None
+        self.access = None
         self.last_text = ""  # the last raw reply, kept to show what a model wrote when it could not be read
         self.answered: dict[str, int] = {}  # prompt digest -> replies already received for exactly that prompt
         self.objective_prompt = (HERE / "objective_prompt.txt").read_text(encoding="utf-8")
 
-    def bind(self, router) -> None:
-        """The run's Intelligence Router: router(worker) -> (model_id, route) for every call."""
-        self.router = router
+    def bind(self, access) -> None:
+        """The run (or the probe): intelligence_for(worker) and invoke(worker, request)."""
+        self.access = access
 
     def _call(self, prompt: str, max_tokens: int = 4000, files: bool = False, schema: dict | None = None,
               worker: str = "system", needs_from: str = "") -> tuple[dict, dict]:
@@ -336,12 +340,13 @@ class ModelSource:
         # A local model gives the same reply to the same prompt (temperature 0, fixed seed). A rework whose feedback and
         # previous files are exactly those of an attempt already answered would get the same failing reply again, so a
         # repeated prompt is sent with some temperature: 0.3 the second time, 0.6 the third, then 0.9.
-        model_id, route = self.router(worker)
+        model_id = self.access.intelligence_for(worker)
         key = hashlib.sha256(f"{model_id}|{prompt}".encode("utf-8")).hexdigest()
         repeats = self.answered.get(key, 0)
-        out = model_adapter.complete(prompt, max_tokens=max_tokens, want_json=not files, schema=schema,
-                                     temperature=round(min(0.3 * repeats, 0.9), 1) if repeats else None, partial=files,
-                                     route=route)
+        out = self.access.invoke(worker, {"prompt": prompt, "max_tokens": max_tokens, "want_json": not files,
+                                          "schema": schema, "partial": files,
+                                          "temperature": round(min(0.3 * repeats, 0.9), 1) if repeats else None})
+        model_id = out.get("model_id") or model_id
         if out.get("error"):
             raise IntelligenceError(out["error"], model_id=model_id, usage=out)
         self.answered[key] = repeats + 1
@@ -359,8 +364,8 @@ class ModelSource:
         if not isinstance(data, dict) or no_files:
             again = ("\n\nYour reply had no files in the required layout. " + files_layout(needs_from)) if files else \
                 "\n\nReply with only one JSON object."
-            out2 = model_adapter.complete(prompt + again, max_tokens=max_tokens, want_json=not files, schema=schema,
-                                          temperature=0.4, route=route)
+            out2 = self.access.invoke(worker, {"prompt": prompt + again, "max_tokens": max_tokens,
+                                               "want_json": not files, "schema": schema, "temperature": 0.4})
             if out2.get("error"):
                 raise IntelligenceError(out2["error"], model_id=model_id, usage=out2)
             self.last_text = out2["text"]

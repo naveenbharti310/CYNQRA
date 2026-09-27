@@ -134,6 +134,18 @@ class DesktopBase(unittest.TestCase):
         self.addCleanup(rt.stop)
         return rt
 
+    def this_computer(self, rt):
+        """The app's local provider connection: the model on this machine, reached through the gateway."""
+        from cynqra.intelligence_layer import IntelligenceSupply
+        sup = IntelligenceSupply(self.tmp.path / "control", runtime=rt)
+        self.addCleanup(sup.close)
+        out = sup.connect({"type": "local", "server": "llama", "name": "This computer", "models": [MODEL]},
+                          origin="app")
+        return sup, out["intelligence"][0]["id"]
+
+    JSON_ASK = {"prompt": "Convert the founder objective", "want_json": True,
+                "schema": {"type": "object", "properties": {"a": {"type": "string"}}}}
+
 
 class DownloadTests(DesktopBase):
     def test_download_resumes_after_a_cut_and_verifies(self):
@@ -193,13 +205,14 @@ class DownloadTests(DesktopBase):
 class ServerTests(DesktopBase):
     def test_start_points_the_adapter_at_the_local_server_with_the_research_settings(self):
         rt = self.runtime()
-        base = rt.start(MODEL)
+        rt.start(MODEL)
         self.assertEqual(rt.status["state"], "ready")
-        self.assertEqual(os.environ["CYNQRA_LOCAL_BASE_URL"], base + "/v1")
-        self.assertEqual(model_adapter.resolve()["kind"], "local")
-        out = model_adapter.complete("Convert the founder objective", want_json=True,
-                                     schema={"type": "object", "properties": {"a": {"type": "string"}}})
+        self.assertNotIn("CYNQRA_LOCAL_BASE_URL", os.environ, "the runtime changes no process environment")
+        self.assertIsNone(model_adapter.resolve(), "the environment names no model; the connection does")
+        sup, mid = self.this_computer(rt)
+        out = sup.gateway.invoke(mid, self.JSON_ASK)
         self.assertIsNone(out["error"])
+        self.assertEqual(out["model_id"], mid)
         body = json.loads(self.requests.read_text().splitlines()[-1])["body"]
         self.assertEqual(body["response_format"]["type"], "json_schema")
         self.assertEqual(body["chat_template_kwargs"], {"enable_thinking": False})
@@ -209,7 +222,8 @@ class ServerTests(DesktopBase):
         self.assertIn("-ngl 0", cmd)  # the processor build gets no GPU layers
         self.assertEqual(rt.settings()["model"], MODEL)
         rt.stop()
-        self.assertNotIn("CYNQRA_LOCAL_BASE_URL", os.environ)
+        self.assertIsNone(sup.gateway.invoke(mid, self.JSON_ASK)["error"], "a call starts the model again")
+        self.assertEqual(rt.status["state"], "ready")
 
     def test_gpu_failure_falls_back_to_the_processor(self):
         os.environ["FAKE_LLAMA_FAIL_GPU"] = "1"
@@ -227,9 +241,8 @@ class ServerTests(DesktopBase):
         rt.start(MODEL)
         self.assertEqual(rt.status["state"], "ready")
         self.assertIn("-ngl 0", rt.log_tail().splitlines()[0])  # restarted on the processor
-        out = model_adapter.complete("Convert the founder objective", want_json=True,
-                                     schema={"type": "object", "properties": {"a": {"type": "string"}}})
-        self.assertIsNone(out["error"])
+        sup, mid = self.this_computer(rt)
+        self.assertIsNone(sup.gateway.invoke(mid, self.JSON_ASK)["error"])
 
     def test_a_working_gpu_passes_its_probe(self):
         rt = self.runtime(metal=FAKE_SERVER)

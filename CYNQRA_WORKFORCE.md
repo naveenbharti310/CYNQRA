@@ -6,6 +6,13 @@ records how the proof of concept now separates **the worker** from **the model**
 for each worker, measures it on real work, replaces it when it fails, and keeps the project inside a budget.
 Everything described as implemented is in `poc/` and covered by tests; what is not yet built is said plainly.
 
+> Since 27 September the model registry, the router and model access are the **Intelligence Layer**
+> (`poc/cynqra/intelligence_layer/`): provider connections, credentials in a secrets layer, the Intelligence
+> Registry, the Router and the Intelligence Gateway, with a worker's intelligence held in a binding, never on the
+> worker. CYNQRA_INTELLIGENCE_SUPPLY.md maps the locked V1 decisions to the code. Sections 2 to 9 below record how
+> the workforce first came about; where they name `registry.py`, `router.py` or a worker's `model_id`, read the
+> Intelligence Layer and the worker's binding.
+
 ## 1. The architecture as it was, and what was only conceptual
 
 Read from the code, not the README.
@@ -225,10 +232,31 @@ with "r_01 (product: …) is covered by no proposed role". The check was right; 
 fix it. Refusals now name the roles that close the gap ("add a role that covers product: CEO, CPO, PM"), with a
 test, and the demonstration was pushed again.
 
+The third (27 September, commit c1952ad, run 36315283277, same runner and objective) probed all three models:
+Qwen3.5 4B passed the code work in one round (15 tests, 264 s), Qwen3.5 9B in three (17 tests; 1 failing in
+rounds one and two), gpt-oss 20B in two (16 tests, all 16 failing in round one). All three filled 7 of 7 objective
+fields. It stopped at Stage 2 again, after about eight minutes of synthesis: "r_13 (devops: every change must
+re-run all tests) is covered by no proposed role; add a role that covers devops: CTO, DevOps". So even with the
+refusal naming the roles, the model did not add one. Which roles cover an area is the catalog's rule, not a
+judgment, so the platform now closes such a gap itself: it adds the catalog role that closes the most open gaps,
+labelled "Added by Cynqra" with what it closes, for the founder to see at the workforce gate. A founder's own
+edit is still refused, not completed behind them. Tests in `test_product_flow.py`. The Hugging Face job did not
+run: the repository has no `HF_TOKEN` secret.
+
+The same commit's desktop build on Windows (run 36315283319) passed install, self-test, window, Start-menu
+launch, uninstall and reinstall into a folder with spaces and accents. Its real-model check did not pass:
+Qwen3.6 35B-A3B at 2 bits filled the objective (7 of 7), but left the same 2 of 14 tests failing in all three
+code rounds (15.5 tokens/s read, 5.5 written). Every call worked; this is the model's work, and the same model
+passed on 0.1.2 earlier that day. Linux and macOS passed the same check.
+
 The desktop app's 0.1.2 end-to-end run on Windows (run 36296951000, the earlier fixed-organization flow, a CPU
 runner) passed with Qwen3.6 35B-A3B at 2 bits: accepted, live, healthy, the product's tests passing on rerun;
 20 model calls, 73,262 tokens in and 41,322 out, 195.5 minutes, the web app task reworked twice before it
-verified.
+verified. The same run's two Linux end-to-end jobs did not finish within their 340 minutes: gpt-oss 20B
+(27 calls, 203,477 tokens in, 53,450 out) and Qwen3.6 35B-A3B at 2 bits (32 calls, 240,609 in, 89,315 out) were
+both still reworking the web app task (t_04) when time ran out; gpt-oss once returned an answer the server could
+not parse against the schema, and the run stopped on it rather than inventing one. Nothing in the app failed;
+these runners write 5 to 7 tokens a second, and the web app is the largest task.
 
 ## 11. What is not built yet
 

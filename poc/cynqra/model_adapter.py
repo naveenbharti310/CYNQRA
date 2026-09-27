@@ -88,8 +88,11 @@ sends one call to one model: the route holds that model's settings under
 the same names as the environment (kind, label, CYNQRA_LOCAL_BASE_URL,
 CYNQRA_HF_MODEL, CYNQRA_NUM_PREDICT, ...), and they overlay the process
 environment for that call only, on that thread; a key set to None counts
-as unset. Cynqra's model registry builds routes, so each worker can run on
-a different model. Two faults can be set on a route, for proving that
+as unset. Cynqra's provider adapters build routes, so each worker can run on
+a different model; a route carries the connection's endpoint
+(CYNQRA_ANTHROPIC_URL, CYNQRA_OPENAI_URL, CYNQRA_LOCAL_BASE_URL,
+HF_ROUTER_URL) and its credential for that one call, and nothing is kept.
+Two faults can be set on a route, for proving that
 Cynqra notices and replaces a failing model: offline (the model cannot be
 reached) and CYNQRA_MAX_REPLY (a hard cap on the reply, so a real model
 really runs out of room). Neither invents an answer.
@@ -206,7 +209,7 @@ def _post(url: str, payload: dict, headers: dict, timeout: float = TIMEOUT_S, re
 
 def _openai(prompt: str, model: str, max_tokens: int = 1500) -> dict:
     data = _post(
-        OPENAI_URL,
+        _ENV.get("CYNQRA_OPENAI_URL") or OPENAI_URL,
         {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
@@ -241,7 +244,7 @@ def _anthropic(prompt: str, model: str, max_tokens: int = 1500) -> dict:
             raise ValueError(f"CYNQRA_EFFORT must be one of {sorted(EFFORTS)}, not {effort!r}")
         payload["output_config"] = {"effort": effort}
     data = _post(
-        ANTHROPIC_URL,
+        _ENV.get("CYNQRA_ANTHROPIC_URL") or ANTHROPIC_URL,
         payload,
         {
             "x-api-key": _ENV["ANTHROPIC_API_KEY"],

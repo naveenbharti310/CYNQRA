@@ -4,7 +4,8 @@ every stage is done by an engine that sees the run only through the run contract
 
   Stage 0-1  objective.py     the founder's objective structured, then decomposed into requirements
   Stage 2-3  synthesis.py     the organization the objective needs, and the workforce approval gate
-  Stage 4    router.py        a model for every worker, from the registry's evidence
+  Stage 4    intelligence_layer  the Intelligence Router binds an intelligence to every worker, from the
+                              registry's evidence; every call goes through the Intelligence Gateway
   Stage 5    planner.py       milestones, tasks, acceptance criteria, owners, accountability
   Stage 6-7  budget.py        the roadmap gate, with the budget in layers against the hard cap (US dollars only)
   Stage 8    gateway.py       every worker action: identity, policy, budget, target check, execute, sanitize, audit
@@ -14,9 +15,10 @@ every stage is done by an engine that sees the run only through the run contract
              replacement.py   kept, rerouted or replaced while the worker's identity stays
   Delivery   delivery.py      the release, the final report, replay and the export
 
-Every run is staffed from a model registry: WORKER is not MODEL. A demo run staffs its workers with the scenario's
-scripted model in a registry of its own; a live run staffs them from the app's registry (or the model the
-environment names). Everything the founder does is a labelled decision (D-10).
+WORKER is not INTELLIGENCE is not PROVIDER CONNECTION is not CREDENTIAL. Workers hold no model: each is bound to an
+intelligence (binding.py). A live run is staffed from the app's Intelligence Layer (the providers the founder
+connected, or the intelligence the environment names); a demo run stands its scenario's script in an Intelligence
+Layer of its own. Everything the founder does is a labelled decision (D-10).
 """
 from __future__ import annotations
 
@@ -27,13 +29,14 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from . import budget, delivery, deploy, execution, gateway, model_adapter, objective, performance, planner, policy
-from . import replacement, roles, router, synthesis
+from . import binding, budget, delivery, deploy, execution, gateway, objective, performance, planner, policy
+from . import replacement, roles, synthesis
 from . import settings as project_settings
 from .db import IST, Store, now
 from .intelligence import SCENARIOS, IntelligenceError, ModelSource, ScriptedSource
+from .intelligence_layer import IntelligenceSupply, SupplyError, VersionChanged, router
+from .intelligence_layer.registry import RegistryError
 from .protocol import ProtocolError, build
-from .registry import Registry, RegistryError
 
 DEFAULT_SCENARIO = "candidate_tracker"
 
@@ -55,7 +58,7 @@ def scenarios() -> list[dict]:
 class Engine:
     """The run. It implements the run contract (run.Run) for the engines, and the founder's controls for the app."""
 
-    def __init__(self, data_dir: Path, intelligence=None, registry: Registry | None = None):
+    def __init__(self, data_dir: Path, intelligence=None, supply: IntelligenceSupply | None = None):
         self.dir = Path(data_dir)
         self.dir.mkdir(parents=True, exist_ok=True)
         self.store = Store(str(self.dir / "cynqra.db"))
@@ -64,10 +67,10 @@ class Engine:
         for p in self.paths.values():
             p.mkdir(exist_ok=True)
         self.lock = threading.RLock()
-        self._injected = intelligence  # a test's source; it is bound to this run's router like any other
-        self._shared = registry  # the app's model registry, for live runs
-        self._own: Registry | None = None  # a registry of this run's own: the demo's scripted model, or a bare run
-        self.registry: Registry | None = None
+        self._injected = intelligence  # a test's source; it is bound to this run like any other
+        self._shared = supply  # the app's Intelligence Layer, for live runs
+        self._own: IntelligenceSupply | None = None  # a run's own: the demo's script, or a run without an app
+        self.supply: IntelligenceSupply | None = None
         self.intel = None
         self.live_proc = None
         if self.store.get("meta", "run") is None:
@@ -94,68 +97,80 @@ class Engine:
         if self.meta["phase"] not in phases:
             raise EngineError(f"not allowed in phase {self.meta['phase']}; needs {' or '.join(phases)}")
 
-    # --- intelligence: one path, through the registry ----------------------------------------------------------
-    def _local_registry(self) -> Registry:
+    # --- intelligence: the Intelligence Layer, through each worker's binding ----------------------------------
+    @property
+    def registry(self):
+        return self.supply.registry if self.supply else None
+
+    def _local_supply(self) -> IntelligenceSupply:
         if self._own is None:
-            self._own = Registry(self.dir / "registry")
+            self._own = IntelligenceSupply(self.dir / "intelligence")
         return self._own
 
     def _attach(self, strict: bool = True) -> None:
-        """Bind the run to its registry and its source. A demo stands its scripted model in a registry of its own; a
-        live run uses the app's registry and, when that offers no model, the model the environment names. strict: a
-        new live run with no model is refused; a reopened one opens, and its next call fails like any model error."""
+        """Bind the run to its Intelligence Layer and its source. A demo stands its scenario's script in an
+        Intelligence Layer of its own; a live run uses the app's, and when nothing connected there is available,
+        the intelligence the environment names. strict: a new live run with no intelligence is refused; a reopened
+        one opens, and its next call fails like any model error."""
         m = self.meta
         if m["mode"] == "demo":
-            reg = self._local_registry()
-            mid = f"scripted-{m['scenario']}"
-            try:
-                reg.get(mid)
-            except RegistryError:
-                reg.register({"runtime": "scripted", "ref": m["scenario"], "id": mid})
+            sup = self._local_supply()
+            title = f"Demo script ({m['scenario']})"
+            conn = sup.connections.find(origin="demo", name=title) or sup.connections.create(
+                {"type": "demo_script", "name": title, "auth": {"method": "none"}, "models": [m["scenario"]]},
+                origin="demo")
+            sup.discover(conn["id"])
             source = self._injected or ScriptedSource(m["scenario"])
         else:
-            reg = self._shared or self._local_registry()
-            if not reg.available() and model_adapter.resolve() is not None:
-                try:
-                    reg.get("environment")
-                except RegistryError:
-                    reg.register({"runtime": "environment", "ref": "environment", "id": "environment"})
-            if strict and not reg.available():
-                raise EngineError("live mode needs a model: add one in the model registry, start a local model in the "
-                                  "desktop app, or set a model in the environment")
+            sup = self._shared or self._local_supply()
+            if not sup.registry.available():
+                sup.connect_environment()
+            if strict and not sup.registry.available():
+                raise EngineError("live mode needs intelligence: connect a provider (OpenAI-compatible, Anthropic or "
+                                  "a model on this machine), or name one in the environment")
             source = self._injected or ModelSource()
-        source.bind(self._route)
-        self.registry, self.intel = reg, source
+        source.bind(self)
+        self.supply, self.intel = sup, source
 
-    def _route(self, worker_id: str) -> tuple[str, dict]:
-        """The Intelligence Router at call time: the model this worker runs on now. Work that belongs to no worker
-        (structuring the objective, synthesizing the workforce) runs on the model chosen for that work."""
-        w = self.worker(worker_id) if worker_id.startswith("w_") else None
-        if w is not None and w.get("model_id"):
-            model_id = w["model_id"]
-        else:
-            sys_ = self.store.get("workforce", "system") or {}
-            ok = False
-            if sys_.get("model_id"):
-                try:
-                    ok = self.registry.availability(self.registry.get(sys_["model_id"]))[0]
-                except RegistryError:
-                    ok = False
-            if not ok:
-                best, rows = router.choose(self.registry, project_settings.get(self.store), ["objective"])
-                if best is None:
-                    raise IntelligenceError("no available model in the registry")
-                sys_ = {"model_id": best["model_id"], "candidates": rows, "at": now()}
-                self.store.put("workforce", "system", sys_)
-                self.event("worker.model_assigned", "organization", "system", {"model_id": best["model_id"],
-                           "model": best["model"], "why": "objective intelligence and workforce synthesis"},
-                           actor="intelligence_router")
-            model_id = sys_["model_id"]
-        return model_id, self.registry.route(model_id)
+    def intelligence_for(self, worker_id: str) -> str:
+        """The intelligence bound to a worker. Work that belongs to no worker (structuring the objective,
+        synthesizing the workforce) runs on the intelligence the Router bound to the control plane for it."""
+        b = binding.current(self.store, worker_id) if worker_id.startswith("w_") else None
+        if b is not None:
+            return b["intelligence_id"]
+        sys_ = binding.current(self.store, binding.SYSTEM)
+        if sys_ is not None:
+            try:
+                if self.registry.availability(self.registry.get(sys_["intelligence_id"]))[0]:
+                    return sys_["intelligence_id"]
+            except RegistryError:
+                pass
+        best, rows = router.choose(self.registry, project_settings.get(self.store), ["objective"])
+        if best is None:
+            raise IntelligenceError("no available intelligence in the registry")
+        binding.bind(self, binding.SYSTEM, self.registry.get(best["model_id"]), by="intelligence_router",
+                     reason="objective intelligence and workforce synthesis", candidates=rows)
+        return best["model_id"]
+
+    def invoke(self, worker_id: str, request: dict) -> dict:
+        """One call for a worker, through the Intelligence Gateway to the intelligence it is bound to, at the
+        version its binding pinned. A new version continues only after its regression check passes."""
+        who = worker_id if worker_id.startswith("w_") and binding.current(self.store, worker_id) else binding.SYSTEM
+        mid = self.intelligence_for(worker_id)
+        pin = (binding.current(self.store, who) or {}).get("version")
+        try:
+            return self.supply.gateway.invoke(mid, request, pinned_version=pin)
+        except VersionChanged as exc:
+            replacement.version_changed(self, who, exc)  # kept after its regression check, or rebound
+            b = binding.current(self.store, who)
+            return self.supply.gateway.invoke(b["intelligence_id"], request, pinned_version=b["version"])
+        except SupplyError as exc:
+            raise IntelligenceError(str(exc), model_id=mid) from exc
 
     def _staff(self, refine: bool = False) -> None:
-        """Stage 4: a model for every worker; once the roadmap exists, refined to the kinds of the tasks each worker
-        owns (one model can power many workers, and two workers of one role can run on different models)."""
+        """Stage 4: an intelligence for every worker; once the roadmap exists, refined to the kinds of the tasks
+        each worker owns (one intelligence can power many workers, and two workers of one role can run on
+        different ones). Every choice is a binding with the Router's whole table."""
         workload = None
         if refine:
             workload = {}
@@ -171,20 +186,12 @@ class Engine:
         except router.RouterError as exc:
             raise IntelligenceError(str(exc)) from exc
         for wid, s in staffing.items():
-            w = self.worker(wid)
-            if refine and w.get("model_id") == s["model_id"]:
+            if refine and self.model_of(wid) == s["model_id"]:
                 continue
-            before = w.get("model_id")
-            w.update({"model_id": s["model_id"], "model": s["model"]})
-            self.store.put("worker", wid, w)
             why = ("refined to the roadmap's workload: " if refine else
                    "lowest expected cost per verified task for its role's work: ") + ", ".join(s["kinds"])
-            self.store.put("staffing", wid, {"worker_id": wid, "model_id": s["model_id"], "candidates": s["candidates"],
-                                             "at": now(), "why": why, "kinds": s["kinds"], "previous": before})
-            self.event("worker.model_assigned", "worker", wid, {"role": w["role"], "model_id": s["model_id"],
-                       "model": s["model"], "why": why, "candidates": [{k: r[k] for k in (
-                           "model", "score", "p_task", "expected_usd", "expected_minutes")} for r in s["candidates"]]},
-                       actor="intelligence_router")
+            binding.bind(self, wid, self.registry.get(s["model_id"]), reason=why, by="intelligence_router",
+                         candidates=s["candidates"])
 
     # --- the run contract: the audit trail and the founder's inbox ---------------------------------------------
     def event(self, event_type: str, aggregate_type: str, aggregate_id: str, payload: dict, *,
@@ -252,7 +259,7 @@ class Engine:
         return self.store.all("worker")
 
     def model_of(self, wid: str) -> str | None:
-        return (self.worker(wid) or {}).get("model_id")
+        return binding.intelligence_of(self.store, wid)
 
     def persona(self, wid: str) -> str:
         w = self.worker(wid)
@@ -672,7 +679,7 @@ class Engine:
                 self.set_meta(phase="workforce", failed_stage=None, notice="")
                 synthesis.propose(self, note="Retried after an intelligence error.")
             elif stage == "roadmap":
-                if not any(w.get("model_id") for w in self.workers()):
+                if not any(self.model_of(w["id"]) for w in self.workers()):
                     self._staff()
                 self._roadmap()
             else:
@@ -733,24 +740,27 @@ class Engine:
             return delivery.export(self)
 
     def workforce_view(self) -> dict:
-        """Who runs on which model and why, what each may spend and has spent, and every intelligence change."""
-        if self.registry is None:
+        """Which intelligence each worker is bound to and why, what each may spend and has spent, and every change
+        to a binding. Workers and intelligence stay separate records; the binding joins them."""
+        if self.supply is None:
             return {"active": False, "why": "no company yet"}
         L = budget.ledger(self.store)
-        staffing = {s["worker_id"]: s for s in self.store.all("staffing")}
+        bound = binding.all_bindings(self.store)
         workers = self.workers()
         in_use: dict[str, list[str]] = {}
         for w in workers:
-            if w.get("model_id"):
-                in_use.setdefault(w["model_id"], []).append(w["id"])
+            if w["id"] in bound:
+                in_use.setdefault(bound[w["id"]]["intelligence_id"], []).append(w["id"])
         return {"active": bool(workers), "registry": self.registry.snapshot(),
-                "settings": project_settings.get(self.store), "ledger": L, "system": self.store.get("workforce", "system"),
+                "settings": project_settings.get(self.store), "ledger": L, "system": bound.get(binding.SYSTEM),
                 "replacements": self.store.all("replacement"), "models_in_use": in_use,
-                "workers": [{"id": w["id"], "role": w["role"], "title": w["title"], "model_id": w.get("model_id"),
-                             "model": w.get("model"), "reports_to": w.get("reports_to"),
+                "workers": [{"id": w["id"], "role": w["role"], "title": w["title"], "reports_to": w.get("reports_to"),
+                             "binding": bound.get(w["id"]),
+                             "model_id": (bound.get(w["id"]) or {}).get("intelligence_id"),
+                             "model": (bound.get(w["id"]) or {}).get("intelligence"),
+                             "why": (bound.get(w["id"]) or {}).get("reason", ""),
+                             "candidates": (bound.get(w["id"]) or {}).get("candidates", []),
                              "budget": L["by_worker"].get(w["id"], {"allocated": 0.0, "spent": 0.0}),
-                             "why": (staffing.get(w["id"]) or {}).get("why", ""),
-                             "candidates": (staffing.get(w["id"]) or {}).get("candidates", []),
                              "performance": w.get("performance_profile")} for w in workers]}
 
     def snapshot(self) -> dict:
@@ -784,6 +794,7 @@ class Engine:
             "forecast": forecast,
             "economics": budget.actual(self.store, forecast) if forecast else None,
             "workforce": self.workforce_view(),
+            "supply": self.supply.snapshot() if self.supply else None,
             "performance": performance.all_cards(self.store, self.registry) if workers else [],
             "evaluations": self.store.all("evaluation"),
             "catalog": roles.catalog(),

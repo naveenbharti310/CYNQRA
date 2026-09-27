@@ -39,14 +39,21 @@ ENGINEER = roles.prompt_text({"id": "w_eng_a", "role": "Engineer", "title": "Sof
 
 
 class _Run:
-    """One model's calibration or regression work: every round an outcome in the registry."""
+    """One intelligence's calibration or regression work: every call through the Intelligence Gateway, every round
+    an outcome in the Intelligence Registry. It is the access point its model source is bound to."""
 
-    def __init__(self, reg, model_id: str, source: str):
-        self.reg, self.model_id, self.source = reg, model_id, source
+    def __init__(self, supply, model_id: str, source: str):
+        self.supply, self.reg, self.model_id, self.source = supply, supply.registry, model_id, source
         self.run_id = f"{source}_{int(time.time())}"
         self.src = ModelSource()
-        self.src.bind(lambda worker: (model_id, reg.route(model_id)))
+        self.src.bind(self)
         self.usd = 0.0
+
+    def intelligence_for(self, worker: str) -> str:
+        return self.model_id
+
+    def invoke(self, worker: str, request: dict) -> dict:
+        return self.supply.gateway.invoke(self.model_id, request)
 
     def outcome(self, kind, verified, usage, attempt, failure=""):
         c = self.reg.record_call(self.model_id, role=self.source, purpose=kind, task_kind=kind, usage=usage,
@@ -122,13 +129,14 @@ def _speed(u: dict) -> str:
             + (f"; reads {u['read_tps']} tokens/s, writes {u['write_tps']} tokens/s" if u.get("write_tps") else ""))
 
 
-def probe(reg, model_id: str, log=print) -> dict:
+def probe(supply, model_id: str, log=print) -> dict:
     """Run both probes on one registered model and record every round as an outcome. The result also settles the
     model's regression gate for its current version."""
+    reg = supply.registry
     m = reg.get(model_id)
     if m["runtime"] == "scripted":
         raise ValueError("the scripted demo is not a model; there is nothing to probe")
-    run = _Run(reg, model_id, "probe")
+    run = _Run(supply, model_id, "probe")
     result = {"model_id": model_id, "model": m["name"], "objective": None, "code_rounds": [], "passed": False}
     say = lambda s: log(f"{m['name']}:{s}")  # noqa: E731
     try:
@@ -147,10 +155,11 @@ def probe(reg, model_id: str, log=print) -> dict:
     return result
 
 
-def regression_check(reg, model_id: str, kind: str, log=lambda s: None) -> dict:
+def regression_check(supply, model_id: str, kind: str, log=lambda s: None) -> dict:
     """Before a model takes over a worker's task: evidence that it can do this kind of work now. Its own verified
     record on the kind is enough (and a passed regression gate for its version); otherwise it does the calibration
     work of that kind here, and the result is recorded like any other outcome."""
+    reg = supply.registry
     m = reg.get(model_id)
     if m["runtime"] == "scripted":
         return {"passed": False, "evidence": "the scripted demo can only replay its own scenario", "ran": False}
@@ -162,7 +171,7 @@ def regression_check(reg, model_id: str, kind: str, log=lambda s: None) -> dict:
     if done:
         return {"passed": True, "evidence": f"{len(done)} verified {kind} attempt(s) on record for this version",
                 "ran": False}
-    run = _Run(reg, model_id, "regression")
+    run = _Run(supply, model_id, "regression")
     try:
         if kind in roles.BUILD_TYPES:
             ok, rounds = run.code({"product": "Order tracker for a bakery"}, log)

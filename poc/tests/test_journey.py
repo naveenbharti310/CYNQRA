@@ -182,10 +182,10 @@ class JourneyTests(unittest.TestCase):
 
     def test_the_script_is_staffed_and_metered_like_a_model(self):  # WORKER is not MODEL, even in the demo
         view = self.e.workforce_view()
-        self.assertEqual(view["models_in_use"], {"scripted-candidate_tracker": ["w_cto", "w_pm", "w_eng_a", "w_eng_b"]})
+        self.assertEqual(view["models_in_use"], {"scripted-demo-candidate-tracker": ["w_cto", "w_pm", "w_eng_a", "w_eng_b"]})
         self.assertEqual([m["runtime"] for m in view["registry"]], ["scripted"])
         calls = self.e.store.all("call")
-        self.assertTrue(calls and all(c["model_id"] == "scripted-candidate_tracker" for c in calls))
+        self.assertTrue(calls and all(c["model_id"] == "scripted-demo-candidate-tracker" for c in calls))
         L = self.e.snapshot()["budget"]["ledger"]
         self.assertEqual((L["spent_total"], L["state"], L["warned"]), (0.0, "ok", []),
                          "a script costs nothing, and this machine's time is not priced by default")

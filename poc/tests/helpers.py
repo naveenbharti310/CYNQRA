@@ -45,10 +45,30 @@ def restore_env(saved: dict):
     os.environ.update(saved)
 
 
+class EnvAccess:
+    """What the environment names, connected through a real Intelligence Layer (connection, credential reference,
+    adapter, gateway), as a live run with nothing else connected is. Each test gets its own control plane."""
+
+    def __init__(self):
+        from cynqra.intelligence_layer import IntelligenceSupply
+        self.dir = tempfile.mkdtemp(prefix="cynqra_env_")
+        self.supply = IntelligenceSupply(Path(self.dir))
+        self.entries = self.supply.connect_environment()
+        if not self.entries:
+            raise AssertionError("the environment names no intelligence")
+        self.model_id = self.entries[0]["id"]
+
+    def intelligence_for(self, worker: str) -> str:
+        return self.model_id
+
+    def invoke(self, worker: str, request: dict) -> dict:
+        return self.supply.gateway.invoke(self.model_id, request)
+
+
 def env_source() -> ModelSource:
-    """A model source bound to the model the environment names, as a live run's environment model is."""
+    """A model source bound to the intelligence the environment names, through the Intelligence Gateway."""
     src = ModelSource()
-    src.bind(lambda worker: ("environment", {}))
+    src.bind(EnvAccess())
     return src
 
 

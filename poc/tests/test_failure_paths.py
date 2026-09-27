@@ -77,7 +77,7 @@ class InvalidProtocolTests(Base):
         self.assertIn("No other model in the registry is available", d["problem"],
                       "the Replacement Engine looked for another intelligence before asking the founder")
         v = self.e.store.all("violation")
-        self.assertEqual([(x["worker_id"], x["model_id"]) for x in v], [("w_pm", "scripted-candidate_tracker")] * 3)
+        self.assertEqual([(x["worker_id"], x["model_id"]) for x in v], [("w_pm", "scripted-demo-candidate-tracker")] * 3)
         self.assertIn("Escalation", [p["kind"] for p in self.e.store.all("protocol")])
 
     def test_founder_retries_and_the_run_finishes(self):

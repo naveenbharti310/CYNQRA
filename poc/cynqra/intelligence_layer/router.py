@@ -17,8 +17,8 @@ Selection. For a kind of work k and an available model m, from the registry's me
 """
 from __future__ import annotations
 
-from . import roles
-from .registry import Registry
+from .. import roles
+from .registry import IntelligenceRegistry as Registry
 
 ATTEMPTS = 3  # verification attempts before a task counts as failed (execution.MAX_ATTEMPTS)
 PRIOR = 2.0

@@ -35,14 +35,18 @@ Demo. The workers' words come from a prepared scenario; the first screen offers 
 candidate tracker: an internal recruiting tool built by a CTO, a PM and two engineers. The
 restaurant covers forecast: a 14-day forecast and prep plan built by nine workers (CEO, CTO,
 PM, Data Scientist, backend and frontend engineers, designer, DevOps, QA). Every screen says
-it is demo mode. The script stands in the run's model registry as its only model, so the
-demo is staffed, routed and metered like a live run. The documents and code the workers hand
+it is demo mode. The script stands in the run's own Intelligence Registry as its only entry
+(a demo-script connection, not a provider), so the demo is staffed, bound and metered like a
+live run. The documents and code the workers hand
 over are still written to disk, verified for real (tests, document rules, the forecast's
 backtest), merged for real and deployed for real on your machine.
 
-Live. Real models do the thinking. The run is staffed from the model registry (Models, on
-the first screen); when the registry offers none, the model the environment names is
-registered and used: set ANTHROPIC_API_KEY (default model claude-sonnet-5) or OPENAI_API_KEY
+Live. Real models do the thinking. Connect providers on the Intelligence screen (first
+screen, top right): an OpenAI-compatible API, the Anthropic API, or a local/self-hosted
+server; the desktop app connects this computer itself. Each connection's models are
+discovered and registered, and the Intelligence Router binds each worker to one from
+measured evidence (CYNQRA_INTELLIGENCE_SUPPLY.md). When nothing is connected, the model the
+environment names is connected and used: set ANTHROPIC_API_KEY (default model claude-sonnet-5) or OPENAI_API_KEY
 (default gpt-4o-mini) before starting, or CYNQRA_MODEL to pick another. A model that stops
 answering is replaced by another that passes its regression check, or the founder decides.
 Nothing is invented to fill the gap.
@@ -121,7 +125,7 @@ TEST_REPORT.md holds the last full run and its coverage.
 | cynqra/objective.py | Objective Intelligence: the objective structured and decomposed into requirements |
 | cynqra/synthesis.py | Workforce Synthesizer: the organization the objective needs, and its gate |
 | cynqra/roles.py | The catalog: roles, task types and their verifiers, document types |
-| cynqra/router.py | Intelligence Router: a model for every worker, from measured evidence |
+| cynqra/intelligence_layer/router.py | Intelligence Router: an intelligence for every worker, from measured evidence; owns no credentials |
 | cynqra/planner.py | Execution Planner: milestones, tasks, owners, accountability, verification gates |
 | cynqra/budget.py, settings.py | Budget Engine: the dollar forecast in layers, the ledger, the breaker; the project's settings |
 | cynqra/gateway.py | Every worker action: identity, policy, budget, target check, execute, sanitize, audit |
@@ -130,7 +134,8 @@ TEST_REPORT.md holds the last full run and its coverage.
 | cynqra/testrunner.py | Test runner in a clean process, with a cleaned environment |
 | cynqra/performance.py, replacement.py | Performance Engine and Replacement Engine: keep, reroute or replace |
 | cynqra/delivery.py | Delivery, final report, replay, the organization graph, export |
-| cynqra/registry.py, probe.py | The model registry, and the calibration work every model does |
+| cynqra/intelligence_layer/ | The Intelligence Layer: provider connections, credentials (secrets layer), adapters (OpenAI-compatible, Anthropic, local), the Intelligence Registry, Router and Gateway |
+| cynqra/binding.py, probe.py | A worker's intelligence binding (version pin, history); the calibration work every intelligence does |
 | cynqra/policy.py | D-27 risk rubric and D-28 authority matrix as code |
 | cynqra/protocol.py | Handoff, Blocker, Escalation, Approval as stamped, hashed objects |
 | cynqra/db.py | SQLite store; events are append only, enforced by triggers |

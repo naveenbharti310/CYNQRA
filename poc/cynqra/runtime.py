@@ -396,7 +396,6 @@ class Runtime:
                 why = self._probe(base)  # a GPU can load a model and still be unable to compute with it
             if not why:
                 self.base = base
-                self.use(model, base)
                 self._set(state="ready", model=model_id, started_at=time.time())
                 self.save_settings(model=model_id)
                 return base
@@ -445,16 +444,6 @@ class Runtime:
         if 0 < tps < 1.5:  # a real GPU writes tens of tokens a second; a crawl means it cannot really compute
             return f"the GPU answered at {tps:.1f} tokens/s, slower than the processor would be"
         return ""
-
-    def use(self, model: dict, base: str) -> None:
-        """Point model_adapter at the running server, with the research's request settings. Only the
-        model on this machine is used: API keys in the environment are ignored by this process."""
-        os.environ.update({"CYNQRA_LOCAL_BASE_URL": base + "/v1", "CYNQRA_MODEL": model["name"],
-                           "CYNQRA_NUM_PREDICT": str(model["predict"]), "CYNQRA_THINK": model["think"],
-                           "CYNQRA_TEMPERATURE": "0", "CYNQRA_SEED": "42"})
-        os.environ.setdefault("CYNQRA_TIMEOUT", "3600")
-        for k in ("CYNQRA_OLLAMA_MODEL", "CYNQRA_S1_MODEL_CMD", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
-            os.environ.pop(k, None)
 
     def activity(self) -> dict | None:
         """What the model is doing now, from llama-server's /slots: the prompt it is reading, the tokens it has written."""
@@ -519,7 +508,6 @@ class Runtime:
         with self.lock:
             if self.status.get("state") == "ready":
                 self.status["state"] = "none"
-        os.environ.pop("CYNQRA_LOCAL_BASE_URL", None)
 
 
 def parse_devices(text: str) -> list[dict]:

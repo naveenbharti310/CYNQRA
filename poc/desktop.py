@@ -437,7 +437,7 @@ def prepare_model(desk: Desktop, model_id: str, gpu: str | None) -> None:
 def check_model(args) -> int:
     """A real model on this machine does Cynqra's calibration work (probe.py): a structured answer, and code that
     passes its own tests, fixed from the failures for up to three rounds. The model is registered in the app's
-    registry first, so the check is also its first measured record there."""
+    Intelligence Registry through the app's local connection first, so the check is also its first measured record."""
     from cynqra.probe import probe
     desk = Desktop(Path(args.data) if args.data else data_dir())
     result = {"model": args.check_model, "platform": platform.platform(), "ram_gb": desk.runtime.ram_gb, "passed": False}
@@ -446,8 +446,9 @@ def check_model(args) -> int:
         prepare_model(desk, args.check_model, args.gpu)
         result["accel"] = desk.runtime.status["accel"]
         result["ready_s"] = round(time.time() - t0)
-        m = desk.app.registry.register({"runtime": "llama", "ref": args.check_model})
-        r = probe(desk.app.registry, m["id"], log=lambda line: print(line, flush=True))
+        local = next(c for c in desk.app.supply.connections.all() if c["name"] == "This computer")
+        m = next(x for x in desk.app.supply.discover(local["id"]) if x["ref"] == args.check_model)
+        r = probe(desk.app.supply, m["id"], log=lambda line: print(line, flush=True))
         usages = [r["objective"]["usage"]] + [x["usage"] for x in r["code_rounds"]] if r.get("objective") else []
         result.update(passed=r["passed"], objective_complete=r.get("objective_passed", False),
                       code_passed=r.get("code_passed", False), objective=r.get("objective"), code_rounds=r["code_rounds"],

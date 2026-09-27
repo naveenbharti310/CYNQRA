@@ -13,7 +13,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import budget, policy
+from . import binding, budget, policy
 from .db import digest, now
 from .testrunner import run_unittests
 
@@ -39,7 +39,7 @@ def execute(run, worker_id: str, task_id: str, action_type: str, target: str = "
     decision = policy.evaluate(role=w["role"], action_type=action_type, frozen=run.meta["frozen"], budget_state=state,
                                target=target)
     action = {"id": "a_" + uuid.uuid4().hex[:10], "company_id": run.cid, "task_id": task_id, "worker_id": worker_id,
-              "role": w["role"], "model_id": w.get("model_id"), "action_type": action_type, "target": target,
+              "role": w["role"], "model_id": binding.intelligence_of(run.store, worker_id), "action_type": action_type, "target": target,
               "risk_tier": decision["risk_tier"], "policy_decision": decision["decision"],
               "policy_reason": decision["reason"], "policy_version": decision["policy_version"],
               "authority_snapshot": dict(policy.MATRIX.get(w["role"], {})), "status": "", "created_at": now(),

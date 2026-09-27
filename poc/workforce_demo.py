@@ -4,7 +4,8 @@
     desktop.py --workforce hf "objective"        Qwen3.5-35B-A3B, GLM-4.7 and Kimi K2.5 on Hugging Face (HF_TOKEN)
 
 Through the app's own HTTP API, as the window drives it:
- 1. Register three real models (facts only: runtime, price, context; no scores).
+ 1. Connect the provider (this machine, or Hugging Face with HF_TOKEN named, never copied); its models are
+    discovered and registered in the Intelligence Registry (facts only: runtime, price, context; no scores).
  2. Probe each one on Cynqra's calibration work, so selection starts from measured outcomes.
  3. Give Cynqra the objective and a dollar budget. Cynqra decomposes it into requirements and synthesizes the
     organization; the founder approves the workforce, then the roadmap and the budget built on it.
@@ -46,16 +47,21 @@ def run(args) -> int:
            "decisions": [], "local_usd_per_hour": LOCAL_USD_PER_HOUR if args.workforce == "local" else None}
     say = lambda *a: print(f"{time.time() - t0:7.0f}s ", *a, flush=True)  # noqa: E731
     try:
-        # 1. register
+        # 1. connect: the providers are connected once; their models are discovered and registered
         if args.workforce == "local":
             for ref, name in LOCAL:
                 say(f"downloading {name} if needed")
                 desk.runtime.download(ref)
-                rep["models"].append(api("/api/models", {"runtime": "llama", "ref": ref, "name": name,
-                                                         "compute_usd_per_hour": LOCAL_USD_PER_HOUR}))
+            local = next(c for c in api("/api/intelligence")["connections"] if c["name"] == "This computer")
+            got = api(f"/api/connections/{local['id']}/update", {"models": [r for r, _ in LOCAL],
+                                                                  "machine_usd_per_hour": LOCAL_USD_PER_HOUR})
         else:
-            for ref, name in HOSTED:
-                rep["models"].append(api("/api/models", {"runtime": "hf", "ref": ref, "name": name}))
+            got = api("/api/connections", {"type": "openai_compatible", "name": "Hugging Face Inference Providers",
+                                           "endpoint": "https://router.huggingface.co/v1",
+                                           "auth": {"method": "env", "env_var": "HF_TOKEN"},
+                                           "models": [r for r, _ in HOSTED]})
+        rep["connection"] = got["connection"]
+        rep["models"] = got["intelligence"]
         for m in rep["models"]:
             say(f"registered {m['name']}: {m['runtime']} {m['ref']}, context {m['context']}, "
                 + (f"${m['compute_usd_per_hour']}/h of this machine" if m["local"] else f"${m['price_in']} in / ${m['price_out']} out per M"))
@@ -64,7 +70,7 @@ def run(args) -> int:
             from cynqra.probe import probe
             for m in rep["models"]:
                 say(f"probing {m['name']} on Cynqra's calibration work")
-                r = probe(desk.app.registry, m["id"], log=lambda s: say(s.strip()))
+                r = probe(desk.app.supply, m["id"], log=lambda s: say(s.strip()))
                 rep["probes"].append(r)
         # 3. project
         api("/api/company", {"name": args.company, "mode": "live"})
@@ -102,7 +108,7 @@ def run(args) -> int:
         # 5. fault
         eng = next(w for w in wf["workers"] if w["id"] == "w_eng_a")
         faulted = eng["model_id"]
-        api(f"/api/models/{faulted}/fault", {"max_reply": FAULT_REPLY_TOKENS})
+        api(f"/api/intelligence/{faulted}/fault", {"max_reply": FAULT_REPLY_TOKENS})
         rep["fault"] = {"model_id": faulted, "model": eng["model"], "max_reply": FAULT_REPLY_TOKENS,
                         "why": "the model staffed as Engineer A; its replies are capped so its real code cannot fit"}
         say(f"FAULT: {eng['model']} (Engineer A's model) now has its replies capped at {FAULT_REPLY_TOKENS} tokens")
@@ -145,7 +151,8 @@ def run(args) -> int:
                                                         "usd_spent_by_previous", "inherited")} for r in view.get("replacements", [])],
                        ledger=view.get("ledger"), workers_final=[{k: w[k] for k in ("id", "role", "model", "budget")}
                                                                  for w in view.get("workers", [])],
-                       outcomes=[o for o in desk.app.registry.outcomes() if o["run_id"] == e.cid],
+                       outcomes=[o for o in desk.app.supply.registry.outcomes() if o["run_id"] == e.cid],
+                       bindings=e.store.all("binding"),
                        registry=[{"name": m["name"], "runtime": m["runtime"], "ref": m["ref"], "fault": m.get("fault"),
                                   "available": m["available"], "performance": m["performance"]} for m in view["registry"]],
                        tasks=[{k: t.get(k) for k in ("id", "kind", "owner_worker_id", "title", "status", "attempts",

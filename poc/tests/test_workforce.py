@@ -1,9 +1,9 @@
-"""The workforce: workers staffed from the model registry, every call metered, every verification learned from,
-and a failing model replaced by another that continues the work.
+"""The workforce: workers bound to intelligence from the Intelligence Registry, every call metered, every
+verification learned from, and a failing intelligence replaced by another that continues the work.
 
-Three models are registered as openai_compatible servers, each one its own fake_llama_server.py process on its
-own port (a test double of llama-server: its answers come from tests/fake_model.py and are never a result). The
-real demonstration runs the same code on real models (.github/workflows/cynqra-workforce.yml).
+Three provider connections (OpenAI-compatible), each to its own fake_llama_server.py process on its own port (a
+test double of llama-server: its answers come from tests/fake_model.py and are never a result), each offering one
+model. The real demonstration runs the same code on real models (.github/workflows/cynqra-workforce.yml).
 """
 from __future__ import annotations
 
@@ -17,9 +17,10 @@ import urllib.request
 
 from helpers import POC, SCENARIO, TempDir, engine_to_gates, no_model_env, restore_env, run_journey
 
+from cynqra import binding
 from cynqra.engine import Engine
-from cynqra.registry import Registry, RegistryError
-from cynqra.router import estimate, rank
+from cynqra.intelligence_layer import IntelligenceSupply, SupplyError
+from cynqra.intelligence_layer.router import estimate, rank
 
 FAKE = POC / "tests" / "fake_llama_server.py"
 
@@ -59,39 +60,45 @@ class WorkforceTests(unittest.TestCase):
         self.saved = no_model_env()
         self.tmp = TempDir()
         self.srv = Servers(3, self.tmp.path)
-        self.reg = Registry(self.tmp.path / "registry")
+        self.supply = IntelligenceSupply(self.tmp.path / "control")
+        self.reg = self.supply.registry
+        self.conns = []
         for i, (name, price) in enumerate([("Model A", 0.2), ("Model B", 0.6), ("Model C", 2.0)]):
-            self.reg.register({"runtime": "openai_compatible", "ref": f"fake-{i}", "name": name,
-                               "base_url": self.srv.urls[i] + "/v1", "price_in": price, "price_out": price * 4,
-                               "context": 32768, "provider": "test double", "license": "none"})
+            out = self.supply.connect({"type": "openai_compatible", "name": f"Server {i}",
+                                       "endpoint": self.srv.urls[i] + "/v1", "auth": {"method": "none"},
+                                       "models": [name], "price_per_m": [price, price * 4]})
+            self.conns.append(out["connection"]["id"])
 
     def tearDown(self):
         self.srv.close()
-        self.reg.close()
+        self.supply.close()
         self.tmp.cleanup()
         restore_env(self.saved)
 
     def engine(self, budget_usd=5.0) -> Engine:
-        e = Engine(self.tmp.path / "run", registry=self.reg)
+        e = Engine(self.tmp.path / "run", supply=self.supply)
         e.create_company("Harbor Recruiting", "live")
         e.draft_objective(SCENARIO["messy"])
         e.set_guardrails(budget_usd=budget_usd, time_value_per_hour=10)
         e.submit_objective()
         return engine_to_gates(e)
 
-    def test_registry_holds_facts_and_refuses_what_it_cannot_run(self):
+    def test_the_registry_holds_facts_and_the_supply_refuses_what_it_cannot_run(self):
         m = self.reg.get("model-a")
-        self.assertEqual((m["runtime"], m["context"], m["price_in"]), ("openai_compatible", 32768, 0.2))
+        self.assertEqual((m["connection_id"], m["ref"], m["price_in"]), (self.conns[0], "Model A", 0.2))
         self.assertNotIn("capability", str(m).lower(), "no hand-made scores")
-        with self.assertRaises(RegistryError):
-            self.reg.register({"runtime": "mystery", "ref": "x"})
-        with self.assertRaises(RegistryError):
-            self.reg.register({"runtime": "llama", "ref": "not-in-the-catalog"})
+        self.assertNotIn("api_key", str(m), "an intelligence holds no credential")
+        with self.assertRaises(SupplyError):
+            self.supply.connect({"type": "mystery", "endpoint": "http://x"})
+        with self.assertRaises(SupplyError):  # a local llama server needs the app's runtime
+            self.supply.connect({"type": "local", "server": "llama", "models": ["not-in-the-catalog"]})
         self.assertEqual(self.reg.availability(m), (True, "available"))
         os.environ.pop("HF_TOKEN", None)
-        hf = self.reg.register({"runtime": "hf", "ref": "zai-org/GLM-4.7", "name": "GLM-4.7"})
-        self.assertEqual(self.reg.availability(hf), (False, "HF_TOKEN is not set"))
-        self.reg.remove("glm-4-7")
+        hf = self.supply.connections.create({"type": "openai_compatible", "name": "Hugging Face",
+                                             "endpoint": "https://router.huggingface.co/v1",
+                                             "auth": {"method": "env", "env_var": "HF_TOKEN"}})
+        glm = self.reg.register({"ref": "zai-org/GLM-4.7", "name": "GLM-4.7"}, connection_id=hf["id"])
+        self.assertEqual(self.reg.availability(glm), (False, "HF_TOKEN is not set"))
 
     def test_selection_follows_measured_outcomes_not_names(self):
         rows = rank(self.reg, ["code"], 10.0)
@@ -110,12 +117,14 @@ class WorkforceTests(unittest.TestCase):
                          "a kind never seen borrows the model's overall record")
 
     def test_live_mode_without_any_model_is_refused_before_anything_is_written(self):
-        for m in self.reg.models():
-            self.reg.remove(m["id"])
-        e = Engine(self.tmp.path / "none", registry=self.reg)
+        for cid in self.conns:
+            self.supply.remove_connection(cid)
+        self.assertFalse(self.reg.available(), "removing a connection retires what it offered")
+        self.assertTrue(self.reg.models(include_retired=True), "their measured record is kept")
+        e = Engine(self.tmp.path / "none", supply=self.supply)
         with self.assertRaises(Exception) as ctx:
             e.create_company("Harbor Recruiting", "live")
-        self.assertIn("needs a model", str(ctx.exception))
+        self.assertIn("needs intelligence", str(ctx.exception))
         self.assertEqual(e.meta["phase"], "new")
         e.close()
 
@@ -138,13 +147,16 @@ class WorkforceTests(unittest.TestCase):
 
     def test_a_model_that_goes_offline_is_detected_and_replaced(self):
         e = self.engine()
+        before = sorted(w["id"] for w in e.workers())
         self.reg.set_fault("model-a", offline=True)  # after staffing: every worker is on Model A
         run_journey(e, max_rounds=40)
         self.assertEqual(e.meta["phase"], "accepted", e.meta.get("notice"))
         reps = e.store.all("replacement")
         self.assertTrue(reps and all(r["from"] == "model-a" for r in reps))
         self.assertTrue({r["to"] for r in reps} <= {"model-b", "model-c"})
-        self.assertFalse(any(w["model_id"] == "model-a" for w in e.store.all("worker")), "nobody left on it")
+        self.assertFalse(any(binding.intelligence_of(e.store, w["id"]) == "model-a" for w in e.workers()),
+                         "no worker left on it")
+        self.assertEqual(sorted(w["id"] for w in e.workers()), before, "every worker kept its identity")
         self.assertFalse(self.reg.availability(self.reg.get("model-a"))[0])
         errors = [c for c in self.reg.calls("model-a") if c["error"]]
         self.assertGreaterEqual(len(errors), 2, "detected from its own failed calls")
@@ -155,10 +167,8 @@ class WorkforceTests(unittest.TestCase):
 
     def test_a_task_is_rerouted_to_a_peer_on_a_better_model(self):
         e = self.engine()
-        w = e.worker("w_eng_b")
-        w.update(model_id="model-c", model="Model C")  # the two engineers run on different models
-        e.store.put("worker", "w_eng_b", w)
-        self.reg.remove("model-b")
+        binding.bind(e, "w_eng_b", self.reg.get("model-c"), reason="the test's choice", by="test")  # two models
+        self.supply.remove_connection(self.conns[1])  # Model B is gone
         self.reg.set_fault("model-a", max_reply=40)  # Engineer A's model cannot finish its code
         run_journey(e, max_rounds=40)
         self.assertEqual(e.meta["phase"], "accepted", e.meta.get("notice"))
@@ -203,13 +213,12 @@ class WorkforceTests(unittest.TestCase):
         e.close()
 
     def test_the_regression_gate(self):
-        m = self.reg.register({"runtime": "openai_compatible", "ref": "fake-v", "name": "Versioned", "version": "1",
-                               "base_url": self.srv.urls[0] + "/v1"})
+        cid = self.conns[0]
+        m = self.reg.register({"ref": "fake-v", "name": "Versioned", "version": "1"}, connection_id=cid)
         self.assertEqual(m["regression"]["status"], "unverified")
         self.reg.set_regression("versioned", False, "failed its calibration code")
         self.assertEqual(self.reg.availability(self.reg.get("versioned")), (False, "failed its regression check"))
-        m = self.reg.register({"runtime": "openai_compatible", "ref": "fake-v", "name": "Versioned", "version": "2",
-                               "base_url": self.srv.urls[0] + "/v1"})
+        m = self.reg.register({"ref": "fake-v", "name": "Versioned", "version": "2"}, connection_id=cid)
         self.assertEqual((m["regression"]["status"], m["regression"]["previous_version"]), ("unverified", "1"))
         self.assertTrue(self.reg.availability(m)[0], "a new version gets its own chance")
 

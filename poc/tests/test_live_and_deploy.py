@@ -52,9 +52,13 @@ class LiveModeTests(unittest.TestCase):  # A15
         calls = e.store.all("call")
         self.assertTrue(calls)
         self.assertTrue(all(c["label"] == "shell command" for c in calls))
-        self.assertTrue(all(c["model_id"] == "environment" for c in calls),
-                        "the environment's model was registered and staffed like any other")
-        self.assertEqual({w["model_id"] for w in e.workers()}, {"environment"})
+        self.assertTrue(all(c["model_id"] == "shell-command" for c in calls),
+                        "the environment's model was connected, registered and bound like any other")
+        self.assertEqual({e.model_of(w["id"]) for w in e.workers()}, {"shell-command"})
+        conn = e.supply.connections.all()[0]
+        self.assertEqual((conn["type"], conn["server"], conn["origin"]), ("local", "command", "environment"))
+        self.assertTrue(all("model_id" not in w and "api_key" not in w for w in e.workers()),
+                        "a worker record holds no model and no credential")
         self.assertTrue(all(c["estimated"] for c in calls), "command token counts are marked estimated")
         self.assertEqual([t["status"] for t in e.tasks()], ["VERIFIED"] * 6)
         e.close()

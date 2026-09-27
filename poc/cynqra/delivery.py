@@ -173,6 +173,7 @@ def export(run) -> str:
         add("decisions.json", json.dumps(run.store.all("decision"), indent=1).encode(), "decision_history")
         add("events.jsonl", "\n".join(json.dumps(e) for e in run.store.events()).encode(), "event_log")
         org = {"organization": run.store.get("organization", "org_1"), "workers": run.workers(),
+               "intelligence_bindings": run.store.all("binding"),
                "proposal": run.store.get("proposal", (run.store.get("organization", "org_1") or {}).get("proposal", "")),
                "policy_version": policy.POLICY_VERSION, "matrix": policy.MATRIX, "risk": policy.RISK}
         add("organization.json", json.dumps(org, indent=1).encode(), "organization_configuration")

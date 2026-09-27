@@ -15,7 +15,8 @@ Every approval, rejection and override is a labelled decision in the audit trail
 """
 from __future__ import annotations
 
-from . import policy, roles, router
+from . import policy, roles
+from .intelligence_layer import router
 from . import settings as project_settings
 from .db import now
 from .intelligence import IntelligenceError, as_int, ask
@@ -30,11 +31,49 @@ def roles_for_area(area: str) -> list[str]:
     return [n for n, r in roles.ROLES.items() if area in r["areas"]]
 
 
-def validate_workforce(prop: dict, pkg: dict) -> dict:
-    """Stage 2's proposal, checked by the platform against the role catalog and the requirements:
-    known roles within their limits; every requirement covered by a proposed role whose areas include it; and the
-    roles the delivery pipeline cannot run without (someone to write code, a CTO to review and merge, someone to
-    assign work and to deploy)."""
+PIPELINE = [("code", "writes the product's code"), ("review_merge", "reviews and merges the release"),
+            ("deploy", "proposes the production deploy")]
+
+
+def _gaps(merged: dict, reqs: dict) -> list[tuple[str, set[str], str]]:
+    """What the proposed roles leave open, each with the catalog roles that would close it: a requirement area no
+    proposed role covers, a pipeline task type no role owns, nobody to assign work."""
+    present = [roles.role(n) for n in merged]
+    gaps = []
+    for rid, r in reqs.items():
+        if not any(r["area"] in p["areas"] for p in present):
+            gaps.append((f"covers {rid} ({r['area']}: {r['text'][:80]})", set(roles_for_area(r["area"])), rid))
+    for kind, what in PIPELINE:
+        if not any(kind in p["owns"] for p in present):
+            gaps.append((f"{what} ({kind})", {n for n, r in roles.ROLES.items() if kind in r["owns"]}, ""))
+    if not any(n in roles.ASSIGNERS for n in merged):
+        gaps.append(("assigns the work", set(roles.ASSIGNERS), ""))
+    return gaps
+
+
+def complete(merged: dict, reqs: dict) -> None:
+    """Close what the proposal leaves open from the catalog, one role at a time: the role that closes the most open
+    gaps, the catalog's order breaking ties. The catalog decides which roles cover an area or own a task type, so
+    this is the platform's rule, not a judgment the model has to get right; each added role says what it closes and
+    the founder sees it at the workforce gate. Real models left a requirement area uncovered even when the refusal
+    named the roles that close it (the [workforce] runs of 27 Sep: 36310111670, then 36315283277)."""
+    order = list(roles.ROLES)
+    while gaps := _gaps(merged, reqs):
+        name = max(order, key=lambda n: (sum(n in fits for _, fits, _ in gaps), -order.index(n)))
+        closes = [g for g in gaps if name in g[1]]
+        if not closes:  # nothing in the catalog closes what is left (an area no role covers)
+            raise IntelligenceError(f"no role in the catalog {gaps[0][0]}")
+        merged[name] = {"role": name, "quantity": 1, "added_by": "platform",
+                        "why": "Added by Cynqra: the organization needs a role that " + "; ".join(g[0] for g in closes)
+                               + ".", "requirement_ids": [g[2] for g in closes if g[2]]}
+
+
+def validate_workforce(prop: dict, pkg: dict, close_gaps: bool = True) -> dict:
+    """Stage 2's proposal, checked by the platform against the role catalog and the requirements: known roles
+    within their limits, each with its reason. What it leaves open (a requirement area no proposed role covers; a
+    role the delivery pipeline cannot run without: someone to write code, to review and merge, to deploy, to assign
+    work) the platform closes from the catalog (complete). A founder's edit is not completed behind their back:
+    what it leaves open is refused, naming the roles that close it."""
     if not isinstance(prop, dict) or not isinstance(prop.get("roles"), list) or not prop["roles"]:
         raise IntelligenceError("the workforce proposal has no roles")
     merged: dict[str, dict] = {}
@@ -55,33 +94,28 @@ def validate_workforce(prop: dict, pkg: dict) -> dict:
             raise IntelligenceError(f"{m['role']}: {m['quantity']} proposed, the catalog allows at most {cap}")
         if not m["why"]:
             raise IntelligenceError(f"{m['role']}: say why the role is needed")
-    total = sum(m["quantity"] for m in merged.values())
-    if total > roles.MAX_WORKERS:
-        raise IntelligenceError(f"{total} workers proposed; at most {roles.MAX_WORKERS}")
     reqs = {r["id"]: r for r in pkg["requirements"]}
-    coverage: dict[str, list[str]] = {rid: [] for rid in reqs}
     for m in merged.values():
         areas = roles.role(m["role"])["areas"]
         m["requirement_ids"] = [x for x in m["requirement_ids"] if x in reqs and reqs[x]["area"] in areas]
+    if not close_gaps and (gaps := _gaps(merged, reqs)):
+        what, fits, _ = gaps[0]
+        raise IntelligenceError(f"no role in the workforce {what}; add one of: "
+                                f"{', '.join(n for n in roles.ROLES if n in fits)}")
+    complete(merged, reqs)
+    total = sum(m["quantity"] for m in merged.values())
+    if total > roles.MAX_WORKERS:
+        raise IntelligenceError(f"{total} workers proposed; at most {roles.MAX_WORKERS}")
+    coverage: dict[str, list[str]] = {rid: [] for rid in reqs}
+    for m in merged.values():
         for rid in m["requirement_ids"]:
             coverage[rid].append(m["role"])
-    for rid, r in reqs.items():  # a requirement no proposed role claimed goes to a proposed role that covers its area
+    for rid, r in reqs.items():  # a requirement no role claimed goes to the first present role that covers its area
         if not coverage[rid]:
-            fit = [m for m in merged.values() if r["area"] in roles.role(m["role"])["areas"]]
-            if not fit:
-                raise IntelligenceError(f"{rid} ({r['area']}: {r['text'][:80]}) is covered by no proposed role; add a "
-                                        f"role that covers {r['area']}: {', '.join(roles_for_area(r['area']))}")
-            fit[0]["requirement_ids"].append(rid)
-            coverage[rid].append(fit[0]["role"])
+            fit = next(m for m in merged.values() if r["area"] in roles.role(m["role"])["areas"])
+            fit["requirement_ids"].append(rid)
+            coverage[rid].append(fit["role"])
     workers = roles.instantiate(list(merged.values()))
-    needs = [("code", "write the product's code"), ("review_merge", "review and merge the release"),
-             ("deploy", "propose the production deploy")]
-    for kind, what in needs:
-        if not roles.owners_of(kind, workers):
-            raise IntelligenceError(f"no proposed role can {what} ({kind}); add one of: "
-                                    f"{', '.join(n for n, r in roles.ROLES.items() if kind in r['owns'])}")
-    if roles.assigner(workers) is None:
-        raise IntelligenceError(f"no proposed role can assign work; add one of: {', '.join(roles.ASSIGNERS)}")
     return {"summary": str(prop.get("summary") or "").strip(), "roles": list(merged.values()), "coverage": coverage,
             "workers": workers}
 
@@ -158,7 +192,8 @@ def override(prop: dict, edited_roles, requirements: dict, allowed: bool) -> dic
                               "your feedback and Cynqra revises it")
     if not isinstance(edited_roles, list) or not edited_roles:
         raise IntelligenceError("an edited workforce needs roles")
-    edited = validate_workforce({"summary": prop.get("summary", ""), "roles": edited_roles}, requirements)
+    edited = validate_workforce({"summary": prop.get("summary", ""), "roles": edited_roles}, requirements,
+                                close_gaps=False)
     edited["overridden"] = True
     return edited
 
@@ -185,7 +220,7 @@ def approve(run, edited_roles=None) -> dict:
               "version": 1})
     for t in workers:
         w = dict(t)
-        w.update({"company_id": run.cid, "model_id": None, "model": None,
+        w.update({"company_id": run.cid,
                   "authority_policy_id": f"{policy.POLICY_VERSION}:{t['role']}", "status": "active",
                   "performance_profile": {"verified": 0, "first_pass": 0, "reworks": 0, "blockers": 0}})
         run.store.put("worker", t["id"], w)

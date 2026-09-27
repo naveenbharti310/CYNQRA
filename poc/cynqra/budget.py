@@ -21,8 +21,9 @@ from __future__ import annotations
 import time
 
 from . import roles
+from .binding import intelligence_of
 from . import settings as project_settings
-from .router import estimate
+from .intelligence_layer.router import estimate
 
 LAYERS = ("inference", "tools", "infrastructure", "verification")
 WARN_AT = (50, 80, 95)  # percent of the cap
@@ -149,7 +150,7 @@ def construct(store, tasks: list[dict], workers: list[dict], reg, assigner: str 
     """The forecast for a roadmap, in layers, with views by worker, workstream and milestone."""
     s = project_settings.get(store)
     rate = float(s["compute_usd_per_hour"]) / 3600
-    wmodel = {w["id"]: w.get("model_id") for w in workers}
+    wmodel = {w["id"]: intelligence_of(store, w["id"]) for w in workers}
     vsec = {**VERIFY_S_DEFAULT, **_measured_verify_seconds(store)}
     rows = []
     for t in tasks:

@@ -170,6 +170,11 @@ class Store:
             r = self.conn.execute("SELECT data FROM entities WHERE kind=? AND id=?", (kind, id_)).fetchone()
             return json.loads(r[0]) if r else None
 
+    def delete(self, kind: str, id_: str) -> None:
+        """Entities only; the event log stays append only."""
+        with self.lock:
+            self.conn.execute("DELETE FROM entities WHERE kind=? AND id=?", (kind, id_))
+
     def all(self, kind: str) -> list[dict]:
         with self.lock:
             rows = self.conn.execute(

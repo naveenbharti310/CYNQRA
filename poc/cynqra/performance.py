@@ -16,6 +16,7 @@ Replacement Engine must look at the alternatives.
 """
 from __future__ import annotations
 
+from .binding import all_bindings
 from .roles import BUILD_TYPES
 
 THRESHOLDS = {
@@ -105,13 +106,15 @@ def below(card: dict, forecast_per_task: float | None = None, t: dict | None = N
 def all_cards(store, reg=None) -> list[dict]:
     """Every worker: its card across models, and one per model it ran on, current model first."""
     out = []
+    bound = all_bindings(store)
     for w in store.all("worker"):
-        models = [w.get("model_id")] if w.get("model_id") else []
+        now_on = (bound.get(w["id"]) or {}).get("intelligence_id")
+        models = [now_on] if now_on else []
         for v in store.all("verification") + store.all("call"):
             mid = v.get("model_id")
             if (v.get("worker_id") or v.get("worker")) == w["id"] and mid and mid not in models:
                 models.append(mid)
-        out.append({"worker_id": w["id"], "title": w.get("title"), "role": w.get("role"), "model_id": w.get("model_id"),
+        out.append({"worker_id": w["id"], "title": w.get("title"), "role": w.get("role"), "model_id": now_on,
                     "overall": scorecard(store, w["id"], None, None),
                     "by_model": [scorecard(store, w["id"], m, reg) for m in models]})
     return out

@@ -93,6 +93,36 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(req.headers.get_content_type(), "application/zip")
         self.assertEqual(req.read()[:2], b"PK")
 
+    def test_provider_connections_over_http(self):
+        from test_workforce import Servers
+        srv = Servers(1, self.tmp.path)
+        self.addCleanup(srv.close)
+        os.environ["CYNQRA_TEST_KEY"] = "sk-test-not-real"
+        self.addCleanup(os.environ.pop, "CYNQRA_TEST_KEY", None)
+        code, out = self.call("/api/connections", {"type": "openai_compatible", "name": "Team API",
+                                                   "endpoint": srv.urls[0] + "/v1", "models": "Model A, Model B",
+                                                   "auth": {"method": "env", "env_var": "CYNQRA_TEST_KEY"}})
+        self.assertEqual(code, 200, out)
+        cid = out["connection"]["id"]
+        self.assertEqual(sorted(m["name"] for m in out["intelligence"]), ["Model A", "Model B"])
+        self.assertEqual(out["connection"]["credential"]["present"], True)
+        self.assertNotIn("sk-test-not-real", json.dumps(self.call("/api/intelligence")[1]), "a key is never shown")
+        code, out = self.call(f"/api/connections/{cid}/update", {"models": ["Model A"], "rate_limits": {"calls_per_minute": 30}})
+        self.assertEqual(code, 200, out)
+        self.assertEqual(out["connection"]["rate_limits"], {"calls_per_minute": 30}, "the update is applied")
+        state = self.call("/api/intelligence")[1]
+        self.assertEqual([m["name"] for m in state["intelligence"] if m["status"] != "retired"], ["Model A"],
+                         "what the connection no longer offers is retired")
+        self.assertIn("bedrock", [t["type"] for t in state["provider_types"] if not t["implemented"]])
+        self.assertEqual(self.call(f"/api/connections/{cid}/update", {"endpoint": "http://elsewhere"})[0], 400)
+        self.assertEqual(self.call("/api/connections", {"type": "bedrock"})[0], 400)
+        mid = next(m["id"] for m in state["intelligence"] if m["name"] == "Model A")
+        self.assertEqual(self.call(f"/api/intelligence/{mid}/fault", {"offline": True})[1]["fault"], {"offline": True})
+        self.assertEqual(self.call(f"/api/connections/{cid}/remove", {})[0], 200)
+        state = self.call("/api/intelligence")[1]
+        self.assertFalse([c for c in state["connections"] if c["id"] == cid])
+        self.assertTrue(all(m["status"] == "retired" for m in state["intelligence"] if m["connection_id"] == cid))
+
     def test_bad_requests_are_400_not_crashes(self):
         self.assertEqual(self.call("/api/objective/submit", {})[0], 400)
         self.assertEqual(self.call("/api/company", {"name": "X", "mode": "psychic"})[0], 400)

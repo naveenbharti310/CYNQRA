@@ -13,9 +13,16 @@ POST /api/killswitch                {on}
 POST /api/run/resume                retry after a model or network error
 GET  /api/replay/<task_id>
 GET  /api/graph?q=approves|owns|depends&subject=...
-GET  /api/models                    the model registry and running probes
-POST /api/models                    register a model {runtime, ref, ...}
-POST /api/models/<id>/fault|remove|probe
+GET  /api/intelligence              the Intelligence Layer: provider connections (credentials described, never
+                                    revealed), the registry, the provider types, running probes
+POST /api/connections               connect a provider {type, name, endpoint, auth: {method: env|secret|none,
+                                    env_var | secret}, server (local), models, account, region, rate_limits,
+                                    settings, price_per_m, machine_usd_per_hour}; its models are discovered
+POST /api/connections/<id>/discover|update|remove   update: {models, settings, rate_limits, price_per_m,
+                                    machine_usd_per_hour, name, account, region}; then discovered again
+POST /api/intelligence              register an intelligence a connection offers but does not list
+                                    {connection_id, ref, name, ...facts}
+POST /api/intelligence/<id>/fault|fallback|retire|probe
 GET  /api/export                    builds and downloads the export bundle
 POST /api/reset                     archives this run and starts a new one
 
@@ -45,7 +52,7 @@ from .engine import Engine, EngineError
 from .intelligence import IntelligenceError
 from .probe import probe
 from .protocol import ProtocolError
-from .registry import Registry, RegistryError
+from .intelligence_layer import IntelligenceSupply, SupplyError
 from .runtime import ModelRuntimeError
 
 UI = Path(__file__).resolve().parent.parent / "ui"
@@ -62,8 +69,13 @@ class App:
         self.quit = threading.Event()
         self.last_seen = time.time()  # the window's last poll: the desktop app notices a closed window
         self.window_polls = 0  # polls from the app's own page (?window=1), not from scripts or tests
-        # The model registry sits beside the runs, not in one: what Cynqra learns about models outlives a run.
-        self.registry = Registry(self.root / "registry", runtime=runtime)
+        # The Intelligence Layer sits beside the runs, not in one: its connections outlive a run, and what Cynqra
+        # learns about each intelligence carries across projects.
+        self.supply = IntelligenceSupply(self.root / "control", runtime=runtime)
+        if runtime is not None:  # the desktop app: the models this computer can run, as a local provider connection
+            local = self.supply.connections.find(origin="app", name="This computer") or self.supply.connections.create(
+                {"type": "local", "server": "llama", "name": "This computer", "auth": {"method": "none"}}, origin="app")
+            self.supply.discover(local["id"])
         self.probes: dict[str, dict] = {}
         self.engine = self._new_engine()
         self.auto = {"on": False, "delay": 0.9}
@@ -74,7 +86,7 @@ class App:
 
     def _new_engine(self) -> Engine:
         intel = self.factory() if self.factory else None
-        return Engine(self.root / "current", intelligence=intel, registry=self.registry)
+        return Engine(self.root / "current", intelligence=intel, supply=self.supply)
 
     def _loop(self) -> None:
         while not self._stop.is_set():
@@ -145,37 +157,51 @@ class App:
             raise KeyError(what)
         return rt.snapshot()
 
-    def models_call(self, model_id: str | None, what: str, body: dict):
-        reg = self.registry
+    def supply_call(self, what: str, target: str | None, body: dict):
+        sup = self.supply
+        if what == "connect":
+            return sup.connect(body)
+        if what == "discover":
+            return {"intelligence": sup.discover(target), "connection": sup.connections.public(target)}
+        if what == "update":
+            sup.connections.update(target, body)
+            return {"intelligence": sup.discover(target), "connection": sup.connections.public(target)}
+        if what == "disconnect":
+            sup.remove_connection(target)
+            return {"ok": True}
         if what == "register":
-            return reg.register(body)
+            conn = sup.connections.get(str(body.get("connection_id") or ""))
+            return sup.registry.register({k: v for k, v in body.items() if k != "connection_id"}, conn["id"],
+                                         source="registered")
         if what == "fault":
-            return reg.set_fault(model_id, body.get("offline"), body.get("max_reply"))
-        if what == "remove":
-            reg.remove(model_id)
+            return sup.registry.set_fault(target, body.get("offline"), body.get("max_reply"))
+        if what == "fallback":
+            return sup.registry.set_fallback(target, str(body.get("fallback_id") or ""))
+        if what == "retire":
+            sup.registry.retire(target, "retired by the founder")
             return {"ok": True}
         if what == "probe":
-            reg.get(model_id)
-            if (self.probes.get(model_id) or {}).get("state") == "running":
-                raise EngineError("a probe of this model is already running")
+            sup.registry.get(target)
+            if (self.probes.get(target) or {}).get("state") == "running":
+                raise EngineError("a probe of this intelligence is already running")
             if self.auto["on"]:
-                raise EngineError("pause the run before probing a model: one model runs at a time on this machine")
-            self.probes[model_id] = {"state": "running", "log": []}
+                raise EngineError("pause the run before probing: one model runs at a time on this machine")
+            self.probes[target] = {"state": "running", "log": []}
 
             def go():
                 try:
-                    r = probe(reg, model_id, log=self.probes[model_id]["log"].append)
-                    self.probes[model_id].update(state="done", result=r)
-                except Exception as exc:  # noqa: BLE001 - shown on the model's card
-                    self.probes[model_id].update(state="error", error=str(exc))
+                    r = probe(sup, target, log=self.probes[target]["log"].append)
+                    self.probes[target].update(state="done", result=r)
+                except Exception as exc:  # noqa: BLE001 - shown on the intelligence's card
+                    self.probes[target].update(state="error", error=str(exc))
             threading.Thread(target=go, daemon=True).start()
-            return self.probes[model_id]
+            return self.probes[target]
         raise KeyError(what)
 
     def close(self) -> None:
         self._stop.set()
         self.engine.close()
-        self.registry.close()
+        self.supply.close()
         stop_all()
 
 
@@ -207,7 +233,7 @@ def make_server(app: App, port: int = 8750) -> ThreadingHTTPServer:
         def _guard(self, fn):
             try:
                 return self._send(200, fn())
-            except (EngineError, IntelligenceError, ProtocolError, ModelRuntimeError, RegistryError, ValueError, KeyError) as exc:
+            except (EngineError, IntelligenceError, ProtocolError, ModelRuntimeError, SupplyError, ValueError, KeyError) as exc:
                 return self._send(400, {"error": str(exc)})
             except Exception as exc:  # noqa: BLE001 - shown to the founder, never a dropped connection
                 return self._send(500, {"error": f"{type(exc).__name__}: {exc}"})
@@ -232,8 +258,8 @@ def make_server(app: App, port: int = 8750) -> ThreadingHTTPServer:
             m = re.match(r"^/api/replay/(t_\w+)$", path)
             if m:
                 return self._guard(lambda: app.engine.replay(m.group(1)))
-            if path == "/api/models":
-                return self._guard(lambda: {"models": app.registry.snapshot(), "probes": app.probes})
+            if path == "/api/intelligence":
+                return self._guard(lambda: {**app.supply.snapshot(), "probes": app.probes})
             if path == "/api/graph":
                 q = parse_qs(u.query)
                 return self._guard(lambda: app.engine.graph(q.get("q", [""])[0], q.get("subject", [""])[0]))
@@ -261,7 +287,8 @@ def make_server(app: App, port: int = 8750) -> ThreadingHTTPServer:
                 "/api/objective/guardrails": lambda: e.set_guardrails(body.get("budget_usd"),
                                                                       body.get("time_value_per_hour"),
                                                                       body.get("constraints"), body.get("governance")),
-                "/api/models": lambda: app.models_call(None, "register", body),
+                "/api/connections": lambda: app.supply_call("connect", None, body),
+                "/api/intelligence": lambda: app.supply_call("register", None, body),
                 "/api/objective/submit": e.submit_objective,
                 "/api/run/step": app.step,
                 "/api/killswitch": lambda: e.kill_switch(bool(body.get("on"))),
@@ -289,9 +316,13 @@ def make_server(app: App, port: int = 8750) -> ThreadingHTTPServer:
                     return self._send(404, {"error": "not found"})
                 app.quit.set()
                 return self._send(200, {"ok": True})
-            m = re.match(r"^/api/models/([a-z0-9-]+)/(fault|remove|probe)$", path)
+            m = re.match(r"^/api/connections/(conn_[a-z0-9]+)/(discover|update|remove)$", path)
             if m:
-                return self._guard(lambda: app.models_call(m.group(1), m.group(2), body))
+                what = {"remove": "disconnect"}.get(m.group(2), m.group(2))
+                return self._guard(lambda: app.supply_call(what, m.group(1), body))
+            m = re.match(r"^/api/intelligence/([a-z0-9-]+)/(fault|fallback|retire|probe)$", path)
+            if m:
+                return self._guard(lambda: app.supply_call(m.group(2), m.group(1), body))
             m = re.match(r"^/api/decisions/(dec_\w+)$", path)
             if m:
                 return self._guard(lambda: app.decide(m.group(1), body.get("action", ""), body.get("note", ""),

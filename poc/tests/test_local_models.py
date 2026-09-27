@@ -116,7 +116,8 @@ class LocalServerTests(unittest.TestCase):
 
     def test_hugging_face_inference_providers(self):
         from test_adapter import FakeProvider
-        from cynqra.registry import WORST_PRICE, Registry
+        from cynqra.intelligence_layer.adapters import WORST_PRICE
+        from helpers import EnvAccess
         saved = no_model_env()
         p = FakeProvider()
         try:
@@ -134,15 +135,14 @@ class LocalServerTests(unittest.TestCase):
             self.assertIn("tasks", data)
             self.assertFalse(usage["estimated"])
             self.assertIsNone(model_adapter.resolve().get("local"), "paid calls, so spend is counted")
-            tmp = TempDir()
-            reg = Registry(tmp.path / "reg")
-            m = reg.register({"runtime": "environment", "ref": "environment", "id": "a"})
+            acc = EnvAccess()
+            m, conn = acc.entries[0], acc.supply.connections.all()[0]
             self.assertEqual((m["price_in"], m["price_out"]), WORST_PRICE, "an unlisted hosted model errs on the safe side")
+            self.assertIn("safe default", conn["status_note"], "and the connection says why")
+            self.assertEqual(acc.supply.credentials.public(conn["credential_id"])["env_var"], "HF_TOKEN")
             os.environ["CYNQRA_PRICE_PER_M"] = "0.25,0.69"
-            m = reg.register({"runtime": "environment", "ref": "environment", "id": "b"})
+            m = EnvAccess().entries[0]
             self.assertEqual((m["price_in"], m["price_out"], m["local"]), (0.25, 0.69, False))
-            reg.close()
-            tmp.cleanup()
             p.mode = "hf_401"
             self.assertIn("refused the token", model_adapter.complete("x")["error"])
             p.mode = "hf_402"
@@ -193,7 +193,6 @@ class FileBlockTests(unittest.TestCase):
         self.assertEqual(_file_blocks('{"result": "blocked", "description": "which date format?"}'), {})
 
     def test_a_reply_without_files_is_asked_for_once_more_with_the_layout(self):
-        from cynqra import intelligence
         replies = ['{"result": "done", "summary": "I wrote the files"}\nHere they are, conceptually.',
                    '{"result": "done"}\n=== FILE: a.py ===\nx = 1\n=== END FILE ===\n']
         seen = []
@@ -201,20 +200,19 @@ class FileBlockTests(unittest.TestCase):
         def fake(prompt, **kw):
             seen.append((prompt, kw.get("temperature")))
             return {"text": replies[len(seen) - 1], "tokens_in": 10, "tokens_out": 5, "estimated": False, "error": None}
-        saved = intelligence.model_adapter.complete
-        intelligence.model_adapter.complete = fake
+        saved = model_adapter.complete
+        model_adapter.complete = fake
         os.environ["CYNQRA_LOCAL_BASE_URL"] = "http://127.0.0.1:9/v1"
         try:
             data, usage = env_source()._call("write a.py", files=True)
         finally:
-            intelligence.model_adapter.complete = saved
+            model_adapter.complete = saved
         self.assertEqual(data["files"], {"a.py": "x = 1\n"})
         self.assertIn("no files in the required layout", seen[1][0])
         self.assertEqual(seen[1][1], 0.4)
         self.assertEqual((usage["tokens_in"], usage["tokens_out"]), (20, 10))
 
     def test_blank_objective_fields_are_inferred_in_one_short_follow_up(self):
-        from cynqra import intelligence
         first = {"product": "Cake order tracker", "target_customer": "Bakery staff", "primary_outcome": "No lost orders",
                  "business_outcome": "Fewer refunds", "success_criteria": "", "constraints": "Internal only",
                  "priorities": "", "inferred_fields": ["business_outcome"], "missing_fields": ["success_criteria"]}
@@ -226,13 +224,13 @@ class FileBlockTests(unittest.TestCase):
             seen.append((prompt, kw.get("schema")))
             reply = first if len(seen) == 1 else second
             return {"text": json.dumps(reply), "tokens_in": 100, "tokens_out": 50, "estimated": False, "error": None}
-        saved = intelligence.model_adapter.complete
-        intelligence.model_adapter.complete = fake
+        saved = model_adapter.complete
+        model_adapter.complete = fake
         os.environ["CYNQRA_LOCAL_BASE_URL"] = "http://127.0.0.1:9/v1"
         try:
             data, usage = env_source().structure_objective("My staff lose cake orders.")
         finally:
-            intelligence.model_adapter.complete = saved
+            model_adapter.complete = saved
         self.assertEqual(len(seen), 2)
         self.assertIn("success_criteria, priorities", seen[1][0])
         self.assertEqual(sorted(seen[1][1]["required"]), ["priorities", "success_criteria"])
@@ -252,8 +250,8 @@ class FileBlockTests(unittest.TestCase):
             if prompt == "fails":
                 return {"text": "", "tokens_in": 0, "tokens_out": 0, "estimated": False, "error": "server gone"}
             return {"text": '{"ok": 1}', "tokens_in": 10, "tokens_out": 5, "estimated": False, "error": None}
-        saved = intelligence.model_adapter.complete
-        intelligence.model_adapter.complete = fake
+        saved = model_adapter.complete
+        model_adapter.complete = fake
         os.environ["CYNQRA_LOCAL_BASE_URL"] = "http://127.0.0.1:9/v1"
         try:
             src = env_source()
@@ -263,7 +261,7 @@ class FileBlockTests(unittest.TestCase):
                 with self.assertRaises(intelligence.IntelligenceError):
                     src._call("fails")
         finally:
-            intelligence.model_adapter.complete = saved
+            model_adapter.complete = saved
         self.assertEqual(temps, [("same", None), ("same", 0.3), ("other", None), ("same", 0.6), ("same", 0.9),
                                  ("same", 0.9), ("fails", None), ("fails", None)])
 
@@ -277,8 +275,8 @@ class FileBlockTests(unittest.TestCase):
             seen.update(kw)
             return {"text": text, "tokens_in": 900, "tokens_out": 6144, "estimated": False, "error": None,
                     "truncated": True}
-        saved = intelligence.model_adapter.complete
-        intelligence.model_adapter.complete = fake
+        saved = model_adapter.complete
+        model_adapter.complete = fake
         os.environ["CYNQRA_LOCAL_BASE_URL"] = "http://127.0.0.1:9/v1"
         os.environ["CYNQRA_NUM_PREDICT"] = "6144"
         try:
@@ -286,10 +284,10 @@ class FileBlockTests(unittest.TestCase):
             with self.assertRaises(intelligence.IntelligenceError):  # a JSON reply cannot be used in part
                 fake_json = {"text": '{"a": ', "tokens_in": 1, "tokens_out": 1, "estimated": False,
                              "error": "RuntimeError: reply truncated at max_tokens"}
-                intelligence.model_adapter.complete = lambda prompt, **kw: fake_json
+                model_adapter.complete = lambda prompt, **kw: fake_json
                 env_source()._call("plan it", schema={"type": "object"})
         finally:
-            intelligence.model_adapter.complete = saved
+            model_adapter.complete = saved
             os.environ.pop("CYNQRA_NUM_PREDICT", None)
         self.assertTrue(seen["partial"])
         self.assertEqual(data["files"], {"store.py": "def add(x):\n    return x\n"})

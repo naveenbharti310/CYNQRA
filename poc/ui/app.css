@@ -67,7 +67,7 @@ h1,h2,h3{margin:0}
 .hero{font-family:var(--serif);font-size:44px;line-height:1.1;font-weight:600;letter-spacing:-.02em}
 .lede{font-size:17px;line-height:1.55;color:var(--ink2);margin:0}
 label.lbl{font-size:13px;font-weight:600;color:var(--ink2)}
-textarea,input[type=text],input[type=number],select{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line2);border-radius:10px;padding:10px 14px}
+textarea,input[type=text],input[type=number],input[type=password],select{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line2);border-radius:10px;padding:10px 14px}
 textarea.big{height:150px;font-size:17px;line-height:1.5;resize:none;padding:16px}
 .modes{display:flex;gap:10px}
 .mode{flex:1;border:1px solid var(--line2);border-radius:10px;padding:12px 14px;background:var(--panel);cursor:pointer}

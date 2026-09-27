@@ -4,6 +4,7 @@ Engine, the Performance Engine's signals and the gateway's output sanitizing."""
 from __future__ import annotations
 
 import json
+import types
 import unittest
 
 from helpers import M1_ROLES, SCENARIO, TempDir, approve, no_model_env, restore_env
@@ -14,7 +15,7 @@ from cynqra.engine import Engine, EngineError
 from cynqra.intelligence import IntelligenceError, ScriptedSource
 from cynqra.objective import validate_requirements
 from cynqra.planner import validate_plan
-from cynqra.registry import Registry
+from cynqra.intelligence_layer import IntelligenceSupply
 from cynqra.synthesis import validate_workforce
 
 # The restaurant demand forecasting example of section 6, as requirements and the section 3 workforce table.
@@ -80,23 +81,28 @@ class CatalogAndSynthesisTests(unittest.TestCase):
                 validate_workforce(org, self.req)
         bad(lambda o: o["roles"].append({"role": "Astrologer", "quantity": 1, "why": "x", "requirement_ids": []}))
         bad(lambda o: o["roles"][0].update(quantity=2))  # one CEO at most
-        bad(lambda o: o.update(roles=[r for r in o["roles"] if r["role"] != "CTO"]))  # nobody reviews and merges
-        bad(lambda o: o.update(roles=[r for r in o["roles"] if r["role"] not in ("DataScientist",)]))  # ai_ml uncovered
         bad(lambda o: o["roles"][1].update(why=""))
 
-    def test_a_refusal_tells_the_model_how_to_fix_it(self):
-        # the first real-model [workforce] run (27 Sep, run 36310111670) proposed no role covering a product
-        # requirement, twice; the refusal named the gap but not the roles that close it
+    def test_the_platform_closes_what_the_catalog_requires(self):
+        # the real-model [workforce] runs of 27 Sep (36310111670, then 36315283277) proposed no role covering a
+        # requirement area, even when the refusal named the roles that close it; the catalog decides that, so the
+        # platform adds the role, says what it closes, and the founder sees it at the gate
         org = json.loads(json.dumps(SECTION3_ORG))
         org["roles"] = [r for r in org["roles"] if r["role"] not in ("CEO", "CPO", "PM")]
-        with self.assertRaises(IntelligenceError) as ctx:
-            validate_workforce(org, self.req)
-        self.assertIn("add a role that covers product: CEO, CPO, PM", str(ctx.exception))
+        prop = validate_workforce(org, self.req)
+        added = [r for r in prop["roles"] if r.get("added_by") == "platform"]
+        self.assertEqual([r["role"] for r in added], ["CEO"], "the first catalog role that covers the product area")
+        self.assertIn("Added by Cynqra", added[0]["why"])
+        self.assertTrue(all(prop["coverage"].values()), "every requirement is covered")
         org = json.loads(json.dumps(SECTION3_ORG))
-        org["roles"] = [r for r in org["roles"] if r["role"] not in ("CTO",)]
-        with self.assertRaises(IntelligenceError) as ctx:
-            validate_workforce(org, self.req)
-        self.assertIn("add one of: CTO", str(ctx.exception))
+        org["roles"] = [r for r in org["roles"] if r["role"] not in ("CTO", "DataScientist")]
+        prop = validate_workforce(org, self.req)
+        self.assertEqual(sorted(r["role"] for r in prop["roles"] if r.get("added_by")), ["CTO", "DataScientist"])
+        self.assertTrue(roles.owners_of("review_merge", prop["workers"]))
+        self.assertEqual(len(prop["workers"]), sum(r["quantity"] for r in prop["roles"]))
+        with self.assertRaises(IntelligenceError):  # an area nothing in the catalog covers is still refused
+            validate_workforce(json.loads(json.dumps(SECTION3_ORG)), {"requirements": [
+                {"id": "r_99", "area": "astrology", "text": "read the stars"}]})
 
     def test_authority_comes_from_the_catalog(self):
         self.assertEqual(policy.MATRIX, roles.matrix())
@@ -146,8 +152,9 @@ class GateTests(unittest.TestCase):
     def test_an_allowed_override_is_checked_and_recorded(self):
         project_settings.update(self.e.store, {"allow_workforce_override": True})
         bad = {"roles": [{"role": "PM", "quantity": 1, "why": "x"}]}  # nobody can write code, merge or deploy
-        with self.assertRaises(EngineError):
+        with self.assertRaises(EngineError) as ctx:
             approve(self.e, "approve_workforce", edited=bad)
+        self.assertIn("add one of", str(ctx.exception), "a founder's edit is refused, not completed behind them")
         d = approve(self.e, "approve_workforce", edited=self.EDIT)
         self.assertEqual(d["outcome_label"], "approved_edited")
         self.assertEqual(sorted(w["id"] for w in self.e.workers()), ["w_cto", "w_eng_a", "w_eng_b", "w_pm", "w_qa"])
@@ -158,7 +165,7 @@ class GateTests(unittest.TestCase):
     def test_the_roadmap_is_a_separate_gate_and_can_be_rejected(self):
         approve(self.e, "approve_workforce")
         self.assertEqual(self.e.meta["phase"], "planning")
-        self.assertTrue(all(w["model_id"] for w in self.e.workers()), "every worker staffed before the roadmap gate")
+        self.assertTrue(all(self.e.model_of(w["id"]) for w in self.e.workers()), "every worker staffed before the roadmap gate")
         approve(self.e, "approve_roadmap", "reject", note="Split the web app task")
         pend = self.e.pending_decisions()
         self.assertEqual([d["kind"] for d in pend], ["approve_roadmap"])
@@ -180,14 +187,16 @@ class BudgetEngineTests(unittest.TestCase):
     def test_layers_are_priced_from_the_machine_and_the_plan(self):
         tmp = TempDir()
         e = Engine(tmp.path)
-        reg = Registry(tmp.path / "reg")
+        sup = IntelligenceSupply(tmp.path / "sup")
         try:
-            reg.register({"runtime": "scripted", "ref": "candidate_tracker", "id": "m"})
+            got = sup.connect({"type": "demo_script", "name": "demo", "auth": {"method": "none"},
+                               "models": ["candidate_tracker"]}, origin="demo")
+            e.store.put("binding", "w_eng_a", {"worker_id": "w_eng_a", "intelligence_id": got["intelligence"][0]["id"]})
             project_settings.update(e.store, {"budget_usd": 1.0, "compute_usd_per_hour": 3600.0,
                                               "infra_usd_per_day": 0.25})  # $1 a second of this machine's time
             tasks = [{"id": "t_01", "owner_worker_id": "w_eng_a", "kind": "code", "workstream_id": "w",
                       "milestone_id": "m", "deadline_day": 2}]
-            f = budget.construct(e.store, tasks, [{"id": "w_eng_a", "model_id": "m"}], reg, None)
+            f = budget.construct(e.store, tasks, [{"id": "w_eng_a"}], sup.registry, None)
             attempts = f["tasks"][0]["attempts"]
             self.assertEqual(f["layers"]["infrastructure"]["usd"], 0.5)
             self.assertAlmostEqual(f["layers"]["verification"]["usd"], round(20 * attempts, 4), places=3)
@@ -196,7 +205,7 @@ class BudgetEngineTests(unittest.TestCase):
             self.assertFalse(f["fits"])
             self.assertIn("over", f["warnings"][0])
         finally:
-            reg.close()
+            sup.close()
             e.close()
             tmp.cleanup()
 
@@ -235,7 +244,7 @@ class ScenariosAreHonestTests(unittest.TestCase):
 
     def check(self, scenario, workers_expected):
         src = ScriptedSource(scenario)
-        src.bind(lambda worker: ("scripted", {}))
+        src.bind(types.SimpleNamespace(intelligence_for=lambda worker: "scripted"))
         req = validate_requirements(src.decompose({})[0])
         prop = validate_workforce(src.synthesize({}, req)[0], req)
         self.assertEqual(sum(r["quantity"] for r in prop["roles"]), workers_expected)
