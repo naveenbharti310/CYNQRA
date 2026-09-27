@@ -7,7 +7,7 @@ on your laptop. You make the founder's decisions in the app. The intelligence is
 model that runs on your laptop: no account, no API key, and after the first download nothing
 leaves the machine.
 
-**Download:** https://github.com/naveenbharti310/Passway/releases (the newest `cynqra-v…` release)
+**Download:** https://github.com/naveenbharti310/CYNQRA/releases (the newest `cynqra-v…` release)
 
 | Your laptop | File | Size |
 | --- | --- | --- |

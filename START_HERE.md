@@ -1,7 +1,7 @@
 # CYNQRA HANDOVER
 
 > To run Cynqra for real: install the desktop app for Windows, macOS or Linux from
-> https://github.com/naveenbharti310/Passway/releases and follow CYNQRA_DESKTOP.md. It runs an
+> https://github.com/naveenbharti310/CYNQRA/releases and follow CYNQRA_DESKTOP.md. It runs an
 > open-source model on the laptop itself; no API key, nothing else to install.
 
 > 26 September 2026: read M1_RESTART_26SEP2026.md first. It supersedes

@@ -12,7 +12,7 @@ On first launch, pick the recommended model: **Qwen3.6 35B-A3B**, the strongest 
 fits a laptop, in the size your memory holds (20.6 GB for 32 GB and up, 12.3 GB for 24 GB, 11.4 GB for
 16 GB). The app downloads it once and runs it locally, on the GPU when there is a suitable one.
 
-The full guide, with what to test and troubleshooting: [CYNQRA_DESKTOP.md](https://github.com/naveenbharti310/Passway/blob/cynqra/CYNQRA_DESKTOP.md)
+The full guide, with what to test and troubleshooting: [CYNQRA_DESKTOP.md](https://github.com/naveenbharti310/CYNQRA/blob/cynqra/CYNQRA_DESKTOP.md)
 
 **Measured on GitHub's machines** (16 GB, 4 processor threads, no GPU), a whole Cynqra run for a bakery
 order app, from the founder's sentence to a deployed, healthy product whose tests pass:
