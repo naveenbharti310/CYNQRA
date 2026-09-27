@@ -60,7 +60,7 @@ jobs:
 
   hf:
     if: contains(github.event.head_commit.message, '[workforce]') || (github.event_name == 'workflow_dispatch' && inputs.route != 'local')
-    name: Qwen3.5-35B-A3B, GLM-4.7 and Kimi K2.5 on Hugging Face
+    name: The newest open models Hugging Face serves (Kimi, GLM, DeepSeek, Qwen), probed side by side
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:

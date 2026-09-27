@@ -68,6 +68,18 @@ def _price(conn: dict, ref: str) -> tuple[float, float]:
     return LIST_PRICES.get(ref, WORST_PRICE)
 
 
+HOSTED_TIMEOUT_S = 600  # a hosted API that has not answered in ten minutes is stuck, not slow; 30 min is for a laptop
+
+
+def _hosted(route: dict, conn: dict) -> dict:
+    """A hosted provider's call gives up after HOSTED_TIMEOUT_S unless its connection (or, for a connection made
+    from the environment, the environment) sets CYNQRA_TIMEOUT; the call then fails like any provider error, and
+    the retry and the Replacement Engine take over."""
+    env = os.environ.get("CYNQRA_TIMEOUT") if conn.get("origin") == "environment" else None
+    route["CYNQRA_TIMEOUT"] = route.get("CYNQRA_TIMEOUT") or env or str(HOSTED_TIMEOUT_S)
+    return route
+
+
 def _settings(conn: dict) -> dict:
     """A founder's connection carries its own provider options; everything else is unset for its calls, so one
     connection's options never reach another's. A connection made from the environment keeps the environment's."""
@@ -144,17 +156,26 @@ class OpenAICompatibleAdapter(ProviderAdapter):
                 # connection's status says the listing could not be read
                 conn["_listing_note"] = "the model listing could not be read; stated models priced at the safe default"
         refs = allow or [i for i in listing if not any(x in i.lower() for x in NOT_CHAT)]
-        out = []
+        out, unavailable = [], []
         for ref in refs:
             facts = {"ref": ref, "name": ref, "provider": self._host(conn), "runtime": "openai_compatible_api",
                      "local": False, "modalities": ["text"], "json_schema": True, "tools": True}
             if hf and listing:
-                facts.update(self._hf(ref, listing))
+                try:
+                    facts.update(self._hf(ref, listing))
+                except SupplyError as exc:  # listed, or named, but no provider serves it now: not offered
+                    unavailable.append(str(exc))
+                    continue
             elif hf:
                 facts["price_in"], facts["price_out"] = _price(conn, ref)
             else:
                 facts["price_in"], facts["price_out"] = _price(conn, ref)
             out.append(facts)
+        if unavailable:
+            note = f"{len(unavailable)} not offered now ({'; '.join(unavailable[:3])}{'; ...' if len(unavailable) > 3 else ''})"
+            conn["_listing_note"] = "; ".join(x for x in (conn.get("_listing_note"), note) if x)
+        if allow and not out:
+            raise SupplyError("none of the named models is offered: " + "; ".join(unavailable))
         return out
 
     @staticmethod
@@ -182,9 +203,11 @@ class OpenAICompatibleAdapter(ProviderAdapter):
         r = {"label": entry["ref"], "local": False, **_settings(conn)}
         if flavor == "hf":
             r.update({"kind": "hf", "HF_TOKEN": secret, **({"HF_ROUTER_URL": ep} if ep else {})})
+            _hosted(r, conn)
         elif flavor == "openai":
             r.update({"kind": "openai", "OPENAI_API_KEY": secret,
                       **({"CYNQRA_OPENAI_URL": ep + "/chat/completions"} if ep else {})})
+            _hosted(r, conn)
         else:
             r.update({"kind": "local", "CYNQRA_LOCAL_BASE_URL": ep, "CYNQRA_LOCAL_API_KEY": secret})
         return r
@@ -235,8 +258,8 @@ class AnthropicAdapter(ProviderAdapter):
 
     def route(self, conn: dict, secret: str | None, entry: dict) -> dict:
         ep = conn.get("endpoint") or ""
-        return {"kind": "anthropic", "label": entry["ref"], "local": False, "ANTHROPIC_API_KEY": secret,
-                **({"CYNQRA_ANTHROPIC_URL": ep + "/v1/messages"} if ep else {}), **_settings(conn)}
+        return _hosted({"kind": "anthropic", "label": entry["ref"], "local": False, "ANTHROPIC_API_KEY": secret,
+                        **({"CYNQRA_ANTHROPIC_URL": ep + "/v1/messages"} if ep else {}), **_settings(conn)}, conn)
 
     def environment_specs(self, primary: dict | None) -> list[dict]:
         if not os.environ.get("ANTHROPIC_API_KEY"):

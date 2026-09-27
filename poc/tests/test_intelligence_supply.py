@@ -249,5 +249,62 @@ class WorkforceOnTheSupplyTests(SupplyBase):
         e.close()
 
 
+
+class CatalogueTests(unittest.TestCase):
+    """Hugging Face's router lists every model it has; some have no live provider at a given moment."""
+    LISTING = {"data": [
+        {"id": "org/served", "providers": [{"provider": "p1", "status": "live", "context_length": 131072,
+                                            "supports_structured_output": True, "pricing": {"input": 0.3, "output": 1.2}}]},
+        {"id": "org/not-served-now", "providers": [{"provider": "p2", "status": "offline"}]},
+        {"id": "org/some-embed-model", "providers": [{"provider": "p1", "status": "live"}]}]}
+
+    def setUp(self):
+        from unittest import mock
+        from cynqra.intelligence_layer import adapters
+        self.tmp = TempDir()
+        self.supply = IntelligenceSupply(self.tmp.path / "control")
+        patch = mock.patch.object(adapters, "_get_json", lambda url, headers: self.LISTING)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def tearDown(self):
+        self.supply.close()
+        self.tmp.cleanup()
+
+    def hf(self, models=None):
+        return self.supply.connect({"type": "openai_compatible", "name": "HF", "endpoint": "https://router.huggingface.co/v1",
+                                    "auth": {"method": "none"}, **({"models": models} if models else {})})
+
+    def test_a_model_no_provider_serves_is_skipped_not_fatal(self):
+        out = self.hf()
+        self.assertEqual([m["ref"] for m in out["intelligence"]], ["org/served"], "embeddings and unserved models left out")
+        self.assertEqual((out["intelligence"][0]["price_in"], out["intelligence"][0]["context"]), (0.3, 131072))
+        self.assertIn("1 not offered now", out["connection"]["status_note"])
+
+    def test_a_hosted_call_gives_up_long_before_a_laptop_would(self):
+        from cynqra.intelligence_layer.adapters import HOSTED_TIMEOUT_S
+        conn = self.supply.connections.get(self.hf()["connection"]["id"])
+        entry = self.supply.registry.models()[0]
+        route = self.supply.adapters["openai_compatible"].route(conn, None, entry)
+        self.assertEqual((route["kind"], route["CYNQRA_TIMEOUT"]), ("hf", str(HOSTED_TIMEOUT_S)))
+        self.supply.connections.update(conn["id"], {"settings": {"CYNQRA_TIMEOUT": 90}})
+        conn = self.supply.connections.get(conn["id"])
+        self.assertEqual(self.supply.adapters["openai_compatible"].route(conn, None, entry)["CYNQRA_TIMEOUT"], "90",
+                         "the connection's own setting wins")
+
+    def test_naming_only_unserved_models_is_refused(self):
+        with self.assertRaises(SupplyError):
+            self.hf(models=["org/not-served-now"])
+
+    def test_the_demonstration_picks_the_newest_served_model_of_each_family(self):
+        import workforce_demo
+        picks, missing = workforce_demo.pick_hosted(["moonshotai/Kimi-K3", "moonshotai/Kimi-K3-Instruct-FP8",
+                                                     "zai-org/GLM-4.7", "deepseek-ai/DeepSeek-V4-Flash",
+                                                     "Qwen/Qwen3.5-35B-A3B"])
+        self.assertEqual(picks, ["moonshotai/Kimi-K3", "zai-org/GLM-4.7", "deepseek-ai/DeepSeek-V4-Flash",
+                                 "Qwen/Qwen3.5-35B-A3B"], "the base model; an older family member when the newest is not served")
+        self.assertEqual(missing, ["Qwen3.8"])
+
+
 if __name__ == "__main__":
     unittest.main()

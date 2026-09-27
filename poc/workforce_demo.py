@@ -1,11 +1,13 @@
 """Cynqra chooses, measures and replaces AI workers on real models: the whole demonstration, unattended.
 
     desktop.py --workforce local "objective"     three open models on this machine, swapped in as needed
-    desktop.py --workforce hf "objective"        Qwen3.5-35B-A3B, GLM-4.7 and Kimi K2.5 on Hugging Face (HF_TOKEN)
+    desktop.py --workforce hf "objective"        the newest open models Hugging Face serves (HF_TOKEN)
 
 Through the app's own HTTP API, as the window drives it:
  1. Connect the provider (this machine, or Hugging Face with HF_TOKEN named, never copied); its models are
     discovered and registered in the Intelligence Registry (facts only: runtime, price, context; no scores).
+    On Hugging Face the whole catalogue is discovered, then narrowed to the newest model of each family below
+    that a provider serves today; the rest are retired, their records kept.
  2. Probe each one on Cynqra's calibration work, so selection starts from measured outcomes.
  3. Give Cynqra the objective and a dollar budget. Cynqra decomposes it into requirements and synthesizes the
     organization; the founder approves the workforce, then the roadmap and the budget built on it.
@@ -29,8 +31,36 @@ from pathlib import Path
 
 # The three open models the demonstration can run on one 16 GB machine without a key (one at a time).
 LOCAL = [("qwen3.5-4b", "Qwen3.5 4B"), ("qwen3.5-9b", "Qwen3.5 9B"), ("gpt-oss-20b", "gpt-oss 20B")]
-# The three the product brief names, hosted by Hugging Face Inference Providers.
-HOSTED = [("Qwen/Qwen3.5-35B-A3B", "Qwen3.5-35B-A3B"), ("zai-org/GLM-4.7", "GLM-4.7"), ("moonshotai/Kimi-K2.5", "Kimi K2.5")]
+# The open-weight families to compare on Hugging Face Inference Providers, strongest first as of September 2026
+# (public SWE-bench reports), each as id prefixes, newest first; plus a small, cheap model for contrast. Which
+# exact model is used is read from the live catalogue: a family no provider serves today is skipped and reported.
+HOSTED_FAMILIES = [
+    ("Kimi K3", ["moonshotai/Kimi-K3", "moonshotai/Kimi-K2.6", "moonshotai/Kimi-K2.5"]),
+    ("GLM-5", ["zai-org/GLM-5.2", "zai-org/GLM-5.1", "zai-org/GLM-5", "zai-org/GLM-4.7"]),
+    ("DeepSeek V4", ["deepseek-ai/DeepSeek-V4.1-Flash", "deepseek-ai/DeepSeek-V4-Flash", "deepseek-ai/DeepSeek-V4"]),
+    ("Qwen3.8", ["Qwen/Qwen3.8-Flash-Next", "Qwen/Qwen3.8", "Qwen/Qwen3.6-35B-A3B"]),
+    ("Qwen3.5-35B-A3B (small, for contrast)", ["Qwen/Qwen3.5-35B-A3B"]),
+]
+
+
+def pick_hosted(offered: list[str]) -> tuple[list[str], list[str]]:
+    """For each family, the first prefix that matches an offered id (case-insensitive), and of its matches the
+    shortest id: the base model, not a quantized or dated variant. Returns the picks and the families not served."""
+    picks, missing = [], []
+    low = {o.lower(): o for o in offered}
+    for family, prefixes in HOSTED_FAMILIES:
+        hit = None
+        for pre in prefixes:
+            found = sorted((o for k, o in low.items() if k == pre.lower() or k.startswith(pre.lower() + "-")
+                            or k.startswith(pre.lower() + ":")), key=len)
+            if found:
+                hit = found[0]
+                break
+        if hit and hit not in picks:
+            picks.append(hit)
+        else:
+            missing.append(family)
+    return picks, missing
 LOCAL_USD_PER_HOUR = 0.10  # the value put on an hour of this machine, so local work has a price; stated in the report
 FAULT_REPLY_TOKENS = 300   # a reply cap no real module and its tests fit into
 
@@ -58,8 +88,16 @@ def run(args) -> int:
         else:
             got = api("/api/connections", {"type": "openai_compatible", "name": "Hugging Face Inference Providers",
                                            "endpoint": "https://router.huggingface.co/v1",
-                                           "auth": {"method": "env", "env_var": "HF_TOKEN"},
-                                           "models": [r for r, _ in HOSTED]})
+                                           "auth": {"method": "env", "env_var": "HF_TOKEN"}})
+            offered = [m["ref"] for m in got["intelligence"]]
+            say(f"Hugging Face serves {len(offered)} chat models today")
+            picks, missing = pick_hosted(offered)
+            rep["catalogue"] = {"offered": len(offered), "picked": picks, "not_served": missing}
+            for fam in missing:
+                say(f"not served today: {fam}")
+            if len(picks) < 2:
+                raise RuntimeError(f"only {len(picks)} of the families are served: {picks}; the catalogue: {offered[:40]}")
+            got = api(f"/api/connections/{got['connection']['id']}/update", {"models": picks})
         rep["connection"] = got["connection"]
         rep["models"] = got["intelligence"]
         for m in rep["models"]:
@@ -67,11 +105,17 @@ def run(args) -> int:
                 + (f"${m['compute_usd_per_hour']}/h of this machine" if m["local"] else f"${m['price_in']} in / ${m['price_out']} out per M"))
         # 2. probe
         if not args.no_probe:
+            from concurrent.futures import ThreadPoolExecutor
             from cynqra.probe import probe
-            for m in rep["models"]:
-                say(f"probing {m['name']} on Cynqra's calibration work")
-                r = probe(desk.app.supply, m["id"], log=lambda s: say(s.strip()))
-                rep["probes"].append(r)
+            one = lambda m: probe(desk.app.supply, m["id"], log=lambda s: say(s.strip()))  # noqa: E731
+            if args.workforce == "local":  # one model on this machine at a time
+                for m in rep["models"]:
+                    say(f"probing {m['name']} on Cynqra's calibration work")
+                    rep["probes"].append(one(m))
+            else:  # hosted models run on their providers' machines: probed side by side
+                say(f"probing {len(rep['models'])} models side by side on Cynqra's calibration work")
+                with ThreadPoolExecutor(max_workers=len(rep["models"])) as pool:
+                    rep["probes"] = list(pool.map(one, rep["models"]))
         # 3. project
         api("/api/company", {"name": args.company, "mode": "live"})
         say("structuring the objective")
