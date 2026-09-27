@@ -1,20 +1,35 @@
 # Cynqra desktop app: build the installers for Windows, macOS and Linux, then install each one on a
 # fresh GitHub machine the way a user would and check it with a real open model.
 #
-#   every push             unit tests; build; install; self-test; open the window; a real model
+# The repository is private, so runner minutes are counted (macOS 10x, Windows 2x): a push runs only the unit
+# tests; the installers are built and checked when asked for.
+#
+#   every push             unit tests
+#   "[build]" in the commit, or Run workflow by hand
+#                          build; install; self-test; open the window; a real model
 #                          structures an objective and writes code that passes its tests: Qwen3.6
 #                          35B-A3B 2-bit (the model a 16 GB laptop gets) on Windows and Linux, Qwen3.5
 #                          4B on the 7 GB macOS machine; launch like a user and quit; on Windows also
 #                          uninstall and reinstall into a folder with spaces and accents
-#   "[e2e]" in the commit  also a whole Cynqra run, from the founder's sentence to a deployed, verified
+#   "[e2e]" (or e2e ticked by hand)  also a whole Cynqra run, from the founder's sentence to a deployed, verified
 #                          product: the 16 GB model on Linux and Windows, gpt-oss 20B on Linux
-#   "[release]"            also publishes the installers as a GitHub prerelease
+#   "[release]" (or release ticked by hand)  also publishes the installers as a GitHub prerelease
 name: cynqra-desktop
 
 on:
   push:
     branches: [cynqra]
     paths: ["poc/**", "desktop/**", ".github/workflows/cynqra-desktop.yml"]
+  workflow_dispatch:
+    inputs:
+      e2e:
+        description: Also run the whole journey with a real model (up to 6 hours)
+        type: boolean
+        default: false
+      release:
+        description: Also publish the installers as a prerelease
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -38,6 +53,9 @@ jobs:
 
   build:
     needs: tests
+    if: >-
+      github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[build]')
+      || contains(github.event.head_commit.message, '[e2e]') || contains(github.event.head_commit.message, '[release]')
     strategy:
       fail-fast: false
       matrix:
@@ -196,7 +214,7 @@ jobs:
 
   e2e:
     needs: build
-    if: ${{ !cancelled() && contains(github.event.head_commit.message, '[e2e]') }}
+    if: ${{ !cancelled() && needs.build.result != 'skipped' && (contains(github.event.head_commit.message, '[e2e]') || inputs.e2e) }}
     strategy:
       fail-fast: false
       matrix:
@@ -247,7 +265,7 @@ jobs:
 
   release:
     needs: build
-    if: contains(github.event.head_commit.message, '[release]')
+    if: contains(github.event.head_commit.message, '[release]') || inputs.release
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
