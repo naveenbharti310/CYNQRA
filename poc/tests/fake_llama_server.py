@@ -96,11 +96,14 @@ def main() -> int:
                 text = fake_model.answer(prompt)
                 if "=== FILE:" in prompt:
                     text = as_blocks(text)
+                cut = bool(body.get("max_tokens")) and len(text) > 4 * int(body["max_tokens"])
+                if cut:  # like llama-server: the reply stops at max_tokens (about four characters a token)
+                    text = text[:4 * int(body["max_tokens"])]
                 busy["n"] = len(text) // 4
                 time.sleep(float(os.environ.get("FAKE_LLAMA_THINK_S") or 0))
             finally:
                 busy["on"] = False
-            return self._send(200, {"choices": [{"index": 0, "finish_reason": "stop",
+            return self._send(200, {"choices": [{"index": 0, "finish_reason": "length" if cut else "stop",
                                                  "message": {"role": "assistant", "content": text}}],
                                     "usage": {"prompt_tokens": max(1, len(prompt) // 4),
                                               "completion_tokens": max(1, len(text) // 4)},

@@ -404,20 +404,7 @@ def window_test(args) -> int:
 
 # ------------------------------------------------------------------------- real model checks --
 # Cynqra's own kinds of work, small enough for a quick check of a model on this machine.
-CHECK_OBJECTIVE = (
-    "I run a small bakery and my staff keep losing track of custom cake orders. I want a simple internal web page "
-    "where they can log an order with the pickup date, see what is due in the next few days, and mark orders as "
-    "paid and picked up. Nothing public, no card payments, and it has to run on the shop laptop.")
-CHECK_TASK = {"id": "t_03", "title": "Order store", "kind": "code", "owner_worker_id": "w_eng_a",
-                   "expected_output": "store.py and test_store.py"}
-CHECK_HANDOFF = {"acceptance_check": (
-    "Write store.py and test_store.py, standard library only. OrderStore(path) keeps orders in one JSON file, "
-    "loading it if it exists and saving after every change. add(customer, cake, pickup_date) returns the order dict "
-    "(keys id, customer, cake, pickup_date, paid, picked_up; paid and picked_up start False) and raises ValueError "
-    "when customer or cake is blank or pickup_date is not a real YYYY-MM-DD date. set_paid(order_id, paid) and "
-    "set_picked_up(order_id, picked_up) raise KeyError for an unknown id. due_soon(today) returns orders not picked "
-    "up whose pickup date is before today or within today plus 3 days, soonest first. Tests must cover every rule."),
-    "context_ref": "bench", "artifacts": []}
+from cynqra.probe import CHECK_HANDOFF, CHECK_OBJECTIVE, CHECK_TASK  # noqa: E402,F401 - shared with the registry's probe
 
 
 def prepare_model(desk: Desktop, model_id: str, gpu: str | None) -> None:

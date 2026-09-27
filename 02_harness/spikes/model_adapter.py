@@ -82,15 +82,46 @@ endpoint (HF_ROUTER_URL, default https://router.huggingface.co/v1). These
 are paid calls on someone else's hardware: token counts are the provider's
 own, rate limits and server errors are retried, a JSON Schema is sent as
 response_format, and a refused token or spent credit reads as what it is.
+
+27 Sep 2026, seventh pass: one process, many models. complete(route=...)
+sends one call to one model: the route holds that model's settings under
+the same names as the environment (kind, label, CYNQRA_LOCAL_BASE_URL,
+CYNQRA_HF_MODEL, CYNQRA_NUM_PREDICT, ...), and they overlay the process
+environment for that call only, on that thread; a key set to None counts
+as unset. Cynqra's model registry builds routes, so each worker can run on
+a different model. Two faults can be set on a route, for proving that
+Cynqra notices and replaces a failing model: offline (the model cannot be
+reached) and CYNQRA_MAX_REPLY (a hard cap on the reply, so a real model
+really runs out of room). Neither invents an answer.
 """
 from __future__ import annotations
 
 import json
 import os
 import subprocess
+import threading
 import time
 import urllib.error
 import urllib.request
+
+class _Overlay:
+    """The process environment, overlaid by the route of the call in progress on this thread."""
+
+    def get(self, key: str, default=None):
+        route = getattr(_LOCAL, "route", None) or {}
+        if key in route:
+            return route[key] if route[key] is not None else default
+        return os.environ.get(key, default)
+
+    def __getitem__(self, key: str):
+        value = self.get(key)
+        if value is None:
+            raise KeyError(key)
+        return value
+
+
+_LOCAL = threading.local()
+_ENV = _Overlay()
 
 OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
@@ -102,26 +133,30 @@ EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 
 
 def resolve() -> dict | None:
-    cmd = os.environ.get("CYNQRA_S1_MODEL_CMD")
+    route = getattr(_LOCAL, "route", None)
+    if route and route.get("kind"):
+        return {"kind": route["kind"], "label": route.get("label") or route["kind"], "tokens": "measured",
+                "local": bool(route.get("local"))}
+    cmd = _ENV.get("CYNQRA_S1_MODEL_CMD")
     if cmd:
         return {"kind": "cmd", "label": "shell command", "tokens": "estimated"}
-    if os.environ.get("CYNQRA_OLLAMA_MODEL"):
-        return {"kind": "ollama", "label": os.environ["CYNQRA_OLLAMA_MODEL"], "tokens": "measured", "local": True}
-    if os.environ.get("CYNQRA_LOCAL_BASE_URL"):
-        return {"kind": "local", "label": os.environ.get("CYNQRA_MODEL", "local-model"), "tokens": "measured",
+    if _ENV.get("CYNQRA_OLLAMA_MODEL"):
+        return {"kind": "ollama", "label": _ENV["CYNQRA_OLLAMA_MODEL"], "tokens": "measured", "local": True}
+    if _ENV.get("CYNQRA_LOCAL_BASE_URL"):
+        return {"kind": "local", "label": _ENV.get("CYNQRA_MODEL", "local-model"), "tokens": "measured",
                 "local": True}
-    if os.environ.get("HF_TOKEN") and os.environ.get("CYNQRA_HF_MODEL"):
-        return {"kind": "hf", "label": os.environ["CYNQRA_HF_MODEL"], "tokens": "measured"}
-    if os.environ.get("OPENAI_API_KEY"):
+    if _ENV.get("HF_TOKEN") and _ENV.get("CYNQRA_HF_MODEL"):
+        return {"kind": "hf", "label": _ENV["CYNQRA_HF_MODEL"], "tokens": "measured"}
+    if _ENV.get("OPENAI_API_KEY"):
         return {
             "kind": "openai",
-            "label": os.environ.get("CYNQRA_MODEL", "gpt-4o-mini"),
+            "label": _ENV.get("CYNQRA_MODEL", "gpt-4o-mini"),
             "tokens": "measured",
         }
-    if os.environ.get("ANTHROPIC_API_KEY"):
+    if _ENV.get("ANTHROPIC_API_KEY"):
         return {
             "kind": "anthropic",
-            "label": os.environ.get("CYNQRA_MODEL", "claude-sonnet-5"),
+            "label": _ENV.get("CYNQRA_MODEL", "claude-sonnet-5"),
             "tokens": "measured",
         }
     return None
@@ -179,7 +214,7 @@ def _openai(prompt: str, model: str, max_tokens: int = 1500) -> dict:
             "max_completion_tokens": max_tokens,
         },
         {
-            "Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}",
+            "Authorization": f"Bearer {_ENV['OPENAI_API_KEY']}",
             "Content-Type": "application/json",
         },
     )
@@ -200,7 +235,7 @@ def _anthropic(prompt: str, model: str, max_tokens: int = 1500) -> dict:
         "max_tokens": max(max_tokens, ANTHROPIC_MIN_MAX_TOKENS),
         "messages": [{"role": "user", "content": prompt}],
     }
-    effort = (os.environ.get("CYNQRA_EFFORT") or "").strip().lower()
+    effort = (_ENV.get("CYNQRA_EFFORT") or "").strip().lower()
     if effort:
         if effort not in EFFORTS:
             raise ValueError(f"CYNQRA_EFFORT must be one of {sorted(EFFORTS)}, not {effort!r}")
@@ -209,7 +244,7 @@ def _anthropic(prompt: str, model: str, max_tokens: int = 1500) -> dict:
         ANTHROPIC_URL,
         payload,
         {
-            "x-api-key": os.environ["ANTHROPIC_API_KEY"],
+            "x-api-key": _ENV["ANTHROPIC_API_KEY"],
             "anthropic-version": "2023-06-01",
             "Content-Type": "application/json",
         },
@@ -233,7 +268,7 @@ def _anthropic(prompt: str, model: str, max_tokens: int = 1500) -> dict:
 
 
 def ollama_host() -> str:
-    host = (os.environ.get("OLLAMA_HOST") or "127.0.0.1:11434").strip().rstrip("/")
+    host = (_ENV.get("OLLAMA_HOST") or "127.0.0.1:11434").strip().rstrip("/")
     if not host.startswith(("http://", "https://")):
         host = "http://" + host
     return host.replace("://0.0.0.0", "://127.0.0.1")
@@ -241,31 +276,37 @@ def ollama_host() -> str:
 
 def _local_timeout() -> float:
     try:
-        return float(os.environ.get("CYNQRA_TIMEOUT") or 1800)
+        return float(_ENV.get("CYNQRA_TIMEOUT") or 1800)
     except ValueError:
         return 1800.0
 
 
+def _cap(tokens: int) -> int:
+    """A route's CYNQRA_MAX_REPLY fault caps every reply, whatever the caller asked for."""
+    cap = int(_ENV.get("CYNQRA_MAX_REPLY") or 0)
+    return min(tokens, cap) if cap else tokens
+
+
 def _ollama(prompt: str, model: str, max_tokens: int, want_json: bool, schema: dict | None = None,
             temperature: float | None = None, partial: bool = False) -> dict:
-    num_ctx = int(os.environ.get("CYNQRA_NUM_CTX") or 32768)
-    answer = int(os.environ.get("CYNQRA_NUM_PREDICT") or 0) or max(max_tokens, 8192)
+    num_ctx = int(_ENV.get("CYNQRA_NUM_CTX") or 32768)
+    answer = _cap(int(_ENV.get("CYNQRA_NUM_PREDICT") or 0) or max(max_tokens, 8192))
     if len(prompt) // 4 + answer > num_ctx:  # four characters a token is a floor, so this only refuses sure failures
         raise ValueError(f"the prompt (about {len(prompt) // 4} tokens at least) plus {answer} for the answer does not "
                          f"fit num_ctx={num_ctx}; raise CYNQRA_NUM_CTX")
     options: dict = {"num_ctx": num_ctx, "num_predict": answer}
     if temperature is not None:
         options["temperature"] = temperature
-    elif os.environ.get("CYNQRA_TEMPERATURE"):
-        options["temperature"] = float(os.environ["CYNQRA_TEMPERATURE"])
-    if os.environ.get("CYNQRA_SEED"):
-        options["seed"] = int(os.environ["CYNQRA_SEED"])
+    elif _ENV.get("CYNQRA_TEMPERATURE"):
+        options["temperature"] = float(_ENV["CYNQRA_TEMPERATURE"])
+    if _ENV.get("CYNQRA_SEED"):
+        options["seed"] = int(_ENV["CYNQRA_SEED"])
     payload: dict = {"model": model, "messages": [{"role": "user", "content": prompt}], "stream": False,
-                     "options": options, "keep_alive": os.environ.get("CYNQRA_KEEP_ALIVE", "30m"),
+                     "options": options, "keep_alive": _ENV.get("CYNQRA_KEEP_ALIVE", "30m"),
                      "shift": False, "truncate": False}
     if want_json:
         payload["format"] = schema or "json"
-    think = (os.environ.get("CYNQRA_THINK") or "").strip().lower()
+    think = (_ENV.get("CYNQRA_THINK") or "").strip().lower()
     if think:
         payload["think"] = {"true": True, "false": False}.get(think, think)
     try:
@@ -292,24 +333,24 @@ def _ollama(prompt: str, model: str, max_tokens: int, want_json: bool, schema: d
 def _local_openai(prompt: str, model: str, max_tokens: int, want_json: bool = False, schema: dict | None = None,
                   temperature: float | None = None, partial: bool = False) -> dict:
     """LM Studio or llama-server. Their context size is set when the server loads the model (-c 32768)."""
-    base = os.environ["CYNQRA_LOCAL_BASE_URL"].rstrip("/")
+    base = _ENV["CYNQRA_LOCAL_BASE_URL"].rstrip("/")
     headers = {"Content-Type": "application/json"}
-    if os.environ.get("CYNQRA_LOCAL_API_KEY"):
-        headers["Authorization"] = f"Bearer {os.environ['CYNQRA_LOCAL_API_KEY']}"
+    if _ENV.get("CYNQRA_LOCAL_API_KEY"):
+        headers["Authorization"] = f"Bearer {_ENV['CYNQRA_LOCAL_API_KEY']}"
     payload: dict = {"model": model, "messages": [{"role": "user", "content": prompt}],
-                     "max_tokens": int(os.environ.get("CYNQRA_NUM_PREDICT") or 0) or max(max_tokens, 8192), "stream": False}
+                     "max_tokens": _cap(int(_ENV.get("CYNQRA_NUM_PREDICT") or 0) or max(max_tokens, 8192)), "stream": False}
     if want_json and schema:
         payload["response_format"] = {"type": "json_schema",
                                       "json_schema": {"name": "result", "strict": True, "schema": schema}}
-    think = (os.environ.get("CYNQRA_THINK") or "").strip().lower()
+    think = (_ENV.get("CYNQRA_THINK") or "").strip().lower()
     if think == "false":
         payload["chat_template_kwargs"] = {"enable_thinking": False}
     elif think in ("low", "medium", "high"):  # gpt-oss: reasoning can be kept low, not switched off
         payload["chat_template_kwargs"] = {"reasoning_effort": think}
-    if temperature is not None or os.environ.get("CYNQRA_TEMPERATURE"):
-        payload["temperature"] = temperature if temperature is not None else float(os.environ["CYNQRA_TEMPERATURE"])
-    if os.environ.get("CYNQRA_SEED"):
-        payload["seed"] = int(os.environ["CYNQRA_SEED"])
+    if temperature is not None or _ENV.get("CYNQRA_TEMPERATURE"):
+        payload["temperature"] = temperature if temperature is not None else float(_ENV["CYNQRA_TEMPERATURE"])
+    if _ENV.get("CYNQRA_SEED"):
+        payload["seed"] = int(_ENV["CYNQRA_SEED"])
     try:
         # No transport retries: the request is deterministic (seed, temperature 0), so sending it again would
         # spend minutes of a laptop's time for the same answer. The caller retries with its own temperature.
@@ -343,17 +384,17 @@ def _local_openai(prompt: str, model: str, max_tokens: int, want_json: bool = Fa
 def _hf(prompt: str, model: str, max_tokens: int, want_json: bool = False, schema: dict | None = None,
         temperature: float | None = None, partial: bool = False) -> dict:
     """Hugging Face Inference Providers: the router's OpenAI-compatible chat completions."""
-    base = (os.environ.get("HF_ROUTER_URL") or "https://router.huggingface.co/v1").rstrip("/")
+    base = (_ENV.get("HF_ROUTER_URL") or "https://router.huggingface.co/v1").rstrip("/")
     payload: dict = {"model": model, "messages": [{"role": "user", "content": prompt}], "stream": False,
                      # reasoning models spend part of max_tokens thinking, so the floor leaves room for the answer
-                     "max_tokens": max(max_tokens, int(os.environ.get("CYNQRA_NUM_PREDICT") or 16000)),
-                     "temperature": temperature if temperature is not None else float(os.environ.get("CYNQRA_TEMPERATURE") or 0)}
+                     "max_tokens": _cap(max(max_tokens, int(_ENV.get("CYNQRA_NUM_PREDICT") or 16000))),
+                     "temperature": temperature if temperature is not None else float(_ENV.get("CYNQRA_TEMPERATURE") or 0)}
     if want_json and schema:
         payload["response_format"] = {"type": "json_schema",
                                       "json_schema": {"name": "result", "strict": True, "schema": schema}}
-    if (os.environ.get("CYNQRA_EFFORT") or "").lower() in ("low", "medium", "high"):
-        payload["reasoning_effort"] = os.environ["CYNQRA_EFFORT"].lower()
-    headers = {"Authorization": f"Bearer {os.environ['HF_TOKEN']}", "Content-Type": "application/json"}
+    if (_ENV.get("CYNQRA_EFFORT") or "").lower() in ("low", "medium", "high"):
+        payload["reasoning_effort"] = _ENV["CYNQRA_EFFORT"].lower()
+    headers = {"Authorization": f"Bearer {_ENV['HF_TOKEN']}", "Content-Type": "application/json"}
     try:
         data = _post(base + "/chat/completions", payload, headers)
     except RuntimeError as exc:
@@ -377,7 +418,7 @@ def _hf(prompt: str, model: str, max_tokens: int, want_json: bool = False, schem
 
 
 def _cmd(prompt: str) -> dict:
-    cmd = os.environ["CYNQRA_S1_MODEL_CMD"]
+    cmd = _ENV["CYNQRA_S1_MODEL_CMD"]
     proc = subprocess.run(
         cmd, input=prompt, text=True, capture_output=True, shell=True, check=False
     )
@@ -395,7 +436,23 @@ def _cmd(prompt: str) -> dict:
 
 
 def complete(prompt: str, max_tokens: int = 1500, want_json: bool = False, schema: dict | None = None,
-             temperature: float | None = None, partial: bool = False) -> dict:
+             temperature: float | None = None, partial: bool = False, route: dict | None = None) -> dict:
+    if route is None:
+        return _complete(prompt, max_tokens, want_json, schema, temperature, partial)
+    before = getattr(_LOCAL, "route", None)
+    _LOCAL.route = route
+    try:
+        if route.get("offline"):
+            return {"text": "", "tokens_in": 0, "tokens_out": 0, "estimated": False, "latency_s": 0.0,
+                    "model": route.get("label"), "kind": route.get("kind"),
+                    "error": f"RuntimeError: {route.get('label')} is offline (a fault set on it in the model registry)"}
+        return _complete(prompt, max_tokens, want_json, schema, temperature, partial)
+    finally:
+        _LOCAL.route = before
+
+
+def _complete(prompt: str, max_tokens: int, want_json: bool, schema: dict | None, temperature: float | None,
+              partial: bool) -> dict:
     """Returns text, tokens_in, tokens_out, estimated, latency_s, error.
 
     max_tokens defaults to 1500, the S1 setting. S2 passes a larger value

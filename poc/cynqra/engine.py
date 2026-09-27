@@ -18,7 +18,8 @@ from pathlib import Path
 
 from . import deploy, policy
 from .db import IST, Store, digest, now
-from .intelligence import IntelligenceError, make
+from .intelligence import IntelligenceError, ModelSource, make
+from .workforce import MAX_REPLACEMENTS, ROLE_KINDS, Workforce, estimate
 from .protocol import ProtocolError, build
 from .verification import failure_summary, lint_documents, run_unittests
 
@@ -50,7 +51,8 @@ class EngineError(RuntimeError):
 
 
 class Engine:
-    def __init__(self, data_dir: Path, intelligence=None, scenario: str = "candidate_tracker"):
+    def __init__(self, data_dir: Path, intelligence=None, scenario: str = "candidate_tracker",
+                 workforce: Workforce | None = None):
         self.dir = Path(data_dir)
         self.dir.mkdir(parents=True, exist_ok=True)
         self.store = Store(str(self.dir / "cynqra.db"))
@@ -63,6 +65,7 @@ class Engine:
         self.demo_messy = json.loads(scen.read_text(encoding="utf-8"))["messy"] if scen.exists() else ""
         self._injected = intelligence  # tests pass a source here; it survives create_company
         self._intel = intelligence
+        self.wf = workforce  # the model registry and workforce engine; None: one model for every worker
         self.live_proc = None
         meta = self.store.get("meta", "run")
         if meta is None:
@@ -87,8 +90,134 @@ class Engine:
     @property
     def intel(self):
         if self._intel is None:
-            self._intel = make(self.meta.get("mode", "demo"), self.scenario)
+            if self.staffed_by_registry():
+                self._intel = ModelSource(router=self._route)
+            else:
+                self._intel = make(self.meta.get("mode", "demo"), self.scenario)
         return self._intel
+
+    # --- the workforce: which model each worker runs on (workforce.py, registry.py) -------------------
+    def staffed_by_registry(self) -> bool:
+        """A live run staffs its workers from the model registry when the registry has a model to offer."""
+        if self.meta.get("mode") != "live" or self.wf is None:
+            return False
+        if "registry" not in self.meta:
+            self._set_meta(registry=self.wf.usable())
+        return bool(self.meta["registry"])
+
+    def _route(self, worker_id: str) -> tuple[str, dict]:
+        if worker_id == "system" or self.worker(worker_id) is None:
+            sys_ = self.store.get("workforce", "system")
+            if not (sys_ and sys_.get("model_id")) or not self.wf.reg.availability(self.wf.reg.get(sys_["model_id"]))[0]:
+                best, rows = self.wf.choose(self.store, ["objective"])
+                if best is None:
+                    raise IntelligenceError("no available model in the registry")
+                sys_ = {"model_id": best["model_id"], "candidates": rows}
+                self.store.put("workforce", "system", sys_)
+            model_id = sys_["model_id"]
+        else:
+            model_id = self.worker(worker_id)["model_id"]
+        return model_id, self.wf.reg.route(model_id)
+
+    def _staff(self) -> None:
+        staffing = self.wf.staff(self.store, TEMPLATE)
+        for wid, s in staffing.items():
+            w = self.worker(wid)
+            w.update({"model_id": s["model_id"], "intelligence_source_id": s["model"], "cost_profile": "USD, metered"})
+            self.store.put("worker", wid, w)
+            self.store.put("staffing", wid, {"worker_id": wid, "model_id": s["model_id"], "candidates": s["candidates"],
+                                              "at": now(), "why": "lowest expected cost per verified task for its role"})
+            self.event("worker.model_assigned", "worker", wid, {"role": w["role"], "model_id": s["model_id"],
+                       "model": s["model"], "candidates": [{k: r[k] for k in ("model", "score", "p_task", "expected_usd",
+                                                                               "expected_minutes")} for r in s["candidates"]]},
+                       actor="workforce")
+
+    def model_of(self, wid: str) -> str | None:
+        w = self.worker(wid)
+        return (w or {}).get("model_id")
+
+    def _meter(self, task_id: str) -> dict:
+        return self.store.get("meter", task_id) or {"usd": 0.0, "seconds": 0.0, "tokens": 0}
+
+    def _outcome(self, t: dict, verified: bool, failure: str = "") -> None:
+        """One verification of one attempt: counted for the model that did it, for its kind of task."""
+        if not self.staffed_by_registry():
+            return
+        model_id = self.model_of(t["owner_worker_id"])
+        m = self._meter(t["id"])
+        self.wf.reg.record_outcome(model_id, role=self.worker(t["owner_worker_id"])["role"], task_kind=t["kind"],
+                                   task_id=t["id"], run_id=self.cid, attempt=t["attempts"] + 1, verified=verified,
+                                   usd=m["usd"], seconds=m["seconds"], tokens=m["tokens"], failure=failure)
+        self.store.put("meter", t["id"], {"usd": 0.0, "seconds": 0.0, "tokens": 0})
+
+    def _replace_or_escalate(self, t: dict, why: str) -> dict:
+        """A worker keeps failing a task: give the worker another model that is expected to do better per dollar
+        and minute, and let it continue from where the last one stopped. The founder decides only when no model
+        fits, the budget does not, or this task has already had its replacements."""
+        if not self.staffed_by_registry() or t.get("replacements", 0) >= MAX_REPLACEMENTS:
+            return self._escalate(t, why)
+        wid = t["owner_worker_id"]
+        w = self.worker(wid)
+        old = w["model_id"]
+        L = self.wf.ledger(self.store)
+        left = L["reserve"] + max(0.0, L["allocated"].get(t["id"], 0.0) - L["spent"].get(t["id"], 0.0))
+        best, rows = self.wf.choose(self.store, [t["kind"]], budget_left=left, exclude={old})
+        if best is None:
+            return self._escalate(t, why + (" No other model in the registry can take it over within the budget."
+                                            if rows else " No other model in the registry is available."))
+        spent = L["spent"].get(t["id"], 0.0)
+        prior = [o for o in self.wf.reg.outcomes(old) if o["run_id"] == self.cid and o["task_id"] == t["id"]]
+        w.update({"model_id": best["model_id"], "intelligence_source_id": best["model"]})
+        self.store.put("worker", wid, w)
+        e = estimate(self.wf.reg, self.wf.reg.get(best["model_id"]), t["kind"],
+                     self.wf.settings(self.store)["time_value_per_hour"])
+        self.wf.reallocate(self.store, t, old, e)
+        n = self._count("replacement") + 1
+        rep = {"id": f"rep_{n:03d}", "task_id": t["id"], "worker_id": wid, "role": w["role"], "from": old,
+               "to": best["model_id"], "reason": why[:400], "attempts": len(prior), "usd_spent_by_previous": round(spent, 4),
+               "candidates": rows, "at": now(),
+               "inherited": ["objective", "task specification and handoff", "decided rules", "workspace files",
+                             "previous attempts and their failures", "test results"]}
+        self.store.put("replacement", rep["id"], rep)
+        self.event("worker.model_replaced", "worker", wid, {k: rep[k] for k in ("task_id", "from", "to", "reason", "attempts",
+                   "usd_spent_by_previous")} | {"candidates": [{k: r[k] for k in ("model", "score", "p_task", "expected_usd")}
+                                                             for r in rows]}, actor="workforce", correlation_id=t["id"])
+        handover = (f"You are taking over {t['id']} ({t['title']}) from the previous {w['role']}, who ran on "
+                    f"{self.wf.reg.get(old)['name']} and made {len(prior)} attempts without passing verification. "
+                    f"Why it was replaced: {why[:300]} Its files are in your workspace and kept; continue from them "
+                    "rather than starting again.")
+        t.update({"status": "REWORK" if t["kind"] in ("spec", "code") else "ASSIGNED", "attempts": 0, "cut_offs": 0,
+                  "replacements": t.get("replacements", 0) + 1,
+                  "feedback": handover + ("\n" + t["feedback"] if t.get("feedback") else "")})
+        self._save_task(t)
+        return {"did": "replaced", "task": t["id"], "from": old, "to": best["model_id"]}
+
+    def _model_failed(self, t: dict, exc: IntelligenceError) -> dict | None:
+        """A call to a worker's model failed. Counted against the model; a model down after repeated failures is
+        replaced in every worker that runs on it, and the step is tried again."""
+        if not (self.staffed_by_registry() and exc.model_id):
+            return None
+        self.wf.reg.record_call(exc.model_id, role="", purpose="error", task_kind=t.get("kind", ""), usage=exc.usage,
+                                run_id=self.cid, error=str(exc))
+        m = self.wf.reg.get(exc.model_id)
+        if self.wf.reg.availability(m)[0]:
+            return {"did": "model_error_retry", "task": t["id"], "model": exc.model_id, "why": str(exc)}
+        out = None
+        for w in self.store.all("worker"):
+            if w.get("model_id") == exc.model_id:
+                mine = [x for x in self.tasks() if x["owner_worker_id"] == w["id"] and x["status"] not in ("VERIFIED",)]
+                target = t if t["owner_worker_id"] == w["id"] else (mine[0] if mine else None)
+                if target is not None:
+                    out = self._replace_or_escalate(target, f"{m['name']} stopped answering: {exc}")
+                else:
+                    best, _ = self.wf.choose(self.store, ROLE_KINDS.get(w["role"], ["code"]), exclude={exc.model_id})
+                    if best:
+                        w.update({"model_id": best["model_id"], "intelligence_source_id": best["model"]})
+                        self.store.put("worker", w["id"], w)
+        sys_ = self.store.get("workforce", "system")
+        if sys_ and sys_.get("model_id") == exc.model_id:
+            self.store.put("workforce", "system", {"model_id": None})  # chosen again on the next call
+        return out or {"did": "model_replaced", "task": t["id"], "model": exc.model_id}
 
     def event(self, event_type: str, aggregate_type: str, aggregate_id: str, payload: dict, *,
               actor: str = "orchestrator", actor_type: str = "service", correlation_id: str | None = None,
@@ -341,6 +470,8 @@ class Engine:
                 raise EngineError("mode must be demo or live")
             name = (name or "").strip() or "My company"
             self._set_meta(mode=mode)
+            if mode == "live" and self.wf is not None:
+                self._set_meta(registry=self.wf.usable())  # staffed from the registry for the whole run, or not at all
             self._intel = self._injected
             _ = self.intel  # live mode fails here, before anything is written, if no key
             # Live mode charges one unit per 1000 real tokens, so a whole run needs far more room than demo mode.
@@ -397,9 +528,22 @@ class Engine:
                            "fields_changed": changed}, actor="founder", actor_type="human", authority="founder")
             return obj
 
-    def set_guardrails(self, budget_cap: int | None = None, risk_tolerance: str | None = None) -> dict:
+    def set_guardrails(self, budget_cap: int | None = None, risk_tolerance: str | None = None,
+                       budget_usd: float | None = None, time_value_per_hour: float | None = None) -> dict:
         with self.lock:
             self._require("objective")
+            if budget_usd is not None or time_value_per_hour is not None:
+                s = Workforce.settings(self.store)
+                if budget_usd is not None:
+                    if float(budget_usd) < 0:
+                        raise EngineError("the budget cannot be negative")
+                    s["budget_usd"] = round(float(budget_usd), 2)
+                if time_value_per_hour is not None:
+                    s["time_value_per_hour"] = max(0.0, float(time_value_per_hour))
+                self.store.put("workforce", "settings", s)
+                self.event("budget.changed", "company", self.cid, {"budget_usd": s["budget_usd"],
+                           "time_value_per_hour": s["time_value_per_hour"], "unit": "USD"},
+                           actor="founder", actor_type="human", authority="founder")
             b = self.budget()
             company = self.store.get("company", self.cid)
             if budget_cap is not None:
@@ -464,6 +608,8 @@ class Engine:
                       "performance_profile": {"verified": 0, "first_pass": 0, "reworks": 0, "blockers": 0}})
             self.store.put("worker", t["id"], w)
             self.event("worker.hired", "worker", t["id"], {"role": t["role"], "intelligence": label})
+        if self.staffed_by_registry():
+            self._staff()
 
     def _plan(self, note: str = "") -> None:
         plan, usage = self.intel.plan(self.objective()["structured"], note=note)
@@ -500,6 +646,8 @@ class Engine:
             self.event("state.changed", "company", self.cid, {"stage": "MVP", "phase": "running"}, actor="founder",
                        actor_type="human", authority="founder")
             self._set_meta(phase="running", started_at=time.time(), notice="")
+            if self.staffed_by_registry():
+                self.wf.allocate(self.store, self.tasks(), {w["id"]: w["model_id"] for w in self.store.all("worker")})
         else:
             self._plan(note=d.get("note", ""))
 
@@ -542,6 +690,9 @@ class Engine:
                     self._save_task(t)
                     return {"did": "rework", "task": t["id"], "why": str(exc)}
                 except IntelligenceError as exc:
+                    handled = self._model_failed(t, exc)
+                    if handled:
+                        return handled
                     self._set_meta(notice=f"Stopped on {t['id']}: the intelligence source failed ({exc}). Nothing was invented.")
                     self._set_meta(phase="stopped_error")
                     self.event("task.failed", "task", t["id"], {"reason": "intelligence_error"}, correlation_id=t["id"])
@@ -561,6 +712,16 @@ class Engine:
 
     def _record_call(self, task_id: str, worker: str, purpose: str, usage: dict) -> None:
         n = self._count("call") + 1
+        if usage.get("model_id") and self.staffed_by_registry():
+            kind = (self.task(task_id) or {}).get("kind", purpose) if task_id.startswith("t_") else purpose
+            c = self.wf.reg.record_call(usage["model_id"], role=(self.worker(worker) or {}).get("role", worker),
+                                        purpose=purpose, task_kind=kind, usage=usage, run_id=self.cid)
+            usage = dict(usage, usd=c["usd"])
+            self.wf.charge(self.store, worker, task_id, c["usd"])
+            if task_id.startswith("t_") and purpose == "work":
+                m = self._meter(task_id)
+                self.store.put("meter", task_id, {"usd": m["usd"] + c["usd"], "seconds": m["seconds"] + c["seconds"],
+                                                  "tokens": m["tokens"] + c["tokens_in"] + c["tokens_out"]})
         self.store.put("call", f"call_{n:04d}", {"id": f"call_{n:04d}", "task_id": task_id, "worker": worker,
                        "purpose": purpose, **usage, "at": now()})
         self.charge(int(usage.get("units", 1)), "intelligence", task_id if task_id.startswith("t_") else None)
@@ -690,8 +851,9 @@ class Engine:
         the rest. Replies that keep overflowing are escalated rather than retried without end."""
         t["cut_offs"] = t.get("cut_offs", 0) + 1
         if t["cut_offs"] > MAX_CUT_OFFS:
-            return self._escalate(t, f"{t['id']}: {MAX_CUT_OFFS + 1} replies in a row were longer than the model's "
-                                     "output limit")
+            self._outcome(t, False, "replies kept running past the model's output limit")
+            return self._replace_or_escalate(t, f"{t['id']}: {MAX_CUT_OFFS + 1} replies in a row were longer than the "
+                                                "model's output limit.")
         t.update({"status": "REWORK", "feedback": (
             f"Your last reply was longer than the model's output limit and was cut off while writing {cut}, which was "
             "not saved. " + (f"These files were saved: {', '.join(saved)}. " if saved else "No file was finished. ")
@@ -901,6 +1063,7 @@ class Engine:
             feedback = "; ".join(f["why"] for f in lint["findings"])
             method = "coverage lint against the confirmed objective"
         verdict = "VERIFIED" if passed else ("REQUIRES_REWORK" if t["attempts"] + 1 < MAX_ATTEMPTS else "REQUIRES_HUMAN")
+        self._outcome(t, passed, "" if passed else feedback)
         self.charge(UNIT_COST["verify"], "verify", t["id"])
         v = {"id": vid, "company_id": self.cid, "task_id": t["id"], "attempt": t["attempts"] + 1,
              "risk_tier": t["risk_tier"], "method": method, "checks": checks, "reviewer_type": "service",
@@ -925,7 +1088,7 @@ class Engine:
         self._perf(owner, "reworks")
         if verdict == "REQUIRES_HUMAN":
             self._save_task(t)
-            return self._escalate(t, f"{t['id']} failed verification {t['attempts']} times: {feedback[:200]}")
+            return self._replace_or_escalate(t, f"{t['id']} failed verification {t['attempts']} times: {feedback[:200]}")
         t.update({"status": "REWORK", "feedback": feedback})
         self._save_task(t)
         self.event("task.failed", "task", t["id"], {"attempt": t["attempts"], "rework": True, "verification": vid},
@@ -1059,6 +1222,7 @@ class Engine:
         self.store.put("verification", vid, v)
         self.event("verification.completed", "verification", vid, {"task_id": t["id"], "verdict": verdict, "method": method},
                    actor="verification", correlation_id=t["id"], test_ids=test_ids)
+        self._outcome(t, True)
         t["status"] = "VERIFIED"
         self._save_task(t)
         self._perf(owner, "verified")
@@ -1301,6 +1465,7 @@ class Engine:
             "deployments": self.store.all("deployment"),
             "transition": self.store.get("transition", "tr_1"),
             "budget": self.budget(),
+            "workforce": self.workforce_view(),
             "metrics": self.metrics() if self.store.get("company", self.cid) else {},
             "evolution": self.evolution() if self.store.all("worker") else None,
             "rules": self.rules(),
@@ -1308,6 +1473,25 @@ class Engine:
             "events": self.store.events()[-60:],
             "exports": sorted(p.name for p in self.paths["exports"].glob("*.zip")),
         }
+
+    def workforce_view(self) -> dict:
+        """Who runs on which model, why, what each may spend and has spent, and every replacement."""
+        if self.wf is None:
+            return {"active": False, "why": "no model registry in this app"}
+        view = {"registry": self.wf.reg.snapshot(), "settings": Workforce.settings(self.store)}
+        if not self.staffed_by_registry():
+            view.update(active=False, why="demo mode, or no available model in the registry")
+            return view
+        L = Workforce.ledger(self.store)
+        staffing = {s["worker_id"]: s for s in self.store.all("staffing")}
+        view.update(active=True, ledger=L, replacements=self.store.all("replacement"),
+                    system=self.store.get("workforce", "system"),
+                    workers=[{"id": w["id"], "role": w["role"], "title": w["title"], "model_id": w.get("model_id"),
+                              "model": w.get("intelligence_source_id"), "reports_to": w.get("reports_to"),
+                              "budget": L["by_worker"].get(w["id"], {"allocated": 0.0, "spent": 0.0}),
+                              "candidates": (staffing.get(w["id"]) or {}).get("candidates", []),
+                              "performance": w.get("performance_profile")} for w in self.store.all("worker")])
+        return view
 
     def close(self) -> None:
         deploy.stop(self.live_proc)

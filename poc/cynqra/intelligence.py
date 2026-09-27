@@ -25,7 +25,13 @@ SCRIPTED_UNITS_PER_CALL = 3
 
 
 class IntelligenceError(RuntimeError):
-    """The source could not answer. The step stops; it is never papered over."""
+    """The source could not answer. The step stops; it is never papered over. model_id names the model that
+    failed, so the workforce engine can count the failure against it and staff the worker with another."""
+
+    def __init__(self, message: str, model_id: str | None = None, usage: dict | None = None):
+        super().__init__(message)
+        self.model_id = model_id
+        self.usage = usage or {}
 
 
 def _parse_json(text: str):
@@ -299,8 +305,11 @@ DELIVERY_CONTRACT = ("Delivery contract. The product is a Python 3.10 standard l
 class ModelSource:
     kind = "model"
 
-    def __init__(self):
-        resolved = model_adapter.resolve()
+    def __init__(self, router=None):
+        # router(worker) -> (model_id, route): each worker's calls go to the model it is assigned now. Without
+        # one, every call goes to the single model the environment names.
+        self.router = router
+        resolved = {"label": "workforce"} if router else model_adapter.resolve()
         if resolved is None:
             raise IntelligenceError("Live mode needs a model: in the desktop app, start one in the Model screen; "
                                     "otherwise a local model server (CYNQRA_LOCAL_BASE_URL or CYNQRA_OLLAMA_MODEL), "
@@ -310,7 +319,8 @@ class ModelSource:
         self.answered: dict[str, int] = {}  # prompt digest -> replies already received for exactly that prompt
         self.prompt_v2 = (HERE / "objective_prompt.txt").read_text(encoding="utf-8")
 
-    def _call(self, prompt: str, max_tokens: int = 4000, files: bool = False, schema: dict | None = None) -> tuple[dict, dict]:
+    def _call(self, prompt: str, max_tokens: int = 4000, files: bool = False, schema: dict | None = None,
+              worker: str = "system") -> tuple[dict, dict]:
         """One model call. files=True: a JSON header followed by file blocks, so no constrained JSON mode."""
 
         def parse(text: str):
@@ -325,12 +335,14 @@ class ModelSource:
         # A local model gives the same reply to the same prompt (temperature 0, fixed seed). A rework whose feedback and
         # previous files are exactly those of an attempt already answered would get the same failing reply again, so a
         # repeated prompt is sent with some temperature: 0.3 the second time, 0.6 the third, then 0.9.
-        key = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+        model_id, route = self.router(worker) if self.router else (None, None)
+        key = hashlib.sha256(f"{model_id}|{prompt}".encode("utf-8")).hexdigest()
         repeats = self.answered.get(key, 0)
         out = model_adapter.complete(prompt, max_tokens=max_tokens, want_json=not files, schema=schema,
-                                     temperature=round(min(0.3 * repeats, 0.9), 1) if repeats else None, partial=files)
+                                     temperature=round(min(0.3 * repeats, 0.9), 1) if repeats else None, partial=files,
+                                     route=route)
         if out.get("error"):
-            raise IntelligenceError(out["error"])
+            raise IntelligenceError(out["error"], model_id=model_id, usage=out)
         self.answered[key] = repeats + 1
         self.last_text = out["text"]
         data = parse(out["text"])
@@ -347,9 +359,9 @@ class ModelSource:
             again = ("\n\nYour reply had no files in the required layout. " + FILES_LAYOUT) if files else \
                 "\n\nReply with only one JSON object."
             out2 = model_adapter.complete(prompt + again, max_tokens=max_tokens, want_json=not files, schema=schema,
-                                          temperature=0.4)
+                                          temperature=0.4, route=route)
             if out2.get("error"):
-                raise IntelligenceError(out2["error"])
+                raise IntelligenceError(out2["error"], model_id=model_id, usage=out2)
             self.last_text = out2["text"]
             data = parse(out2["text"])
             out["tokens_in"] += out2["tokens_in"]
@@ -358,7 +370,8 @@ class ModelSource:
             raise IntelligenceError("model did not return a JSON object")
         units = max(1, -(-(out["tokens_in"] + out["tokens_out"]) // 1000))
         usage = {"tokens_in": out["tokens_in"], "tokens_out": out["tokens_out"], "estimated": out["estimated"],
-                 "label": out.get("model", self.label), "latency_s": out.get("latency_s", 0), "units": units}
+                 "label": out.get("model", self.label), "latency_s": out.get("latency_s", 0), "units": units,
+                 "model_id": model_id}
         if out.get("speed"):
             usage.update(out["speed"])
         return data, usage
@@ -419,12 +432,12 @@ class ModelSource:
                   'Return JSON: {"workstreams": [{"id", "name"}], "tasks": [{"id", "workstream_id", "kind", '
                   '"owner_worker_id", "title", "inputs", "expected_output", "dependencies", "tools", "budget", '
                   '"deadline_day", "verification_method"}]}')
-        data, usage = self._call(prompt, max_tokens=3000, schema=SCHEMAS["plan"])
+        data, usage = self._call(prompt, max_tokens=3000, schema=SCHEMAS["plan"], worker="w_pm")
         try:
             return validate_plan(data), usage
         except IntelligenceError as exc:
             data2, usage2 = self._call(prompt + f"\n\nYour previous plan was refused: {exc}. Return a corrected plan.",
-                                       max_tokens=3000, schema=SCHEMAS["plan"])
+                                       max_tokens=3000, schema=SCHEMAS["plan"], worker="w_pm")
             for k in ("tokens_in", "tokens_out", "units"):
                 usage[k] += usage2[k]
             return validate_plan(data2), usage
@@ -436,7 +449,7 @@ class ModelSource:
                   "List only the artifacts the engineer needs. Put every closed list or rule they must not invent "
                   "into acceptance_check.\n"
                   'Return JSON: {"artifacts": [ids], "context_ref": "...", "acceptance_check": "..."}')
-        return self._call(prompt, max_tokens=1500, schema=SCHEMAS["handoff"])
+        return self._call(prompt, max_tokens=1500, schema=SCHEMAS["handoff"], worker="w_pm")
 
     def work(self, task: dict, worker: str, objective: dict, rules: list[str], handoff: dict,
              inbox: dict[str, str], feedback: str = "", answers: list[dict] | None = None,
@@ -469,7 +482,7 @@ class ModelSource:
                   "If a fact you need is missing and you would have to guess it, raise a Blocker instead.\n"
                   + (FILES_LAYOUT if shape is None else f"Return one JSON object: {shape}"))
         return self._call(prompt, max_tokens=8000 if kind == "code" else 3000, files=shape is None,
-                          schema=None if shape is None else SCHEMAS["proposal"])
+                          schema=None if shape is None else SCHEMAS["proposal"], worker=worker)
 
     def answer_blocker(self, task: dict, worker: str, objective: dict, rules: list[str], blocker: dict,
                        artifact_index: list[str], **_) -> tuple[dict, dict]:
@@ -479,7 +492,7 @@ class ModelSource:
                   "Clear it using only the objective, the decided rules and the artifacts. If it needs a new product "
                   "decision, say so plainly and give the safest reading for now.\n"
                   'Return JSON: {"artifacts": [ids], "context_ref": "...", "acceptance_check": "the missing facts"}')
-        return self._call(prompt, max_tokens=1500, schema=SCHEMAS["handoff"])
+        return self._call(prompt, max_tokens=1500, schema=SCHEMAS["handoff"], worker=worker)
 
 
 def make(mode: str, scenario_id: str = "candidate_tracker"):
