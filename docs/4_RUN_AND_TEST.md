@@ -21,7 +21,7 @@ cd poc
 python3 -m unittest discover -s tests -t tests
 ```
 
-About 4 minutes, 237 tests. The browser test runs only if Node and Playwright are installed; otherwise it is skipped
+About 4 minutes, 240 tests. The browser test runs only if Node and Playwright are installed; otherwise it is skipped
 and says so. `poc/TEST_REPORT.md` describes every test module.
 
 To check a real model from the command line: `python3 poc/desktop.py --check-model <model>` (a model on this

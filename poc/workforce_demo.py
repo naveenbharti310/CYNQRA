@@ -163,6 +163,7 @@ def run(args) -> int:
         api("/api/run/auto", {"on": True, "delay": 0})
         seen, deadline = 0, t0 + args.max_minutes * 60
         shown = ("worker.intelligence_bound", "worker.model_replaced", "task.rerouted", "intelligence.version_changed",
+                 "worker.stopped", "worker.stand_in", "ceo.informed",
                  "task.verified", "verification.completed", "task.reply_cut_off", "task.failed", "deployment.verified",
                  "worker.self_checked")
         while time.time() < deadline:

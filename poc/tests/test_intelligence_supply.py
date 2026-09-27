@@ -234,7 +234,9 @@ class WorkforceOnTheSupplyTests(SupplyBase):
         run_journey(e, max_rounds=40)
         self.assertEqual(e.meta["phase"], "accepted", e.meta.get("notice"))
         reps = [r for r in e.store.all("replacement") if r["from"] == primary]
-        self.assertTrue(reps and all(r["to"] == fallback for r in reps), reps)
+        self.assertTrue(reps and all(r["to"] == fallback and r["temporary"] for r in reps), reps)
+        self.assertNotIn("provider_outage", [d["kind"] for d in e.store.all("decision")],
+                         "the fallback the CEO named is their answer in advance: no question")
         self.assertEqual(sorted(w["id"] for w in e.workers()), before, "no worker was created or lost")
         e.close()
 

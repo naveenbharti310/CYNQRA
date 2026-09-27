@@ -63,21 +63,22 @@ class LiveModeTests(unittest.TestCase):  # A15
         self.assertEqual([t["status"] for t in e.tasks()], ["VERIFIED"] * 6)
         e.close()
 
-    def test_a_failing_model_with_no_alternative_goes_to_the_founder_and_invents_nothing(self):
+    def test_a_failing_model_with_no_alternative_waits_and_invents_nothing(self):
         os.environ["CYNQRA_S1_MODEL_CMD"] = fake_model_cmd()
         e = engine_to_running(self.tmp.path, mode="live")
         os.environ["CYNQRA_S1_MODEL_CMD"] = fake_model_cmd(fail=True)
         steps = [r["did"] for r in e.run_until_idle()]
         self.assertEqual(steps[:2], ["assigned", "model_error_retry"], "one failed call is retried")
-        self.assertIn("escalated", steps, "a model down after repeated failures is replaced, or the founder decides")
-        d = e.pending_decisions()[0]
-        self.assertIn("stopped answering", d["problem"])
-        self.assertIn("No other model in the registry is available", d["problem"])
+        self.assertIn("waiting", steps, "a model that stopped answering is waited for, not replaced")
+        self.assertIn("stopped", e.store.events()[-1]["event_type"] + " ".join(
+            x["event_type"] for x in e.store.events()), "the stop is diagnosed and recorded")
         t = e.task("t_01")
-        self.assertEqual((t["status"], t["outputs"]), ("FAILED", []))
+        self.assertEqual((t["status"], t["outputs"]), ("WAITING", []))
         self.assertFalse(any((e.paths["workspaces"] / "w_pm" / "t_01" / "out").iterdir()), "nothing was invented")
-        os.environ["CYNQRA_S1_MODEL_CMD"] = fake_model_cmd()  # the model is back
-        e.decide(d["id"], "approve")
+        self.assertFalse(e.store.all("replacement"))
+        os.environ["CYNQRA_S1_MODEL_CMD"] = fake_model_cmd()  # the model is back, and the wait is over
+        t["waiting"]["until"] = 0
+        e.save_task(t)
         run_journey(e)
         self.assertEqual(e.meta["phase"], "accepted")
         e.close()

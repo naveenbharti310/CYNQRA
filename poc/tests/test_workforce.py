@@ -145,25 +145,103 @@ class WorkforceTests(unittest.TestCase):
         self.assertTrue(all(o["run_id"] == e.cid for o in outs))
         e.close()
 
-    def test_a_model_that_goes_offline_is_detected_and_replaced(self):
+    def test_a_model_that_goes_offline_is_diagnosed_not_replaced(self):
+        """The provider's side is not the AI's fault: the worker keeps its AI, the CEO is asked once whether a
+        stand-in may cover the wait, and each worker returns to its own AI when it answers again."""
         e = self.engine()
         before = sorted(w["id"] for w in e.workers())
         self.reg.set_fault("model-a", offline=True)  # after staffing: every worker is on Model A
+        e.run_until_idle()
+        stopped = [x for x in e.store.events() if x["event_type"] == "worker.stopped"]
+        self.assertTrue(stopped and all(x["payload"]["cause"] == "outage" for x in stopped), "diagnosed first")
+        pend = [d for d in e.pending_decisions() if d["kind"] == "provider_outage"]
+        self.assertEqual(len(pend), 1, "the CEO is asked once, not once per worker")
+        self.assertIn("not at fault", pend[0]["problem"])
+        self.assertIn("per million tokens", pend[0]["recommendation"], "with what the stand-in costs")
+        self.assertFalse(e.store.all("replacement"), "nothing was replaced")
+        self.assertTrue(all(binding.intelligence_of(e.store, w["id"]) == "model-a" for w in e.workers()))
+        self.assertTrue(any(t["status"] == "WAITING" for t in e.tasks()))
+        e.decide(pend[0]["id"], "approve")  # the CEO lets a stand-in cover the wait
+        covered = {r["worker_id"] for r in e.store.all("replacement")}
+        self.assertTrue(covered and all(binding.intelligence_of(e.store, w) != "model-a" for w in covered))
+        self.reg.set_fault("model-a", offline=False)  # the provider answers again
+        e.step()
+        self.assertTrue(all(binding.intelligence_of(e.store, w["id"]) == "model-a" for w in e.workers()),
+                        "each worker is back on its own AI")
+        self.reg.set_fault("model-a", offline=True)  # and down again: the CEO's answer still holds
         run_journey(e, max_rounds=40)
         self.assertEqual(e.meta["phase"], "accepted", e.meta.get("notice"))
         reps = e.store.all("replacement")
-        self.assertTrue(reps and all(r["from"] == "model-a" for r in reps))
+        self.assertTrue(reps and all(r["from"] == "model-a" and r["temporary"] for r in reps))
         self.assertTrue({r["to"] for r in reps} <= {"model-b", "model-c"})
-        self.assertFalse(any(binding.intelligence_of(e.store, w["id"]) == "model-a" for w in e.workers()),
-                         "no worker left on it")
         self.assertEqual(sorted(w["id"] for w in e.workers()), before, "every worker kept its identity")
-        self.assertFalse(self.reg.availability(self.reg.get("model-a"))[0])
-        errors = [c for c in self.reg.calls("model-a") if c["error"]]
-        self.assertGreaterEqual(len(errors), 2, "detected from its own failed calls")
-        evals = [x for x in e.store.all("evaluation") if x["decision"] == "replace"]
-        self.assertTrue(evals and all(x["regression_check"] for x in evals), "every successor passed a regression check")
-        self.assertTrue(any(o["source"] == "regression" for o in self.reg.outcomes()), "the check's work is on record")
+        evals = [x for x in e.store.all("evaluation") if x["decision"] == "stand_in"]
+        self.assertTrue(evals and all(x["regression_check"] for x in evals), "the stand-in passed a regression check")
+        self.assertTrue(any(n["kind"] == "stand_in" for n in e.store.all("ceo_notice")), "and the CEO was told")
+        self.assertEqual([d["kind"] for d in e.store.all("decision")].count("provider_outage"), 1,
+                         "asked once for the whole run")
         e.close()
+
+    def test_the_ceo_may_choose_to_wait_out_an_outage(self):
+        e = self.engine()
+        self.reg.set_fault("model-a", offline=True)
+        e.run_until_idle()
+        d = next(d for d in e.pending_decisions() if d["kind"] == "provider_outage")
+        e.decide(d["id"], "reject", "wait for it")
+        waiting = [t for t in e.tasks() if t["status"] == "WAITING"]
+        self.assertTrue(waiting and all(t["waiting"]["until"] > time.time() for t in waiting))
+        self.assertEqual(e.step()["did"], "idle")
+        self.reg.set_fault("model-a", offline=False)  # the provider is back, and the wait is over
+        for t in waiting:
+            t["waiting"]["until"] = 0
+            e.save_task(t)
+        run_journey(e, max_rounds=40)
+        self.assertEqual(e.meta["phase"], "accepted", e.meta.get("notice"))
+        self.assertFalse(e.store.all("replacement"), "no AI was replaced or stood in")
+        self.assertTrue(all(binding.intelligence_of(e.store, w["id"]) == "model-a" for w in e.workers()))
+        e.close()
+
+    def test_no_credit_goes_to_the_ceo_and_replaces_nothing(self):
+        e = self.engine()
+        gw = self.supply.gateway
+        real = gw.invoke
+        state = {"broke": True}
+
+        def invoke(mid, request, pinned_version=None):
+            if mid == "model-a" and state["broke"]:
+                return {"text": "", "tokens_in": 0, "tokens_out": 0, "estimated": False, "latency_s": 0.1,
+                        "model": "Model A", "model_id": mid,
+                        "error": "HTTPError: HTTP 402: You have exceeded your monthly included credits"}
+            return real(mid, request, pinned_version=pinned_version)
+
+        gw.invoke = invoke
+        try:
+            e.run_until_idle()
+            pend = [d for d in e.pending_decisions() if d["kind"] == "provider_account"]
+            self.assertEqual(len(pend), 1)
+            self.assertIn("no credit", pend[0]["problem"])
+            self.assertFalse(e.store.all("replacement"))
+            self.assertFalse([d for d in e.pending_decisions() if d["kind"] == "provider_outage"])
+            state["broke"] = False  # the CEO added credit
+            run_journey(e, max_rounds=40)
+        finally:
+            gw.invoke = real
+        self.assertEqual(e.meta["phase"], "accepted", e.meta.get("notice"))
+        self.assertFalse(e.store.all("replacement"), "nothing was replaced")
+        self.assertTrue(all(binding.intelligence_of(e.store, w["id"]) == "model-a" for w in e.workers()))
+        e.close()
+
+    def test_why_a_call_failed(self):
+        from cynqra.replacement import diagnose
+        for text, cause in [("HTTP 402: You have exceeded your monthly included credits", "no_credit"),
+                            ("You exceeded your current quota, please check your plan and billing", "no_credit"),
+                            ("HTTP 401: Invalid API key", "access"), ("HTTP 429: Too Many Requests", "rate_limit"),
+                            ("The read operation timed out", "timeout"), ("HTTP 503: Service Unavailable", "outage"),
+                            ("could not reach https://router.huggingface.co: connection refused", "outage"),
+                            ("Model A is offline (a fault set on it in the model registry)", "outage"),
+                            ("Model A is retired: superseded", "withdrawn"),
+                            ("Model A changed version to 2 and failed its regression check", "withdrawn")]:
+            self.assertEqual(diagnose(text), cause, text)
 
     def test_a_task_is_rerouted_to_a_peer_on_a_better_model(self):
         e = self.engine()
@@ -238,6 +316,11 @@ class WorkforceTests(unittest.TestCase):
         self.assertTrue(any(c.get("model_id") == rep["to"] for c in handover), "the successor did the rest")
         failed = [o for o in self.reg.outcomes("model-a") if not o["verified"]]
         self.assertTrue(failed, "the failure is part of Model A's record")
+        note = next(n for n in e.store.all("ceo_notice") if n["kind"] == "intelligence_replaced")
+        self.assertIn("could not do this role's work", note["detail"], "the CEO is told why")
+        self.assertIsNotNone(note["usd_difference"], "and what the better AI costs against the old one")
+        self.assertIn("per million tokens, against", note["detail"], "its price against the old one's")
+        self.assertFalse(e.pending_decisions(), "informed, not asked: the budget covered it")
         L = e.workforce_view()["ledger"]
         moved = [x for x in L["events"] if x["what"] == "reallocated"]
         self.assertTrue(moved and moved[0]["from"] == "model-a", "the budget moved with the work")

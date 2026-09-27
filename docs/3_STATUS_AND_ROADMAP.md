@@ -9,11 +9,12 @@ been proven end to end on strong real AI models in its current form.
 
 | Area | Status |
 | --- | --- |
-| The full flow (idea → team → plan → parallel work → checks → delivery) | ✅ Built. 237 automated tests pass. |
+| The full flow (idea → team → plan → parallel work → checks → delivery) | ✅ Built. 240 automated tests pass. |
 | Demo mode (scripted words; real code, tests and deploy) | ✅ Works end to end, two scenarios. |
 | Team built from the idea, with Specialists named from it | ✅ Built and tested. |
 | Team works in parallel, hands over, asks each other | ✅ Built and tested. |
-| Best AI per member, measured; swapped when it fails | ✅ Built and tested. |
+| Best AI per member, measured | ✅ Built and tested. |
+| When a member stops: finds out why first; replaces only an AI that cannot do the work, and tells the CEO the cost | ✅ Built and tested. |
 | Connections to OpenAI-compatible, Anthropic, local models, Hugging Face | ✅ Built. Bedrock planned. |
 | Installable desktop app (Windows, macOS, Linux) | ✅ Builds and installs; version 0.1.2. |
 | **A full project on strong real models, current design** | ❌ **Not yet done.** See "Real-model results". |

@@ -13,7 +13,7 @@ All code paths below are inside `poc/cynqra/` unless stated.
 | 5. Plan and budget | Milestones, tasks, owners, dependencies, acceptance criteria, and a dollar budget per task | **CEO approves** (gate 2) | `planner.py`, `budget.py` |
 | 6. The work | Everyone works at the same time (see below) | The team | `engine.py` (`step`), `execution.py` |
 | 7. Checks | Every piece of work is checked before it counts as done | Cynqra | `verifier.py` |
-| 8. Replacement | A member whose AI keeps failing gets another AI, or its task moves to a colleague | Cynqra | `performance.py`, `replacement.py` |
+| 8. When a member stops | Cynqra first finds out why. Only an AI that cannot do the role's work is replaced, and the CEO is told what the better one costs (see below) | Cynqra; the CEO only for money or accounts | `replacement.py`, `performance.py` |
 | 9. Delivery | The product is merged and deployed; the CEO receives the Company Pack | **CEO accepts** | `delivery.py`, `deploy.py` |
 
 ## How the team works together
@@ -34,6 +34,20 @@ time); online models run truly in parallel. Up to `parallel_workers` members (de
 
 Messages between members are structured, hashed objects (Handoff, Blocker, Escalation, Approval), never free
 chat: `protocol.py`.
+
+## When a team member stops
+
+Cynqra never swaps a member's AI on the first sign of trouble. It first finds out **why** the member stopped.
+
+| Why | Example | What Cynqra does | Is the AI replaced? |
+| --- | --- | --- | --- |
+| **The provider's side** | Outage, timeout, too many calls | The member waits and tries again. The rest of the team keeps working. If the CEO named a fallback for that AI, it stands in; otherwise Cynqra asks the CEO once whether a stand-in may cover the wait, with its price. The member returns to its own AI as soon as that AI answers again. | **No** |
+| **The account** | No credit left, key refused | The members on that account wait. The CEO is asked to top up or fix the key; the work then continues where it stopped. | **No** |
+| **The AI itself** | Work fails its checks three times; replies keep running out of room or breaking the rules; its measured record falls too low; a new version fails its check | The AI cannot do this role's work. Cynqra picks a better one that passes a check on this kind of work first, and **tells the CEO**: why, which AI now does the work, and its price against the old one. If no better AI fits the budget, the CEO decides. | **Yes** |
+
+The member keeps its identity, role, history and files in every case; only the AI behind it changes. Notices to the
+CEO ("What Cynqra told you") are not decisions: nothing waits on them. They are listed on the Workforce screen and in
+the Company Pack. `replacement.py` (`diagnose`, `model_failed`, `evaluate`, `inform`).
 
 ## The team
 

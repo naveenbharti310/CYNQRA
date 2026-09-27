@@ -474,6 +474,8 @@ class Engine:
                 "review_merge": lambda d, a: execution.after_proposal(self, d, a),
                 "deploy": lambda d, a: execution.after_proposal(self, d, a),
                 "escalation": lambda d, a: execution.after_escalation(self, d, a),
+                "provider_outage": lambda d, a: replacement.after_outage(self, d, a),
+                "provider_account": lambda d, a: replacement.after_account(self, d, a),
                 "budget_breaker": self._after_breaker, "objective_change": self._after_objective_change,
                 "accept_delivery": lambda d, a: delivery.after_accept(self, d, a)}
 
@@ -619,11 +621,15 @@ class Engine:
                 return {"did": "idle", "why": f"phase {m['phase']}"}
             if budget.ledger(self.store)["state"] == "breaker":
                 return {"did": "idle", "why": "budget breaker open"}
+            replacement.resume_waiting(self)
             actions = self._round()
             if not actions:
                 tasks = self.tasks()
                 if tasks and all(t["status"] == "VERIFIED" for t in tasks):
                     return delivery.deliver(self)
+                waiting = [t for t in tasks if t["status"] == "WAITING" and not t["waiting"].get("decision_id")]
+                if waiting:
+                    return {"did": "idle", "why": f"waiting for the provider: {waiting[0]['waiting']['why']}"}
                 return {"did": "idle", "why": "waiting on the founder"}
         if len(actions) == 1 or not isinstance(self.intel, ModelSource):
             # a prepared script answers at once: its round runs in plan order, so a demo replays the same way
@@ -815,6 +821,7 @@ class Engine:
         return {"active": bool(workers), "registry": self.registry.snapshot(),
                 "settings": project_settings.get(self.store), "ledger": L, "system": bound.get(binding.SYSTEM),
                 "replacements": self.store.all("replacement"), "models_in_use": in_use,
+                "ceo_notices": self.store.all("ceo_notice"),
                 "workers": [{"id": w["id"], "role": w["role"], "title": w["title"], "reports_to": w.get("reports_to"),
                              "binding": bound.get(w["id"]),
                              "model_id": (bound.get(w["id"]) or {}).get("intelligence_id"),

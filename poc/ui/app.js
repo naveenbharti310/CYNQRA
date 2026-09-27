@@ -21,6 +21,7 @@ const KIND_TITLE = {
   decision: "Product rule", review_merge: "Merge release to main", deploy: "Production deploy",
   accept_delivery: "Accept delivery", budget_breaker: "Budget cap reached", escalation: "Escalation",
   objective_change: "Objective change", approve_workforce: "Proposed workforce", approve_roadmap: "Roadmap and budget",
+  provider_outage: "An AI provider stopped answering", provider_account: "A provider account needs you",
 };
 const AREA_TITLE = { product: "Product", functional: "Functional", non_functional: "Non-functional", ai_ml: "AI and ML", data: "Data",
   design: "Design", security: "Security", qa: "QA", devops: "DevOps", deployment: "Deployment" };
@@ -487,6 +488,7 @@ function statusText(t) {
     PLANNED: "Planned", ASSIGNED: "In progress", IN_PROGRESS: "In progress", BLOCKED: "Blocked", REVIEW: "Done by worker, verifying",
     REWORK: "Rework", AWAITING_FOUNDER: "Waiting on you", APPROVED: "Approved, executing",
     VERIFIED: t.attempts ? "Verified after rework" : "Verified", FAILED: "Escalated",
+    WAITING: t.waiting ? `Waiting: ${t.waiting.why}` : "Waiting",
   }[t.status] || t.status;
 }
 
@@ -569,12 +571,16 @@ function vWorkforce() {
       <span class="small">Inherited: ${esc(r.inherited.join(", "))}.</span>
       <details><summary class="small">The choice: every other available model</summary>${candTable(r.candidates, r.to)}</details></div>`).join("")
     || `<p class="muted small">No worker has been replaced in this run.</p>`;
+  const notes = (wf.ceo_notices || []).slice().reverse().map((n) => `<div class="card stack"><b>${esc(n.headline)}</b><span class="small">${esc(n.detail)}</span>
+      ${n.usd_difference !== null && n.usd_difference !== undefined ? `<span class="small mono">${n.usd_difference > 0 ? "+" : ""}${usd(n.usd_difference)} a task</span>` : ""}</div>`).join("")
+    || `<p class="muted small">Nothing to tell you yet.</p>`;
   const ledger = (L.events || []).slice(-8).reverse().map((e) => `<div class="list-row small"><span>${e.what === "allocated" ? `Allocated ${e.tasks} tasks` : `${esc(e.task)}: released ${usd(e.released)} from ${esc(modelName(e.from))}, drew ${usd(e.drawn)} for ${esc(modelName(e.to))}`}</span><span class="mono">reserve ${usd(e.reserve)}</span></div>`).join("");
   const reuse = Object.entries(wf.models_in_use || {}).map(([m, ws]) => `<div class="kv"><span>${esc(modelName(m))}</span><span>${esc(ws.map(wt).join(", "))}</span></div>`).join("");
   return `<div class="tiles">${tile(usd(s.budget_usd), "Budget")}${tile(usd(alloc), "Allocated to tasks")}${tile(usd(L.spent_total), "Spent")}
       ${tile(usd(L.reserve), "Reserve for retries and replacements")}${tile(`$${esc(s.time_value_per_hour)}/h`, "Value of an hour")}${tile((wf.replacements || []).length, "Replacements")}</div>
     <div class="card stack"><h2 style="font-size:17px">Models in use</h2><span class="small muted">Worker is not model: one model can power many workers, and workers with the same title can run on different models.</span>${reuse}</div>
     <div class="grid2">${workers}</div>
+    <h2 style="font-size:18px;margin:10px 0 4px">What Cynqra told you</h2><p class="small muted" style="margin:0 0 6px">A worker's AI is replaced only when it cannot do the role's work, never for a provider's outage or an account problem; you are told each time, with the cost.</p>${notes}
     <h2 style="font-size:18px;margin:10px 0 4px">Replacements</h2>${reps}
     <div class="card"><h2 style="font-size:17px;margin-bottom:6px">Budget ledger</h2>${ledger || '<p class="muted small">Nothing allocated yet.</p>'}</div>`;
 }
@@ -601,7 +607,8 @@ function companyPack(f) {
   const dec = (p.ceo_decisions || []).map((d) => `<div class="small">${esc(d.kind.replace(/_/g, " "))}: ${esc(d.problem)}${d.outcome ? ` <b>${esc(d.outcome)}</b>` : ""}</div>`).join("") || `<p class="small muted">None.</p>`;
   return `<div class="card stack"><div class="between"><h2 style="font-size:17px">Company Pack</h2><span class="pill teal">${p.ceo_interventions} CEO decision${p.ceo_interventions === 1 ? "" : "s"}</span></div>
     <p class="small muted" style="margin:0">What your founding team hands you: every document, who wrote it and whether it passed its check; the decisions you made; and how many questions the team settled among itself (${p.settled_by_the_team}).</p>
-    ${docs}<h3 style="font-size:14px;margin:6px 0 0">Your decisions</h3>${dec}</div>`;
+    ${docs}<h3 style="font-size:14px;margin:6px 0 0">Your decisions</h3>${dec}
+    ${(p.ceo_informed || []).length ? `<h3 style="font-size:14px;margin:6px 0 0">What Cynqra changed and told you</h3>${p.ceo_informed.map((n) => `<div class="small">${esc(n.headline)}</div>`).join("")}` : ""}</div>`;
 }
 
 function finalReport() {

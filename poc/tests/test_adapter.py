@@ -179,15 +179,17 @@ class AnthropicWireTests(ProviderBase):
             env_source()._call("Convert the founder objective: anything")
         self.assertIn("HTTP 404", str(ctx.exception))
 
-    def test_a_provider_outage_goes_to_the_founder_when_no_other_model_can_work(self):
+    def test_a_provider_outage_waits_and_the_ceo_is_told_when_no_other_model_can_work(self):
         e = engine_to_running(self.tmp.path, mode="live")
         self.p.mode = "http500"
         steps = [r["did"] for r in e.run_until_idle()]
         self.assertIn("model_error_retry", steps)
-        self.assertIn("escalated", steps)
-        d = e.pending_decisions()[0]
-        self.assertIn("HTTP 500", d["problem"])
-        self.assertIn("No other model in the registry is available", d["problem"])
+        self.assertIn("waiting", steps, "the provider's side: the work waits, nothing is replaced or escalated")
+        self.assertFalse(e.pending_decisions(), "nothing for the CEO to decide: no other AI could stand in")
+        note = e.store.all("ceo_notice")[-1]
+        self.assertEqual(note["kind"], "waiting_for_provider")
+        self.assertIn("HTTP 500", note["detail"])
+        self.assertEqual(e.task("t_01")["status"], "WAITING")
         self.assertFalse(e.registry.availability(e.registry.get(e.model_of("w_pm")))[0], "the outage is on its record")
         e.close()
 

@@ -144,6 +144,15 @@ class IntelligenceRegistry:
             return m
 
     # --- availability ----------------------------------------------------------------------------------------
+    def clear_health(self, model_id: str) -> dict:
+        """The cause of its failed calls was fixed (the account has credit again, a new key): it may be called."""
+        with self.lock:
+            m = self.get(model_id)
+            m["health"] = {"errors": 0, "down_until": 0}
+            self.store.put("intelligence", model_id, m)
+            self._audit("intelligence.health_cleared", model_id, {})
+            return m
+
     def availability(self, m: dict) -> tuple[bool, str]:
         """Can a worker bound to this intelligence make a call now? Its own state, then its connection's."""
         if m.get("status") == "retired":
@@ -182,6 +191,8 @@ class IntelligenceRegistry:
             h["errors"] = h.get("errors", 0) + 1 if error else 0
             if h["errors"] >= DOWN_AFTER_ERRORS:
                 h["down_until"] = time.time() + DOWN_FOR_S
+            elif not error:  # it answered: it is up, whatever the last failures said
+                h["down_until"] = 0
             m["health"] = h
             self.store.put("intelligence", model_id, m)
             return c

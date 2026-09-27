@@ -132,6 +132,8 @@ def company_pack(run) -> dict:
     return {"documents": docs,
             "ceo_decisions": [{"kind": d["kind"], "problem": d["problem"][:200], "outcome": d.get("outcome_label")}
                               for d in decided],
+            "ceo_informed": [{k: n[k] for k in ("kind", "headline", "detail", "usd_difference")}
+                             for n in run.store.all("ceo_notice")],
             "settled_by_the_team": len([b for b in run.store.all("blocker_cleared") if not b["founder_involved"]]),
             "ceo_interventions": run.count("intervention")}
 

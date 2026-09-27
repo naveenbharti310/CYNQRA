@@ -24,8 +24,9 @@ Hiring that expertise (a CTO, a CPO, a CFO, domain experts) takes months and mon
 2. **Cynqra builds the team that this idea needs, and only that team.** The team always depends on the idea: a
    bakery chain gets a food-safety specialist, a health app gets a clinical-safety specialist, a software company
    gets a CTO and engineers. You approve the team.
-3. **Each team member gets the best AI for its job.** Cynqra measures which model does which kind of work best, and
-   swaps a model that underperforms. The team member keeps its identity and its work.
+3. **Each team member gets the best AI for its job.** Cynqra measures which model does which kind of work best.
+   When a member stops, Cynqra first finds out why. A provider's outage is waited out; only an AI that cannot do the
+   work is replaced by a better one, and you are told what it costs. The team member keeps its identity and its work.
 4. **The team works like a real company.** Everyone works at the same time on their own part. When someone
    finishes, they hand over. When someone has a doubt, they ask the right colleague. They settle what they can
    among themselves.

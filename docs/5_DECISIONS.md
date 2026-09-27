@@ -21,7 +21,7 @@ These are settled. Change one only with the founder's explicit agreement, and re
 | T1 | **Everyone works at the same time.** Each round, every member with ready work takes one piece; a member does one thing at a time. |
 | T2 | **Members coordinate by Handoff (done) and Blocker (doubt)**, to the right colleague, not through the CEO. |
 | T3 | **AI thinking runs in parallel; recording results runs one at a time**, so the records stay consistent. |
-| T4 | **A failing AI is replaced; the worker keeps its identity, role and history.** A new model version runs only after it passes a check. |
+| T4 | **Cynqra first finds out why a member stopped.** A provider outage or an account problem is not the AI's fault: the member waits (or a stand-in the CEO allowed covers the wait) and nothing is replaced. **Only an AI that cannot do the role's work is replaced**, by a better one that passes a check first, and **the CEO is told, with the price** of the better AI against the old one. The member keeps its identity, role and history. A new model version runs only after it passes a check. |
 | T5 | **US dollars are the only budget.** A breaker stops all work at the cap until the CEO decides. |
 
 ## Intelligence
