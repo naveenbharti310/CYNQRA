@@ -535,7 +535,10 @@ def check_model(args) -> int:
 
 
 def speed(u: dict) -> str:
-    return f"; reads {u['read_tps']} tokens/s, writes {u['write_tps']} tokens/s" if u.get("write_tps") else ""
+    if not u.get("write_tps"):
+        return ""
+    return (f"; reads {u['read_tps']} tokens/s, writes {u['write_tps']} tokens/s"
+            + (f", {u['cached']} prompt tokens reused from the server's cache" if u.get("cached") else ""))
 
 
 def e2e(args) -> int:

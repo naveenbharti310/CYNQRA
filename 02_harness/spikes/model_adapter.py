@@ -334,7 +334,9 @@ def _local_openai(prompt: str, model: str, max_tokens: int, want_json: bool = Fa
     t = data.get("timings") or {}  # llama-server's own measurement of this call
     if t.get("predicted_per_second"):
         out["speed"] = {"read_tps": round(float(t.get("prompt_per_second") or 0), 1),
-                        "write_tps": round(float(t["predicted_per_second"]), 1)}
+                        "write_tps": round(float(t["predicted_per_second"]), 1),
+                        # prompt tokens the server reused from its cache instead of reading them again
+                        "cached": int(t.get("cache_n") or 0)}
     return out
 
 

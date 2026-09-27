@@ -364,6 +364,14 @@ class ModelSource:
         return data, usage
 
     @staticmethod
+    def _head(worker: str, objective: dict, rules: list[str]) -> str:
+        """The start of every role's prompt. What stays the same through a run comes first (the contract, the
+        objective, then the rules, which only grow), the role after it: a local server reuses its cache for the
+        part a prompt shares with the one before, so a change of speaker no longer means reading it all again."""
+        return (DELIVERY_CONTRACT + "\n\n" + ModelSource._ctx(objective, rules) + "\n" + ROLE_TEXT.get(worker, "")
+                + "\n\n")
+
+    @staticmethod
     def _ctx(objective: dict, rules: list[str]) -> str:
         fields = {k: objective.get(k, "") for k in ("product", "target_customer", "primary_outcome", "business_outcome",
                                                      "success_criteria", "constraints", "priorities")}
@@ -398,7 +406,7 @@ class ModelSource:
         return data, usage
 
     def plan(self, objective: dict, note: str = "") -> tuple[dict, dict]:
-        prompt = (ROLE_TEXT["w_pm"] + "\n" + self._ctx(objective, []) + "\n" + DELIVERY_CONTRACT + "\n\n"
+        prompt = (self._head("w_pm", objective, []) +
                   "Plan the work for the fixed organization: w_cto, w_pm, w_eng_a, w_eng_b. Use only these task kinds:\n"
                   "spec (owner w_pm): spec.md and acceptance.md.\n"
                   "decision (owner w_pm): exactly the one product rule the objective leaves open, for the founder.\n"
@@ -422,7 +430,7 @@ class ModelSource:
             return validate_plan(data2), usage
 
     def assign(self, task: dict, objective: dict, rules: list[str], artifact_index: list[str], **_) -> tuple[dict, dict]:
-        prompt = (ROLE_TEXT["w_pm"] + "\n" + self._ctx(objective, rules) + "\n" + DELIVERY_CONTRACT + "\n\n"
+        prompt = (self._head("w_pm", objective, rules) +
                   f"Assign task {task['id']} ({task['title']}) to {task['owner_worker_id']}. Expected output: "
                   f"{task['expected_output']}.\nArtifacts that exist: {json.dumps(artifact_index)}\n"
                   "List only the artifacts the engineer needs. Put every closed list or rule they must not invent "
@@ -454,7 +462,7 @@ class ModelSource:
         if limit:  # a local model's reply is capped; a longer one is cut off, and the files it finished are kept
             extra += (f"\nA reply holds at most about {limit} tokens. If the work needs more, send the most important "
                       "files first and keep each file short; you will be asked for the rest.")
-        prompt = (ROLE_TEXT.get(worker, "") + "\n" + self._ctx(objective, rules) + "\n" + DELIVERY_CONTRACT + "\n\n"
+        prompt = (self._head(worker, objective, rules) +
                   f"Task {task['id']}: {task['title']}. Expected output: {task['expected_output']}.\n"
                   f"Handoff: {json.dumps({k: handoff.get(k) for k in ('acceptance_check', 'context_ref', 'artifacts')})}\n"
                   f"{repo}Files handed to you:\n{files}\n{extra}\n"
@@ -465,7 +473,7 @@ class ModelSource:
 
     def answer_blocker(self, task: dict, worker: str, objective: dict, rules: list[str], blocker: dict,
                        artifact_index: list[str], **_) -> tuple[dict, dict]:
-        prompt = (ROLE_TEXT.get(worker, "") + "\n" + self._ctx(objective, rules) + "\n"
+        prompt = (self._head(worker, objective, rules) +
                   f"{blocker.get('raised_by')} raised a Blocker on {task['id']} ({task['title']}): "
                   f"{blocker.get('description')}\nArtifacts that exist: {json.dumps(artifact_index)}\n"
                   "Clear it using only the objective, the decided rules and the artifacts. If it needs a new product "

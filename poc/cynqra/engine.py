@@ -236,7 +236,10 @@ class Engine:
                    "target": target, "approval": approval, "result": {k: v for k, v in result.items() if k != "test_ids"}},
                    actor=worker_id, actor_type="worker", correlation_id=task_id,
                    policy_decision=decision["decision"], authority=auth, test_ids=result.get("test_ids"))
-        return {"status": "executed", "action": action, "result": result, "policy": decision}
+        out = {"status": "executed", "action": action, "result": result, "policy": decision}
+        if action_type == "run_tests":
+            out["report"] = report  # the whole run, output included, for the caller; the audit log keeps the summary
+        return out
 
     def _deny_target(self, action: dict, task_id: str, auth: str, why: str) -> dict:
         action.update({"status": "denied", "policy_decision": "DENY", "policy_reason": why})
@@ -742,7 +745,7 @@ class Engine:
         elif g["status"] != "executed":
             why = "the test run was refused: " + g["policy"]["reason"]
         elif not passed:
-            report = run_unittests(folder)
+            report = g["report"]  # the run just made; running every test again only to read its failures cost minutes
             why = failure_summary(report) + "\n" + report["output"][-1500:]
         elif (out / "app.py").exists():
             contract = deploy.contract_check(folder, self._smoke_checks(folder))

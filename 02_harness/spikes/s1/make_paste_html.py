@@ -9,7 +9,6 @@ the prompts only. The expected answers never leave corpus.json.
 from __future__ import annotations
 
 import html
-import json
 import sys
 from pathlib import Path
 
