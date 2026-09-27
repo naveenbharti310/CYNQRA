@@ -21,6 +21,18 @@ From the 02_harness folder, with one of these set:
   python spikes/test_spikes.py      harness tests, no key needed
   python kit/test_kit.py            verifier kit tests, no key needed
 
+With no key: an open model on this machine
+S1 and S2 can run on an open-weight model through the Cynqra desktop app's own
+llama-server, downloaded once from Hugging Face. Same runners, corpus, tasks,
+estimate and bars; token counts are measured by llama-server.
+
+  python spikes/run_local.py s1 qwen3.6-35b-a3b-q2 --app ../poc
+  python spikes/run_local.py s2 gpt-oss-20b --app ../poc
+
+On GitHub, a commit message containing [spikes] runs both spikes on both
+models (.github/workflows/cynqra-spikes.yml). A cost result belongs to the
+model and machine that produced it; local_run.json records both.
+
 Exit codes
 0 met the bar. 1 scored and missed the bar. 2 refused, nothing to score with.
 3 a model call failed, nothing scored, the spike is unrun. 4 wiring test only.

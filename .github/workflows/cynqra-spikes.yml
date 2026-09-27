@@ -1,0 +1,54 @@
+# S1 and S2, scored on open-weight models on GitHub's 16 GB Linux machine (4 threads, no GPU), with no
+# API key. The runners, corpus, tasks, locked estimate and bars in 02_harness/spikes are unchanged;
+# spikes/run_local.py only gives them the desktop app's own llama-server. Every report is printed to the
+# log and kept as an artifact. Runs when a commit message on the cynqra branch contains [spikes].
+name: cynqra-spikes
+
+on:
+  push:
+    branches: [cynqra]
+
+permissions:
+  contents: read
+
+jobs:
+  spike:
+    if: contains(github.event.head_commit.message, '[spikes]')
+    strategy:
+      fail-fast: false
+      matrix:
+        spike: [s1, s2]
+        model: [qwen3.6-35b-a3b-q2, gpt-oss-20b]
+    name: ${{ matrix.spike }} on ${{ matrix.model }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build the app (Linux), for its Python and llama-server
+        run: python3 desktop/build.py --target linux-x64 --stage-only
+      - name: Harness tests (no model)
+        run: cd 02_harness && python3 spikes/test_spikes.py
+      - name: Score the spike
+        run: |
+          set +e
+          cd 02_harness
+          ../dist/stage/linux-x64/Cynqra/python/bin/python3 -X utf8 spikes/run_local.py ${{ matrix.spike }} ${{ matrix.model }} --app ../poc
+          code=$?
+          echo "exit code $code (0 met the bar, 1 scored and missed, 2 refused, 3 a model call failed: unrun)"
+          [ $code -le 1 ] || exit $code
+      - name: Report
+        if: always()
+        run: |
+          cd 02_harness/spikes/${{ matrix.spike }}
+          for f in local_run.json ${{ matrix.spike }}_report.json ${{ matrix.spike }}_unrun.json; do
+            [ -f "$f" ] && { echo "==== $f"; cat "$f"; }
+          done
+          mkdir -p "$GITHUB_WORKSPACE/out" && cp -f *.json "$GITHUB_WORKSPACE/out/" 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ matrix.spike }}-${{ matrix.model }}
+          path: out/

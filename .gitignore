@@ -7,3 +7,6 @@ poc/demo/*.mp4
 poc/live_reports/run_*/
 exports/
 dist/
+02_harness/spikes/local_model_data/
+02_harness/spikes/s1/local_run.json
+02_harness/spikes/s2/local_run.json
