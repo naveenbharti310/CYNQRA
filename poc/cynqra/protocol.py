@@ -37,7 +37,7 @@ class ProtocolError(ValueError):
 
 def _shape(value, template):
     """A model's value in the template's shape: a list of text where the template holds a list, else one text.
-    A model that answers a field with a number, a list or an object is read, not trusted to be the right type."""
+    A model may answer a field with a number, a list or an object; it is converted here before anything uses it."""
     if isinstance(template, list):
         value = [value] if isinstance(value, str) else value if isinstance(value, list) else []
         return [v.strip() for v in value if isinstance(v, str) and v.strip()]

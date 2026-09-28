@@ -11,13 +11,13 @@ the code. All code paths are inside `poc/cynqra/` unless stated. The example thr
 | --- | --- | --- | --- | --- |
 | 1. The idea | The CEO describes the company in their own words. Cynqra turns it into a brief: product, customers, outcomes, success criteria, limits, priorities. What Cynqra filled in itself is marked for the CEO to check. | Everything after it is judged against this brief | CEO confirms it, sets the budget | `objective.py` |
 | 2. Requirements | The brief is split into requirements, each with an area (business, market, finance, legal, domain, AI and data, product, ...) | Every requirement must end up owned by someone and checked | Cynqra | `objective.py` |
-| 3. The team | Cynqra proposes the smallest team that covers every requirement. Expertise particular to the idea becomes a **Specialist** named from it (Bluedip: a Restaurant Revenue Management Specialist). Anything left uncovered is added by the platform and labelled. | A team chosen from the idea, not a fixed template | **CEO approves** (gate 1) | `synthesis.py`, `roles.py` |
+| 3. The team | Cynqra proposes the smallest team that covers every requirement. Expertise particular to the idea becomes a **Specialist** named from it (Bluedip: a Restaurant Revenue Management Specialist). Anything left uncovered is added by the platform and labelled. | The team fits the idea; there is no fixed template | **CEO approves** (gate 1) | `synthesis.py`, `roles.py` |
 | 4. The right AI per member | Each member is bound to the AI that measured best for its kind of work | Different work needs different strengths, and measured results beat opinions | Cynqra | `intelligence_layer/router.py`, `binding.py` |
 | 5. Plan and budget | Milestones, tasks, owners, dependencies, acceptance criteria, how each task will be checked, and a dollar budget per task | Nothing starts until the CEO sees who does what and what it costs | **CEO approves** (gate 2) | `planner.py`, `budget.py` |
 | 6. The work | Everyone works at the same time (below) | A real company works in parallel | The team | `engine.py` (`step`), `execution.py` |
 | 7. Checks | Every piece of work is checked before it counts as done | AI output reads the same whether it is right or wrong | Cynqra | `verifier.py` |
 | 8. When a member stops | Cynqra first finds out why. Only an AI that cannot do the role's work is replaced, and the CEO is told what the better one costs (below) | A provider's outage is not the AI's fault; a better AI costs more | Cynqra; the CEO only for money or accounts | `replacement.py`, `performance.py` |
-| 9. Delivery | The product is merged and put live; the CEO receives the Company Pack | The founder gets a result, not a transcript | **CEO accepts** | `delivery.py`, `deploy.py` |
+| 9. Delivery | The product is merged and put live; the CEO receives the Company Pack | The founder gets a working result to use | **CEO accepts** | `delivery.py`, `deploy.py` |
 
 ## How the team works together
 
@@ -37,7 +37,7 @@ before the next starts. Doubts go to the colleague who knows, because that is fa
 **How.** The slow part, the AI thinking, runs in parallel. Saving results, spending money and logging run one at a
 time, so the records always stay consistent. Models on one laptop take turns (a laptop runs one model at a time);
 online models run truly in parallel. Up to `parallel_workers` members (default 6) think at once. Messages between
-members are structured, hashed objects (Handoff, Blocker, Escalation, Approval), never free chat: `protocol.py`.
+members are structured, hashed objects (Handoff, Blocker, Escalation, Approval) with fixed fields: `protocol.py`.
 
 ## The team
 

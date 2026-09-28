@@ -8,7 +8,7 @@ far, then the next steps in order, each with its reason.
 
 ## What works today
 
-**Cynqra is a working proof of concept, not yet a product.** The whole flow exists and is tested. It has not yet
+**Cynqra is a working proof of concept. It is not a product yet.** The whole flow exists and is tested. It has not yet
 been proven end to end on strong real AI models in its current form.
 
 | Area | Status |
@@ -47,16 +47,16 @@ Hugging Face PRO. Nothing in it is scripted: it is the test of whether real AI m
 | # | What | Why this, and why now |
 | --- | --- | --- |
 | 1 | **The Bluedip run on real models**, then **the exam:** 20 real ideas, run end to end, measuring CEO decisions, time, cost and quality, against a single AI | Proof before more features. Every later change is measured against it. |
-| 2 | **Founder conversations:** show 10–20 target founders the Bluedip result; ask if they would pay, and how much | Confirms demand, price and the first buyer. |
+| 2 | **Founder conversations:** show 10 to 20 target founders the Bluedip result; ask if they would pay, and how much | Confirms demand, price and the first buyer. |
 | 3 | **Speed:** online models by default; smaller tasks; faster rescue when a task fails twice | Real runs took hours. |
-| 4 | **Tools for the experts:** web research with sources; a calculator for the CFO; real tool use for building, or hand building to proven coding agents | Experts need current facts, not memory. |
+| 4 | **Tools for the experts:** web research with sources; a calculator for the CFO; real tool use for building, or hand building to proven coding agents | Experts need current facts; a model's memory goes out of date. |
 | 5 | **Checks of substance:** facts against sources, numbers recomputed, documents consistent with each other, an independent reviewer | Trust is the product. |
 | 6 | **Kickoff agreements:** before parallel work starts, the team agrees on how the parts connect and the key facts | Parallel work must fit together. |
 | 7 | **Company memory:** a shared knowledge base; a CEO change updates every affected document | The team must stay consistent over time. |
 | 8 | **Field playbooks:** what companies in a field usually need, as a starting point the idea adjusts | Better teams, faster. |
 | 9 | **CEO experience:** plain decision cards, grouped decisions, phone notifications; a new demo video recorded on Bluedip | Less of the CEO's time; a pitch that shows the product. |
 | 10 | **Hosted web product:** accounts, separate data per customer, secrets manager, AI included in the price, billing | To sell it. |
-| 11 | **Security:** AI-written code run in a sandbox; content from the web or colleagues treated as data, never as instructions | Before any launch. |
+| 11 | **Security:** AI-written code run in a sandbox; content from the web or colleagues treated as data to read, with no power to give orders | Before any launch. |
 
 ## Known limits
 
@@ -64,8 +64,8 @@ Hugging Face PRO. Nothing in it is scripted: it is the test of whether real AI m
   live. Keys are kept out of its environment, but it could read files the user can read. Run only ideas you trust
   on a computer that holds nothing sensitive until the sandbox (roadmap 11) is built.
 - A release whose code listens on every network address (so anyone on the same network could use it) is refused
-  before preview. The check reads the code for the usual ways of writing that; it is a guard until the sandbox,
-  not a proof.
+  before preview. The check looks for the usual ways of writing that in the code. It can miss an unusual one, so
+  the sandbox is still needed.
 - Times are recorded in Indian Standard Time.
 - The desktop app's model server (llama-server) answers anything on this computer without a password, on a
   random port. A website that found the port could make the model work for it; it cannot read Cynqra's data.

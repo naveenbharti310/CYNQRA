@@ -233,7 +233,7 @@ class WorkforceTests(unittest.TestCase):
 
     def test_a_withdrawn_ai_moves_every_worker_on_it_and_the_ceo_is_told(self):
         """An AI that can no longer be used (here retired mid-run) is not waited for: every worker on it is given
-        another through the same evaluation, the work continues, and the CEO is informed, not asked."""
+        another through the same evaluation, the work continues, and the CEO is told, with no question to answer."""
         e = self.engine()
         self.assertTrue(all(binding.intelligence_of(e.store, w["id"]) == "model-a" for w in e.workers()))
         self.reg.retire("model-a", "superseded by its provider")

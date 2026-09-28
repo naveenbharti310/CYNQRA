@@ -30,11 +30,11 @@ Hiring that expertise takes months and money. Cynqra gives it on demand, and che
    name the team.
 2. **Cynqra works out the team this idea needs, and only that team.** Expertise particular to the idea becomes a
    Specialist named from it. You approve the team.
-3. **Each team member gets the best AI for its job**, chosen from measured results, not guesses. When a member
+3. **Each team member gets the best AI for its job**, chosen from measured results. When a member
    stops, Cynqra first finds out why; only an AI that cannot do the work is replaced, and you are told what the
    better one costs.
 4. **The team works like a real company.** Everyone works at the same time on their own part. When someone
-   finishes, they hand over. When someone has a doubt, they ask the right colleague, not you.
+   finishes, they hand over. When someone has a doubt, they ask the colleague who knows. You are left out of it.
 5. **Every piece of work is checked before it counts.** Code must pass its tests; a prediction model must beat a
    simple baseline on data it has not seen; foundation documents must say what is sourced, what is assumed, and
    what a professional must confirm.
@@ -57,7 +57,7 @@ it runs.
   loses to last week's numbers and goes back. The engineer's first version shows more customers than the owner's
   cap allows; the tests catch it.
 - **Doubts go to the right colleague.** No restaurant has entered its food cost yet, so the engineer asks the
-  Specialist, not the founder, what to use.
+  Specialist what to use, and the founder is not interrupted.
 - **The founder decides one real rule**, proposed by the CFO: how far an offer may go.
 - **The result is worth having.** In the live app, the owner's own 50% idea raises revenue and loses money after
   food cost, because customers who would have come anyway pay half too. Bluedip recommends 20% off, which earns

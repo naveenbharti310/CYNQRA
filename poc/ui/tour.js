@@ -2,7 +2,7 @@
 /* Plain words for what is on screen, from the same state the UI renders (GET /api/state).
    Used by the guide panel in the app and by the guided demo page (poc/demo), so a presenter
    and a first time viewer read the same explanation of each step. Written for the CEO:
-   what is happening and why it matters to them, never the names of the machinery. */
+   what is happening and why it matters to them, in their words. */
 const CynqraTour = (() => {
   let WORKERS = [];
   const who = (id) => { if (id === "orchestrator") return "Cynqra"; const w = WORKERS.find((x) => x.id === id); return w ? `the ${w.title}` : id || "a team member"; };
@@ -89,7 +89,7 @@ const CynqraTour = (() => {
     if (last.did === "completed" && t.attempts) return { chapter: CH.work, view: "work", title: `${Who(t.owner_worker_id)} fixes the work and sends it again`,
       body: "The failed check and its details went back to them, and they sent a corrected version. It still counts for nothing until every check runs again." };
     if (last.did === "completed") return { chapter: CH.work, view: "work", title: `${Who(t.owner_worker_id)} says "${t.title}" is done`,
-      body: `Done is a claim, not a result. ${files(t)} wait in their own workspace until Cynqra checks them.` };
+      body: `Saying it is done proves nothing yet. ${files(t)} wait in their own workspace until Cynqra checks them.` };
     if (last.did === "rework") {
       const v = lastVerification(st, t.id), failed = (v.checks && v.checks.failed) || [], bt = (v.checks || {}).backtest;
       if (bt && !bt.passed) return { chapter: CH.work, view: "work", title: "The forecast failed its test on real days",
@@ -101,7 +101,7 @@ const CynqraTour = (() => {
         body: `${Who(t.owner_worker_id)}'s work failed ${failed.length ? failed.join(", ") : "its checks"}. It goes back with the failure named and does not count as done. You are never asked: catching this is the checks' job.` };
     }
     if (last.did === "blocked") return { chapter: CH.work, view: "work", title: `${Who(t.owner_worker_id)} asks a colleague instead of guessing`,
-      body: `"${(t.blocker || {}).description || ""}" Guessing here could build the wrong thing. The question goes to ${who((t.blocker || {}).needs_from)}, not to you.` };
+      body: `"${(t.blocker || {}).description || ""}" Guessing here could build the wrong thing. The question goes to ${who((t.blocker || {}).needs_from)}. You are not interrupted.` };
     if (last.did === "blocker_cleared") {
       const a = (t.answers || []).slice(-1)[0] || {};
       return { chapter: CH.work, view: "work", title: `${Who(last.by)} answered, without you`,
@@ -127,7 +127,7 @@ const CynqraTour = (() => {
     if (last.did === "replaced" || last.did === "rerouted") return { chapter: CH.work, view: "workforce", title: last.did === "replaced" ? "A team member got a better AI" : "Work moved to a colleague",
       body: "The AI could not do this role's work: its work kept failing the checks. Cynqra picked another that passed a trial on this kind of work first, and told you why and what it costs. The team member keeps its name, role and history." };
     if (["model_error_retry", "waiting", "waiting_on_ceo", "stand_in"].includes(last.did)) return { chapter: CH.work, view: "work", title: "An AI provider is not answering",
-      body: "Cynqra checked why: it is the provider's side, not the AI's fault, so nothing is replaced. That work waits and tries again; the rest of the team keeps going." };
+      body: "Cynqra checked why: the fault is on the provider's side and the AI is fine, so nothing is replaced. That work waits and tries again; the rest of the team keeps going." };
     if (last.did === "retry" || last.did === "write_refused") return { chapter: CH.work, view: "work", title: "A reply was refused and tried again",
       body: "The reply broke a rule, so it was refused and the step runs again. After three refusals, Cynqra looks for a better AI or brings it to you." };
     return { chapter: CH.work, view: "work", title: "The team is at work", body: "Team members are handing work over and checking it. Nothing needs you right now." };

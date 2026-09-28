@@ -1,4 +1,4 @@
-"""Robustness: a model's answer is read, not trusted. A team whose answers arrive with fields missing, or of the
+"""Robustness: answers with missing fields or fields of the wrong type. A team whose answers arrive with fields missing, or of the
 wrong type (a number where text belongs, an object where a list belongs), must make Cynqra refuse, retry, rework,
 escalate or stop with a clear reason; it must never crash the run. The second audit's fuzzing found five such
 crashes, each of which would have stalled a live run; these tests keep them out."""

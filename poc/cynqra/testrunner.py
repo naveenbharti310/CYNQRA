@@ -76,8 +76,8 @@ def run_unittests(folder: Path, timeout: int = 120) -> dict:
         return {"ran": 0, "passed": False, "tests": [], "failed": [], "output": "no test files", "returncode": None,
                 "problem": ""}
     timed_out = False
-    # Output goes to files, not pipes: something a test started and left running would hold a pipe open, and the
-    # run would look hung after its tests had finished.
+    # Output goes to temporary files. With pipes, something a test started and left running would hold a pipe open,
+    # and the run would look hung after its tests had finished.
     with tempfile.TemporaryFile() as out_f, tempfile.TemporaryFile() as err_f:
         proc = subprocess.Popen(
             [python_exe(), "-m", "unittest", "discover", "-s", str(folder), "-p", "test_*.py", "-v"],

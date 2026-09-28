@@ -582,7 +582,7 @@ function vWorkforce() {
       ${tile(usd(L.reserve), "Reserve for retries and replacements")}${tile(`$${esc(s.time_value_per_hour)}/h`, "Value of an hour")}${tile((wf.replacements || []).length, "Replacements")}</div>
     <div class="card stack"><h2 style="font-size:17px">Models in use</h2><span class="small muted">Worker is not model: one model can power many workers, and workers with the same title can run on different models.</span>${reuse}</div>
     <div class="grid2">${workers}</div>
-    <h2 style="font-size:18px;margin:10px 0 4px">What Cynqra told you</h2><p class="small muted" style="margin:0 0 6px">A worker's AI is replaced only when it cannot do the role's work, never for a provider's outage or an account problem; you are told each time, with the cost.</p>${notes}
+    <h2 style="font-size:18px;margin:10px 0 4px">What Cynqra told you</h2><p class="small muted" style="margin:0 0 6px">A worker's AI is replaced only when it cannot do the role's work. A provider's outage or an account problem is waited out or brought to you. You are told each time, with the cost.</p>${notes}
     <h2 style="font-size:18px;margin:10px 0 4px">Replacements</h2>${reps}
     <div class="card"><h2 style="font-size:17px;margin-bottom:6px">Budget ledger</h2>${ledger || '<p class="muted small">Nothing allocated yet.</p>'}</div>`;
 }
@@ -807,7 +807,7 @@ function vAudit() {
   }).join("") : "";
   const banner = r && r.facts ? (r.complete ? `<div class="ok-banner">Replay complete: 8 of 8 facts present, ${r.events} events, ${r.test_ids.length} test ids</div>`
     : `<div class="bad-banner">Replay incomplete: missing ${esc(r.missing.join(", "))}</div>`) : "";
-  return `<p class="small muted" style="margin:0">Events are append only; the database refuses updates and deletes. A correction is a new event. Payloads carry ids and hashes, never personal data (D-22).</p>
+  return `<p class="small muted" style="margin:0">Events are append only; the database refuses updates and deletes. A correction is a new event. Payloads carry ids and hashes and no personal data (D-22).</p>
     <div class="audit"><div class="card evt"><table><colgroup><col style="width:46px"><col style="width:86px"><col style="width:204px"><col><col style="width:110px"><col style="width:150px"><col style="width:96px"></colgroup><thead><tr><th>Seq</th><th>Time</th><th>Event</th><th title="Correlation id">Correlation</th><th>Actor</th><th>Policy</th><th>Refs</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="card replay stack"><h2 style="font-size:17px">Replay a task</h2><select id="replay-task" aria-label="Task to replay">${opts}</select>
       <span class="small muted">Rebuilt from events and stored protocol objects only.</span>${facts}${banner}</div></div>`;

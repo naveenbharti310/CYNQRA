@@ -101,7 +101,7 @@ class ProviderAddresses(unittest.TestCase):
 
 class NoKeyInTheRecord(unittest.TestCase):
     def test_a_key_quoted_in_an_error_is_never_written(self):
-        """A provider's error message can quote the key it refused; the record keeps the message, not the key."""
+        """A provider's error message can quote the key it refused; the record keeps the message and drops the key."""
         from cynqra.db import KEY_REMOVED, Store
         tmp = TempDir()
         s = Store(str(tmp.path / "t.db"))
@@ -146,7 +146,7 @@ class NothingLeftRunning(unittest.TestCase):
             f"        {body}\n", encoding="utf-8")
 
     def test_a_hung_test_and_what_it_started_are_stopped(self):
-        """Found in the security audit: the timeout stopped the tests, not what they had started."""
+        """Found in the security audit: the timeout stopped the tests but left running what they had started."""
         self._repo("time.sleep(300)")
         r = run_unittests(self.tmp.path, timeout=3)
         self.assertFalse(r["passed"])
