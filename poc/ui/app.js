@@ -5,7 +5,7 @@
 const S = {
   st: null, view: "company", worker: null, replayTask: null, replay: null, replayKey: "",
   seen: -1, sig: "", err: "", busy: false, graph: null, mode: "demo", shown: new Set(), guide: true, modelOpen: false,
-  regOpen: false, probes: {}, sup: null, scenario: "candidate_tracker",
+  regOpen: false, probes: {}, sup: null, scenario: "bluedip",
 };
 /* Cards animate in only the first time they appear; a repaint must not replay it for every card. */
 const fresh = (key) => { if (S.shown.has(key)) return ""; S.shown.add(key); return "fresh"; };
@@ -152,16 +152,16 @@ function wizard() {
       ${S.mode === "demo" ? `<label class="lbl" for="scenario">Demo scenario</label>
         <select id="scenario" data-keep="no">${(st.scenarios || []).map((x) => `<option value="${esc(x.id)}" ${x.id === S.scenario ? "selected" : ""}>${esc(x.title)}</option>`).join("")}</select>
         <p class="small muted" style="margin:0">${esc(scen ? scen.about : "")}</p>` : intelSources()}`}` : "";
-  const right = obj ? objectiveCard(obj) : `<div class="card" style="flex:1;display:flex;align-items:center;justify-content:center"><p class="muted">Your structured objective appears here.</p></div>`;
+  const right = obj ? objectiveCard(obj) : `<div class="card" style="flex:1;display:flex;align-items:center;justify-content:center"><p class="muted">Your brief appears here.</p></div>`;
   return `<div class="wiz">${top}<div class="wiz-body">
     <div class="wiz-left">
       ${steps(0)}
-      <h1 class="hero">Tell Cynqra the company you want to build.</h1>
-      <p class="lede">You are the CEO. Describe the company and its product, a budget and any constraints; you do not name the team. Cynqra assembles the founding team it needs, from CTO and CFO to market, legal and security experts, gives each member the intelligence best suited to its work, and they work at the same time, handing over and asking each other as a real team does. You approve the team, then the roadmap and budget, and decide only what only a CEO should.</p>
+      <h1 class="hero">Describe the company you want to build.</h1>
+      <p class="lede">Cynqra assembles the expert team it needs, checks every piece of their work, and asks you only what a CEO should decide. You don't name the team: you approve it, then the plan and budget.</p>
       ${modeChoice}
-      <label class="lbl" for="messy">Your objective</label>
+      <label class="lbl" for="messy">Your company, in your own words</label>
       <textarea class="big" id="messy">${esc(obj ? obj.statement : scen ? scen.messy : "")}</textarea>
-      <div class="row"><button class="btn primary" id="structure" ${S.busy ? "disabled" : ""}>${obj ? "Structure it again" : "Structure my objective"}</button></div>
+      <div class="row"><button class="btn primary" id="structure" ${S.busy ? "disabled" : ""}>${obj ? "Make the brief again" : "Make it a brief"}</button></div>
       <div class="err" role="alert">${esc(S.err)}</div>
       <p class="small muted" style="margin:0">${S.mode === "demo" && phase === "new" || st.meta.mode === "demo"
         ? "Demo mode: the words the workers write come from a prepared script, and every screen says so. Code is still written, tested, backtested and deployed for real. Nothing to download or connect."
@@ -224,8 +224,8 @@ function workforceStep() {
   return `<div class="wiz-body">
     <div class="wiz-left">
       ${steps(1)}
-      <h1 class="hero">The workforce your objective needs.</h1>
-      <p class="lede">Cynqra decomposed the objective into ${req ? req.requirements.length : 0} requirements and synthesized the organization from its role catalog. You approve the organization; you do not have to build it.</p>
+      <h1 class="hero">The team your company needs.</h1>
+      <p class="lede">Cynqra broke your idea into ${req ? req.requirements.length : 0} requirements and chose the team that covers every one. You approve the team; you don't have to build it.</p>
       <div class="card stack"><div class="caps">Requirements</div>${reqList(req)}
         <div class="small">Workstreams: ${ws}</div><div class="small">Critical path: <span class="mono">${esc(((req || {}).critical_path || []).join(" > "))}</span></div></div>
       <div class="err" role="alert">${esc(S.err)}</div>
@@ -265,8 +265,8 @@ function planStep() {
   return `<div class="wiz-body">
     <div class="wiz-left">
       ${steps(2)}
-      <h1 class="hero">The roadmap and the budget.</h1>
-      <p class="lede">The approved organization, a model for every worker, the roadmap in milestones with owners and acceptance criteria, and the budget built on it. Nothing starts until you approve.</p>
+      <h1 class="hero">The plan and the budget.</h1>
+      <p class="lede">Who does what, in what order, how each piece of work is checked, which AI each team member uses, and what it all costs. Nothing starts until you approve.</p>
       <div class="card stack"><div class="caps">Intelligence for each worker</div>${staffed}
         <span class="small muted">Chosen by the Intelligence Router from the registry's measured evidence: the chance of passing verification, expected cost and time.${regModels().length === 1 ? " The registry holds one model, so every worker runs on it." : ""}</span></div>
       <div class="card stack"><div class="caps">Budget</div>${budgetTable(st.forecast)}</div>

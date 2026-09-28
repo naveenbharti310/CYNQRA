@@ -1,5 +1,9 @@
 # Cynqra product demo video
 
+**What:** the scripts that record a video of the demo. **Why:** a two-minute video shows Cynqra to people who will not
+run it. **How:** below. **Note:** the video and this script still show the earlier candidate-tracker demo; recording
+a new video of the Bluedip demo is on the roadmap (docs/3_STATUS_AND_ROADMAP.md).
+
 Cynqra_POC_demo.mp4 sits next to the project folder. It was 3 minutes 36 seconds,
 1920 x 1080, 30 frames a second, silent with on screen captions. Every screen in it is the real POC doing the real work in demo
 mode: the objective is structured, the organization runs, verification catches the

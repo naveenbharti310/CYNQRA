@@ -21,10 +21,14 @@ permissions:
   contents: read
 
 env:
+  # The Bluedip idea, the same as the demo that opens first (docs/5_DECISIONS.md, P9), with nothing scripted:
+  # the test of whether real AI models can do what the demo shows.
   OBJECTIVE: >-
-    I run a small bakery and my staff keep losing track of custom cake orders. I want a simple internal web page
-    where they can log an order with the pickup date, see what is due in the next few days, and mark orders as
-    paid and picked up. Nothing public, no card payments, and it has to run on the shop laptop.
+    I want to build Bluedip, an app that helps restaurant owners fill their quiet hours. It should predict
+    footfall and revenue for breakfast, lunch and dinner in real time, recommend offers for the slow periods,
+    and let an owner create a limited-time offer, like 50% off for at most 15 customers between 1 PM and 4 PM,
+    and see how many customers it will bring and what it does to revenue. First release for restaurant owners
+    only: no diner app and no payments.
   PYTHONUNBUFFERED: "1"
 
 jobs:
@@ -46,7 +50,7 @@ jobs:
       - name: The workforce demonstration
         run: |
           dist/stage/linux-x64/Cynqra/python/bin/python3 -X utf8 dist/stage/linux-x64/Cynqra/app/desktop.py \
-            --workforce local "$OBJECTIVE" --data "$RUNNER_TEMP/wf" --company "Bakery orders" --budget-usd 2 --max-minutes 300
+            --workforce local "$OBJECTIVE" --data "$RUNNER_TEMP/wf" --company "Bluedip" --budget-usd 2 --max-minutes 300
       - name: Report
         if: always()
         run: |
@@ -74,7 +78,7 @@ jobs:
           else echo "go=1" >> "$GITHUB_OUTPUT"; fi
       - name: The workforce demonstration
         if: steps.token.outputs.go == '1'
-        run: python3 poc/desktop.py --workforce hf "$OBJECTIVE" --data "$RUNNER_TEMP/wf" --company "Bakery orders" --budget-usd 5 --max-minutes 170
+        run: python3 poc/desktop.py --workforce hf "$OBJECTIVE" --data "$RUNNER_TEMP/wf" --company "Bluedip" --budget-usd 5 --max-minutes 170
       - name: Report
         if: always() && steps.token.outputs.go == '1'
         run: |

@@ -1,26 +1,43 @@
 # Cynqra
 
-**Your expert team, on demand.** You describe the company you want to build. Cynqra assembles the team it needs,
-gives each member the best AI for its job, and the team works together, like a real company, to deliver it. You are
-the CEO: you make only the decisions a CEO should.
+**Describe the company you want to build. Cynqra assembles the expert team it needs, checks every piece of their
+work, and asks you only what a CEO should decide.**
+
+| | |
+| --- | --- |
+| **What** | An expert team on demand, for any idea. You are the CEO. Cynqra works out which experts your idea needs, gives each the best AI for its job, and they work together like a real company. You receive the Company Pack: the foundation documents, the product, your decisions and what it cost. |
+| **Why** | Building a product has become cheap. Knowing what a real company needs, and trusting AI work you cannot judge yourself, has not. With a single AI chat you must know what to ask and check every answer; with Cynqra, the team does, and the work is checked before it counts. |
+| **How** | You describe the company. Cynqra proposes the team; you approve it, then the plan and budget. The team works at the same time, hands work over, and asks the right colleague when in doubt. Every piece of work passes an independent check. You decide only the real choices: money, risk, going live. |
+
+## See it: the Bluedip demo
+
+A founder describes **Bluedip**, an app that predicts a restaurant's footfall and revenue hour by hour and estimates
+what an offer will do before the owner runs it. Cynqra builds the team the idea needs: a Data Scientist, a Restaurant
+Revenue Management Specialist, a CFO, a Market Analyst, a Legal and Compliance Advisor, a Project Manager, a CTO and
+an engineer. They lay the company's foundation, build and check the models and the app, and put it live.
+
+In the live app, the owner's own idea, 50% off for at most 15 customers from 1 pm to 4 pm, turns out to raise revenue
+and **lose money after food cost**, because customers who would have come anyway pay half too. Bluedip recommends 20%
+off, which **earns money**. That is the depth a single AI chat does not give a founder: the right experts, and
+numbers you can check.
 
 ## Read these, in order
 
 | # | Document | What it answers | Time |
 | --- | --- | --- | --- |
-| 1 | [docs/1_VISION.md](docs/1_VISION.md) | What Cynqra is, for whom, and why it matters | 5 min |
-| 2 | [docs/2_HOW_IT_WORKS.md](docs/2_HOW_IT_WORKS.md) | How a project runs, step by step, and where each step is in the code | 10 min |
-| 3 | [docs/3_STATUS_AND_ROADMAP.md](docs/3_STATUS_AND_ROADMAP.md) | What works today, what is proven, and what to build next | 5 min |
-| 4 | [docs/4_RUN_AND_TEST.md](docs/4_RUN_AND_TEST.md) | How to run it, test it and build it | 5 min |
-| 5 | [docs/5_DECISIONS.md](docs/5_DECISIONS.md) | The decisions that are settled and must not be reopened without the founder | 5 min |
+| 1 | [docs/1_VISION.md](docs/1_VISION.md) | What Cynqra is, why it exists, how it works, for whom | 5 min |
+| 2 | [docs/2_HOW_IT_WORKS.md](docs/2_HOW_IT_WORKS.md) | How a project runs, step by step, why it is built that way, and where each step is in the code | 10 min |
+| 3 | [docs/3_STATUS_AND_ROADMAP.md](docs/3_STATUS_AND_ROADMAP.md) | What works today, what is proven, what comes next and why in that order | 5 min |
+| 4 | [docs/4_RUN_AND_TEST.md](docs/4_RUN_AND_TEST.md) | How to run it, test it and build it, and what each run proves | 5 min |
+| 5 | [docs/5_DECISIONS.md](docs/5_DECISIONS.md) | What is settled, and why | 5 min |
 
 ## The repository
 
 | Folder | What is in it |
 | --- | --- |
-| `poc/` | The product: the engine (`poc/cynqra/`), the web screens (`poc/ui/`), the tests (`poc/tests/`) |
+| `poc/` | The product: the engine (`poc/cynqra/`), the screens (`poc/ui/`), the demos (`poc/scenarios/`), the tests (`poc/tests/`) |
 | `desktop/` | Builds the installable app for Windows, macOS and Linux |
-| `.github/workflows/` | The automatic checks and the real-model test runs on GitHub |
+| `.github/workflows/` | The automatic checks and the real-AI test runs on GitHub |
 | `archive/` | History only: earlier plans, notes and experiments. Not needed to work on Cynqra |
 
 ## Start in one minute
@@ -29,4 +46,6 @@ the CEO: you make only the decisions a CEO should.
 python3 poc/run_poc.py
 ```
 
-A browser opens on the first screen. Choose **Demo** to watch a full project with nothing to install or pay for.
+A browser opens. Choose **Demo** and press **Make it a brief**: the Bluedip project runs from the founder's words to a
+live app, with nothing to install or pay for. The guide at the bottom of the screen says what is happening at each
+step, and why.

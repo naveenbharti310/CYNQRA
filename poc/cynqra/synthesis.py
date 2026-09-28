@@ -183,7 +183,7 @@ def propose(run, note: str = "") -> dict:
     total = sum(r["quantity"] for r in prop["roles"])
     costs = prop["cost_by_role"]
     run.decision("approve_workforce",
-                 problem=f"Cynqra proposes a {total}-worker organization for your objective. {prop['summary']}",
+                 problem=f"Cynqra proposes a team of {total} for your company. {prop['summary']}",
                  recommendation="Approve the proposed organization. Cynqra then assigns a model to every worker and "
                                 "builds the roadmap and the budget for your second approval.",
                  risk="LOW", confidence="medium",

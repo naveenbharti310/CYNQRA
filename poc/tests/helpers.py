@@ -92,7 +92,8 @@ def engine_to_running(folder: Path, mode: str = "demo", scenario: str = "candida
                       governance: dict | None = None, **engine_kw) -> Engine:
     e = Engine(folder, **engine_kw)
     e.create_company("Harbor Recruiting", mode, scenario)
-    messy = RESTAURANT["messy"] if scenario == "restaurant_forecast" else SCENARIO["messy"]
+    messy = json.loads((POC / "scenarios" / scenario / "scenario.json").read_text(encoding="utf-8"))["messy"] \
+        if mode == "demo" else SCENARIO["messy"]
     e.draft_objective(messy)
     if budget_usd is not None or governance:
         e.set_guardrails(budget_usd=budget_usd, governance=governance)

@@ -200,6 +200,86 @@ class JourneyTests(unittest.TestCase):
         self.assertEqual((econ["total_actual"], econ["cap_usd"]), (0.0, 5.0))
 
 
+class BluedipJourneyTests(unittest.TestCase):
+    """The demo that opens first. A founder describes Bluedip, an app that predicts a restaurant's footfall and
+    revenue hour by hour and estimates what an offer will do before it runs. The team the idea needs lays the
+    company's foundation, builds and checks the models and the app, and hands the CEO the Company Pack."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.saved = no_model_env()
+        cls.tmp = TempDir()
+        cls.e = engine_to_running(cls.tmp.path, scenario="bluedip")
+        cls.answered = run_journey(cls.e)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.e.close()
+        cls.tmp.cleanup()
+        restore_env(cls.saved)
+
+    def call(self, path, body=None):
+        req = urllib.request.Request(self.e.live_url() + path, data=None if body is None else json.dumps(body).encode(),
+                                     method="POST" if body is not None else "GET",
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return json.loads(r.read())
+
+    def test_the_team_follows_the_idea(self):
+        titles = sorted(w["title"] for w in self.e.workers())
+        self.assertEqual(titles, sorted(["Business Lead", "Project Manager", "Senior Data Scientist",
+                                         "Restaurant Revenue Management Specialist", "CFO", "Market Analyst",
+                                         "Legal and Compliance Advisor", "CTO", "Software Engineer"]))
+
+    def test_the_company_pack_holds_the_foundation_all_checked(self):
+        self.assertEqual(self.e.meta["phase"], "accepted")
+        pack = self.e.final_report()["company_pack"]
+        authors = {d["author"] for d in pack["documents"] if d["verified"]}
+        self.assertTrue({"Business Lead", "Market Analyst", "Restaurant Revenue Management Specialist",
+                         "Legal and Compliance Advisor", "CFO", "Senior Data Scientist", "Project Manager"} <= authors)
+        docs = self.e.paths["main"] / "docs"
+        for name, marks in (("market_analysis.md", ["Assumption", "No market-size figure"]),
+                            ("revenue_management_report.md", ["Sourced", "Confirm with a professional"]),
+                            ("compliance_register.md", ["Sourced", "Assumption", "Confirm with a professional"]),
+                            ("financial_model.md", ["assumption", "month 19", "₹85 lakh"]),
+                            ("business_brief.md", ["**What.**", "**Why.**", "**How.**"])):
+            text = (docs / name).read_text(encoding="utf-8")
+            for m in marks:
+                self.assertIn(m, text, f"{name}: trust is the product")
+
+    def test_the_checks_caught_two_mistakes_before_they_counted(self):
+        vs = {t: [v["verdict"] for v in self.e.store.all("verification") if v["task_id"] == t] for t in ("t_06", "t_10")}
+        self.assertEqual(vs, {"t_06": ["REQUIRES_REWORK", "VERIFIED"], "t_10": ["REQUIRES_REWORK", "VERIFIED"]})
+        first = next(v for v in self.e.store.all("verification") if v["task_id"] == "t_06")
+        self.assertGreater(first["checks"]["backtest"]["model_mae"], first["checks"]["backtest"]["baseline_mae"])
+
+    def test_a_doubt_went_to_the_right_colleague_not_the_ceo(self):
+        cleared = self.e.store.all("blocker_cleared")
+        self.assertEqual([(b["task_id"], b["by"], b["founder_involved"]) for b in cleared],
+                         [("t_10", "w_spec_revenue_management", False)])
+
+    def test_the_ceo_decided_only_ceo_questions(self):
+        self.assertEqual([d["kind"] for d in self.answered], ["decision", "review_merge", "deploy", "accept_delivery"])
+        self.assertEqual(self.answered[0]["source"], "w_cfo")
+        self.assertIn("50%", (self.e.paths["main"] / "docs" / "DECISIONS.md").read_text(encoding="utf-8"))
+
+    def test_the_live_app_shows_the_owners_example_loses_money_and_a_better_offer(self):
+        day = self.call("/api/day")
+        self.assertEqual([r["slot"] for r in day["recommendations"]], ["breakfast", "lunch", "dinner"])
+        lunch = next(s for s in day["slots"] if s["slot"] == "lunch")
+        self.assertEqual(lunch["quiet"], [13, 16], "1 pm to 4 pm")
+        r = self.call("/api/offers/estimate", {"start": 13, "end": 16, "discount": 0.5, "cap": 15})
+        self.assertLessEqual(r["estimate"]["customers_using"], 15)
+        if r["estimate"]["expected_without"] > 5:
+            self.assertGreater(r["estimate"]["revenue_change"], 0)
+            self.assertLess(r["estimate"]["margin_change"], 0)
+            self.assertGreater(r["better"]["margin_change"], 0)
+
+    def test_every_task_replays_completely(self):
+        for t in self.e.tasks():
+            self.assertTrue(self.e.replay(t["id"])["complete"], t["id"])
+
+
 class RestaurantJourneyTests(unittest.TestCase):
     """The second demo: a nine-worker organization, seven documents, a forecast the platform backtests (its first
     method fails and is reworked), a store, an app, acceptance tests, a merge and a deploy by DevOps."""

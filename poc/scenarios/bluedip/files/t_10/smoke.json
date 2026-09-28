@@ -1,0 +1,10 @@
+{
+  "note": "Smoke checks for the deploy step. Preview runs all of them; live runs only the GET checks, so production data is never touched.",
+  "checks": [
+    {"method": "GET", "path": "/health", "expect": 200},
+    {"method": "GET", "path": "/api/day", "expect": 200},
+    {"method": "GET", "path": "/api/offers", "expect": 200},
+    {"method": "POST", "path": "/api/offers/estimate", "body": {"start": 13, "end": 16, "discount": 0.2, "cap": 12}, "expect": 200},
+    {"method": "GET", "path": "/pay", "expect": 404}
+  ]
+}

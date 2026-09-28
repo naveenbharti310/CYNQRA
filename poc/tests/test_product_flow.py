@@ -317,6 +317,17 @@ class ScenariosAreHonestTests(unittest.TestCase):
     def test_candidate_tracker(self):
         self.check("candidate_tracker", 4)
 
+    def test_bluedip(self):
+        prop, plan = self.check("bluedip", 9)
+        spec = next(w for w in prop["workers"] if w["role"] == "Specialist")
+        self.assertEqual((spec["id"], spec["title"]),
+                         ("w_spec_revenue_management", "Restaurant Revenue Management Specialist"))
+        docs = {d for t in plan["tasks"] if t["kind"] == "document" for d in t["documents"]}
+        self.assertTrue({"market_analysis", "gtm_plan", "financial_model", "risk_compliance", "specialist_report",
+                         "method"} <= docs)
+        self.assertEqual([t["kind"] for t in plan["tasks"]].count("forecast"), 1, "the model is backtested")
+        self.assertEqual(roles.assigner(prop["workers"]), "w_pm")
+
     def test_restaurant_forecast(self):
         prop, plan = self.check("restaurant_forecast", 9)
         kinds = [t["kind"] for t in plan["tasks"]]

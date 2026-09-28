@@ -1,58 +1,99 @@
 # 1. Vision
 
-## The problem
-
-AI is everywhere. Anyone can use the strongest models, and people now try two or three new ideas a day.
-
-The problem is not access to AI. **It is knowing how to use it:**
-
-- **Which expertise does this idea need?** A founder with an idea outside their own field does not know what a
-  CTO, a CFO or an expert in that field would ask, check or build.
-- **What must a real company have?** Architecture, product definition, finances, legal and compliance, a plan to
-  reach customers. A non-expert does not know the list, or what good looks like.
-- **Who keeps the work on track?** With a single AI chat, the person must steer it minute by minute: re-explain,
-  correct, check, push it forward. Their time and attention become the bottleneck.
-
-Hiring that expertise (a CTO, a CPO, a CFO, domain experts) takes months and money.
+**Describe the company you want to build. Cynqra assembles the expert team it needs, checks every piece of their
+work, and asks you only what a CEO should decide.**
 
 ## What Cynqra is
 
-**An expert team, on demand, for any idea.**
+An expert team on demand, for any idea. The founder is the CEO. Cynqra works out which experts the idea needs,
+gives each one the best AI for its job, and runs them like a real company. The founder decides only what a CEO
+should, and receives the result as the Company Pack.
 
-1. **You are the CEO.** You describe the company you want to build: the product, a budget, any constraints.
-   You do not name the team.
-2. **Cynqra builds the team that this idea needs, and only that team.** The team always depends on the idea: a
-   bakery chain gets a food-safety specialist, a health app gets a clinical-safety specialist, a software company
-   gets a CTO and engineers. You approve the team.
-3. **Each team member gets the best AI for its job.** Cynqra measures which model does which kind of work best.
-   When a member stops, Cynqra first finds out why. A provider's outage is waited out; only an AI that cannot do the
-   work is replaced by a better one, and you are told what it costs. The team member keeps its identity and its work.
+## Why it exists
+
+Building a product has become cheap. Knowing what a real company needs has not.
+
+- **Which expertise does this idea need?** A founder with an idea outside their own field does not know what a
+  data scientist, a CFO or an expert in that field would ask, check or build.
+- **What must a real company have?** A product, and around it a market, a financial model, legal and compliance,
+  and the field's own rules. A non-expert does not know the list, or what good looks like.
+- **Can I trust what I get?** A polished answer from an AI reads the same whether it is right or wrong, and a
+  non-expert cannot tell the difference.
+- **Who keeps the work on track?** With a single AI chat, the founder must steer minute by minute: re-explain,
+  correct, check, push it forward. Their attention becomes the bottleneck.
+
+Hiring that expertise takes months and money. Cynqra gives it on demand, and checks it.
+
+## How it works
+
+1. **You are the CEO.** You describe the company in your own words: the product, a budget, any limits. You do not
+   name the team.
+2. **Cynqra works out the team this idea needs, and only that team.** Expertise particular to the idea becomes a
+   Specialist named from it. You approve the team.
+3. **Each team member gets the best AI for its job**, chosen from measured results, not guesses. When a member
+   stops, Cynqra first finds out why; only an AI that cannot do the work is replaced, and you are told what the
+   better one costs.
 4. **The team works like a real company.** Everyone works at the same time on their own part. When someone
-   finishes, they hand over. When someone has a doubt, they ask the right colleague. They settle what they can
-   among themselves.
-5. **Nothing counts as done on a worker's word.** Code must pass its tests. Documents must say what is sourced, what
-   is assumed, and what a real professional must confirm.
+   finishes, they hand over. When someone has a doubt, they ask the right colleague, not you.
+5. **Every piece of work is checked before it counts.** Code must pass its tests; a prediction model must beat a
+   simple baseline on data it has not seen; foundation documents must say what is sourced, what is assumed, and
+   what a professional must confirm.
 6. **You decide only what a CEO should:** the team, the plan and budget, and the few real choices the team brings
-   you.
-7. **You receive the result:** the company's foundation documents, the product built and checked, your decisions,
-   and what it cost.
+   you, such as a rule on money, merging the product or putting it live.
+7. **You receive the Company Pack.**
 
-**The measure of success: how few times the CEO is needed, for a result that is verified.**
+## The example: Bluedip
+
+A founder describes Bluedip: an app that helps restaurant owners fill their quiet hours. It predicts footfall and
+revenue for every hour and meal, recommends offers for breakfast, lunch and dinner, and lets an owner create a
+limited-time offer, such as 50% off for at most 15 customers between 1 pm and 4 pm, and see what it will do before
+it runs.
+
+- **The team follows the idea.** Bluedip is a prediction business, so it gets a Data Scientist. Whether a discount
+  earns money is its field, so it gets a Restaurant Revenue Management Specialist. It also gets a CFO, a Market
+  Analyst, a Legal and Compliance Advisor, a Business Lead, a Project Manager, a CTO and an engineer. It gets no
+  Security Expert yet: release 1 holds no diner data and takes no payments.
+- **The work is checked.** The platform tests the footfall forecast on days it has not seen; the first version
+  loses to last week's numbers and goes back. The engineer's first version shows more customers than the owner's
+  cap allows; the tests catch it.
+- **Doubts go to the right colleague.** No restaurant has entered its food cost yet, so the engineer asks the
+  Specialist, not the founder, what to use.
+- **The founder decides one real rule**, proposed by the CFO: how far an offer may go.
+- **The result is worth having.** In the live app, the owner's own 50% idea raises revenue and loses money after
+  food cost, because customers who would have come anyway pay half too. Bluedip recommends 20% off, which earns
+  money.
+
+## What you get: the Company Pack
+
+- **The foundation documents**, each written by the right expert and checked: in Bluedip's case the business
+  brief, the market analysis and launch plan, the financial model, the compliance register, the revenue management
+  report, and how the models work.
+- **The product**, built, tested and live.
+- **Your decisions**, and the questions the team settled without you.
+- **What it cost**, in dollars, per team member and per task.
+
+**The measure of success: how few times the CEO is needed, for a result that is checked.**
 
 ## Who it is for
 
-- **First:** founders and builders who try many ideas and do not have every expertise themselves.
-- **Next:** startup studios, accelerators and investors who assess many ideas.
-- **Later:** innovation teams inside larger companies.
+- **First (to be tested):** first-time founders with an idea outside their own field, who cannot yet hire the
+  experts it needs.
+- **The alternative first buyer, tested in the same founder conversations:** startup studios and accelerators, who
+  judge many ideas and have budgets.
+- **Later:** investors assessing ideas, and innovation teams inside larger companies.
 
 ## What makes it different
 
-| | A single AI chat | An agent manager (for example Paperclip) | Cynqra |
-| --- | --- | --- | --- |
-| Who decides which experts are needed? | You | You | **Cynqra, from your idea** |
-| Who picks the AI for each job? | You | You | **Cynqra, from measured results** |
-| Who supervises the work? | You, minute by minute | You | **The team itself; you only decide** |
-| Is the work checked before it counts? | No | By approval | **Yes, independently** |
+Others build what you describe. **Cynqra works out what your idea needs, checks the work, and asks you only the
+CEO's questions.**
+
+| | What it is built for | What Cynqra adds |
+| --- | --- | --- |
+| A single AI chat (ChatGPT, Claude, Gemini) | Answering what you ask | You do not need to know what to ask |
+| App builders (Lovable, Bolt, Replit Agent) | Turning your description into an app | The company around the product: market, money, legal, the field's own expertise |
+| AI software teams (MGX, from MetaGPT) | A team of AI roles building the software you describe | A team chosen from your idea, business experts and field specialists included |
+| General agents (Manus, ChatGPT agent) | Carrying out a task you describe | A whole company's work, split, handed over and checked |
+| Agent managers (Paperclip) | Running AI agents in an organisation you design | Cynqra designs the organisation from your idea |
 
 ## What Cynqra is not
 

@@ -315,7 +315,7 @@ def selftest(args) -> int:
     tmp = Path(tempfile.mkdtemp(prefix="selftest_", dir=data_dir()))  # inside the data folder, whatever its path
     check("Python", lambda: f"{platform.python_version()} at {sys.executable}")
     check("App files", lambda: _need([HERE / "ui" / "index.html", HERE / "ui" / "app.js", HERE / "ui" / "icon.png",
-                                      HERE / "scenarios" / "candidate_tracker" / "scenario.json",
+                                      HERE / "scenarios" / "bluedip" / "scenario.json",
                                       HERE / "cynqra" / "objective_prompt.txt"]))
 
     def servers():

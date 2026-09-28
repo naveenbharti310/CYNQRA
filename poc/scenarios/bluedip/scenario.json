@@ -1,0 +1,809 @@
+{
+  "id": "bluedip",
+  "title": "Bluedip: fill a restaurant's quiet hours",
+  "about": "A founder describes Bluedip, an app that predicts a restaurant's footfall and revenue hour by hour and estimates what an offer will really do before the owner runs it. Cynqra builds the team the idea needs: a Data Scientist for the models, a Restaurant Revenue Management Specialist, a CFO, a Market Analyst, a Legal and Compliance Advisor, a Project Manager, a CTO and an engineer. They work at the same time; the platform backtests the forecast (its first version fails), the engineer asks the Specialist instead of guessing, the CEO decides one rule on discounts, and the app goes live. The owner's own example, 50% off for 15 customers from 1 to 4 pm, turns out to raise revenue and lose money; Bluedip recommends the offer that earns it.",
+  "note": "Prepared script for demo mode. Every word a worker says in demo mode comes from this file, and the product shows that. The models and the app in files/ are real: they are tested, backtested and deployed for real.",
+  "settings": {
+    "self_checks": 0
+  },
+  "messy": "I want to build Bluedip, an app that helps restaurant owners fill their quiet hours. It should predict footfall and revenue for breakfast, lunch and dinner in real time, recommend offers for the slow periods, and let an owner create a limited-time offer, like 50% off for at most 15 customers between 1 PM and 4 PM, and see how many customers it will bring and what it does to revenue. First release for restaurant owners only: no diner app and no payments.",
+  "objective": {
+    "product": "Bluedip: an app that helps restaurant owners fill their quiet hours with offers that earn money",
+    "target_customer": "Owners of independent restaurants and small chains in Indian cities",
+    "primary_outcome": "Owners see expected footfall and revenue for every hour and meal, and run offers that fill quiet hours without losing margin",
+    "business_outcome": "Restaurants pay a monthly subscription because Bluedip adds more margin than it costs",
+    "success_criteria": "A live app that predicts footfall and revenue by hour and estimates the customers, revenue and margin an offer brings, and a checked business plan",
+    "constraints": "No diner-facing app or payments in the first release; every estimate shows the assumptions behind it",
+    "priorities": "Honest estimates first, then recommendations for each meal, then growth",
+    "inferred_fields": [
+      "business_outcome",
+      "priorities"
+    ],
+    "missing_fields": []
+  },
+  "requirements": {
+    "outcomes": [
+      "Owners see their day's footfall and revenue before it happens",
+      "Every offer is estimated, in customers, revenue and margin, before it runs",
+      "Restaurants pay for Bluedip because it adds more than it costs"
+    ],
+    "requirements": [
+      {
+        "id": "r_01",
+        "area": "business",
+        "text": "Bluedip helps restaurant owners fill quiet hours with offers that earn money.",
+        "verification": "Business brief"
+      },
+      {
+        "id": "r_02",
+        "area": "market",
+        "text": "Who pays, what they use today, the competitors and a launch plan, each claim sourced or marked as an assumption.",
+        "verification": "Market analysis and launch plan"
+      },
+      {
+        "id": "r_03",
+        "area": "finance",
+        "text": "Price, costs, the month Bluedip breaks even and the funding it needs.",
+        "verification": "Financial model"
+      },
+      {
+        "id": "r_04",
+        "area": "legal",
+        "text": "Advertising of offers, data protection and tax on discounted bills, with what a professional must confirm.",
+        "verification": "Compliance register"
+      },
+      {
+        "id": "r_05",
+        "area": "domain",
+        "text": "Revenue management: when a discount earns money and when it only gives it away.",
+        "verification": "Specialist report"
+      },
+      {
+        "id": "r_06",
+        "area": "ai_ml",
+        "text": "Predict footfall and revenue for every hour and meal, checked on days the model has not seen.",
+        "verification": "Method, and the platform's backtest"
+      },
+      {
+        "id": "r_07",
+        "area": "ai_ml",
+        "text": "Estimate the customers, revenue and margin an offer brings, and learn from each finished offer.",
+        "verification": "Method, and the offer tests"
+      },
+      {
+        "id": "r_08",
+        "area": "finance",
+        "text": "How far an offer may go is a rule for the founder to decide.",
+        "verification": "Founder decision on record"
+      },
+      {
+        "id": "r_09",
+        "area": "functional",
+        "text": "An owner creates a limited-time offer with a window, a discount and a maximum number of customers, which is never exceeded.",
+        "verification": "Offer and app tests"
+      },
+      {
+        "id": "r_10",
+        "area": "functional",
+        "text": "A recommended offer, or none, for breakfast, lunch and dinner.",
+        "verification": "Offer and app tests"
+      },
+      {
+        "id": "r_11",
+        "area": "design",
+        "text": "One screen: the day by hour, the meals with their recommendations, and the offer builder with its estimate.",
+        "verification": "App test fetches the page"
+      },
+      {
+        "id": "r_12",
+        "area": "deployment",
+        "text": "Bluedip runs on the company's own host.",
+        "verification": "Health check and smoke test on the live address"
+      },
+      {
+        "id": "r_13",
+        "area": "product",
+        "text": "Release 1 is for restaurant owners only: no diner-facing app and no payments.",
+        "verification": "Smoke test and acceptance check"
+      }
+    ],
+    "workstreams": [
+      {
+        "id": "ws_business",
+        "name": "Business foundation",
+        "requirement_ids": [
+          "r_01",
+          "r_02",
+          "r_03",
+          "r_04",
+          "r_05",
+          "r_08"
+        ],
+        "depends_on": []
+      },
+      {
+        "id": "ws_models",
+        "name": "Prediction models",
+        "requirement_ids": [
+          "r_06",
+          "r_07"
+        ],
+        "depends_on": []
+      },
+      {
+        "id": "ws_app",
+        "name": "The owner's app",
+        "requirement_ids": [
+          "r_09",
+          "r_10",
+          "r_11",
+          "r_13"
+        ],
+        "depends_on": [
+          "ws_business",
+          "ws_models"
+        ]
+      },
+      {
+        "id": "ws_release",
+        "name": "Release",
+        "requirement_ids": [
+          "r_12"
+        ],
+        "depends_on": [
+          "ws_app"
+        ]
+      }
+    ]
+  },
+  "workforce": {
+    "summary": "A company built on prediction, not only an app. A Data Scientist owns the footfall and offer models; a Restaurant Revenue Management Specialist, because whether a discount earns money is this company's field; a CFO, a Market Analyst and a Legal and Compliance Advisor for the business foundation; a Business Lead runs the business side for the founder; a Project Manager coordinates; a CTO and one engineer build and release the owner's app. No Security Expert yet: release 1 holds no diner data and takes no payments.",
+    "roles": [
+      {
+        "role": "CEO",
+        "quantity": 1,
+        "why": "Runs the business side for the founder and writes the brief everyone works from.",
+        "requirement_ids": [
+          "r_01",
+          "r_13"
+        ]
+      },
+      {
+        "role": "PM",
+        "quantity": 1,
+        "why": "Hands out the work, keeps it moving, and writes the app's spec and acceptance checks.",
+        "requirement_ids": [
+          "r_09"
+        ]
+      },
+      {
+        "role": "DataScientist",
+        "quantity": 1,
+        "why": "Bluedip is its predictions: the footfall forecast, the offer estimate, and how both learn.",
+        "requirement_ids": [
+          "r_06",
+          "r_07"
+        ]
+      },
+      {
+        "role": "Specialist",
+        "field": "revenue management",
+        "title": "Restaurant Revenue Management Specialist",
+        "quantity": 1,
+        "why": "Knows when a discount earns money and when it only gives it away: the core of every recommendation.",
+        "requirement_ids": [
+          "r_05"
+        ]
+      },
+      {
+        "role": "CFO",
+        "quantity": 1,
+        "why": "Price, costs, break-even and funding, and the rule on how deep an offer may go.",
+        "requirement_ids": [
+          "r_03",
+          "r_08"
+        ]
+      },
+      {
+        "role": "MarketAnalyst",
+        "quantity": 1,
+        "why": "Who pays, what they use today, and how to reach the first restaurants.",
+        "requirement_ids": [
+          "r_02"
+        ]
+      },
+      {
+        "role": "LegalAdvisor",
+        "quantity": 1,
+        "why": "Offers must not mislead diners; data and tax rules apply to every offer.",
+        "requirement_ids": [
+          "r_04"
+        ]
+      },
+      {
+        "role": "CTO",
+        "quantity": 1,
+        "why": "Owns the release: reviews it, proposes the merge and the deploy.",
+        "requirement_ids": [
+          "r_12"
+        ]
+      },
+      {
+        "role": "Engineer",
+        "quantity": 1,
+        "why": "Builds the owner's app on the Data Scientist's models.",
+        "requirement_ids": [
+          "r_09",
+          "r_10",
+          "r_11"
+        ]
+      }
+    ]
+  },
+  "plan": {
+    "workstreams": [
+      {
+        "id": "ws_business",
+        "name": "Business foundation"
+      },
+      {
+        "id": "ws_models",
+        "name": "Prediction models"
+      },
+      {
+        "id": "ws_app",
+        "name": "The owner's app"
+      },
+      {
+        "id": "ws_release",
+        "name": "Release"
+      }
+    ],
+    "milestones": [
+      {
+        "id": "m_1",
+        "name": "Business foundation and models ready",
+        "due_day": 3
+      },
+      {
+        "id": "m_2",
+        "name": "The owner's app built and checked",
+        "due_day": 5
+      },
+      {
+        "id": "m_3",
+        "name": "Bluedip live",
+        "due_day": 6
+      }
+    ],
+    "tasks": [
+      {
+        "id": "t_01",
+        "workstream_id": "ws_business",
+        "kind": "document",
+        "owner_worker_id": "w_ceo",
+        "title": "Business brief",
+        "inputs": "Confirmed objective",
+        "expected_output": "business_brief.md",
+        "dependencies": [],
+        "deadline_day": 1,
+        "milestone_id": "m_1",
+        "acceptance_criteria": [
+          "What Bluedip is, why owners need it and how it works",
+          "The founder's constraints stated"
+        ],
+        "requirement_ids": [
+          "r_01",
+          "r_13"
+        ],
+        "documents": [
+          "business_brief"
+        ]
+      },
+      {
+        "id": "t_02",
+        "workstream_id": "ws_business",
+        "kind": "document",
+        "owner_worker_id": "w_market",
+        "title": "Market analysis and launch plan",
+        "inputs": "Business brief",
+        "expected_output": "market_analysis.md and launch_plan.md",
+        "dependencies": [
+          "t_01"
+        ],
+        "deadline_day": 2,
+        "milestone_id": "m_1",
+        "acceptance_criteria": [
+          "Customers, competitors and positioning, each claim sourced or marked as an assumption",
+          "A launch plan with its metrics"
+        ],
+        "requirement_ids": [
+          "r_02"
+        ],
+        "documents": [
+          "market_analysis",
+          "gtm_plan"
+        ]
+      },
+      {
+        "id": "t_03",
+        "workstream_id": "ws_business",
+        "kind": "document",
+        "owner_worker_id": "w_spec_revenue_management",
+        "title": "When an offer earns money",
+        "inputs": "Business brief",
+        "expected_output": "revenue_management_report.md",
+        "dependencies": [
+          "t_01"
+        ],
+        "deadline_day": 2,
+        "milestone_id": "m_1",
+        "acceptance_criteria": [
+          "The rules that decide whether a discount earns money",
+          "Recommendations, and what a professional must confirm"
+        ],
+        "requirement_ids": [
+          "r_05"
+        ],
+        "documents": [
+          "specialist_report"
+        ]
+      },
+      {
+        "id": "t_04",
+        "workstream_id": "ws_business",
+        "kind": "document",
+        "owner_worker_id": "w_legal",
+        "title": "Compliance register",
+        "inputs": "Business brief",
+        "expected_output": "compliance_register.md",
+        "dependencies": [
+          "t_01"
+        ],
+        "deadline_day": 2,
+        "milestone_id": "m_1",
+        "acceptance_criteria": [
+          "Every rule that applies, with its source",
+          "Risks, and who must confirm what"
+        ],
+        "requirement_ids": [
+          "r_04"
+        ],
+        "documents": [
+          "risk_compliance"
+        ]
+      },
+      {
+        "id": "t_05",
+        "workstream_id": "ws_models",
+        "kind": "document",
+        "owner_worker_id": "w_ds",
+        "title": "How the models work",
+        "inputs": "Business brief",
+        "expected_output": "method.md",
+        "dependencies": [
+          "t_01"
+        ],
+        "deadline_day": 2,
+        "milestone_id": "m_1",
+        "acceptance_criteria": [
+          "The forecast, the hourly split, the correction during the day and the offer estimate, explained",
+          "How each is evaluated"
+        ],
+        "requirement_ids": [
+          "r_06",
+          "r_07"
+        ],
+        "documents": [
+          "method"
+        ]
+      },
+      {
+        "id": "t_06",
+        "workstream_id": "ws_models",
+        "kind": "forecast",
+        "owner_worker_id": "w_ds",
+        "title": "Footfall forecast",
+        "inputs": "Method",
+        "expected_output": "forecast.py and its tests",
+        "dependencies": [
+          "t_05"
+        ],
+        "deadline_day": 3,
+        "milestone_id": "m_1",
+        "acceptance_criteria": [
+          "forecast(history, horizon) returns covers a day",
+          "It beats last week's numbers on days it has not seen"
+        ],
+        "requirement_ids": [
+          "r_06"
+        ]
+      },
+      {
+        "id": "t_07",
+        "workstream_id": "ws_business",
+        "kind": "document",
+        "owner_worker_id": "w_cfo",
+        "title": "Financial model",
+        "inputs": "Market analysis and launch plan",
+        "expected_output": "financial_model.md",
+        "dependencies": [
+          "t_02"
+        ],
+        "deadline_day": 3,
+        "milestone_id": "m_1",
+        "acceptance_criteria": [
+          "Price, costs, break-even and funding",
+          "The assumptions that move the answer most"
+        ],
+        "requirement_ids": [
+          "r_03"
+        ],
+        "documents": [
+          "financial_model"
+        ]
+      },
+      {
+        "id": "t_08",
+        "workstream_id": "ws_business",
+        "kind": "decision",
+        "owner_worker_id": "w_cfo",
+        "title": "How far may an offer go?",
+        "inputs": "Revenue management report, financial model",
+        "expected_output": "A rule, as an Approval",
+        "dependencies": [
+          "t_03",
+          "t_07"
+        ],
+        "deadline_day": 3,
+        "milestone_id": "m_1",
+        "acceptance_criteria": [
+          "The founder has decided how far an offer may go"
+        ],
+        "requirement_ids": [
+          "r_08"
+        ]
+      },
+      {
+        "id": "t_09",
+        "workstream_id": "ws_app",
+        "kind": "document",
+        "owner_worker_id": "w_pm",
+        "title": "App spec and acceptance checks",
+        "inputs": "Business brief, method",
+        "expected_output": "product_spec.md and acceptance.md",
+        "dependencies": [
+          "t_01",
+          "t_05"
+        ],
+        "deadline_day": 3,
+        "milestone_id": "m_2",
+        "acceptance_criteria": [
+          "Users and what is out of scope",
+          "Numbered acceptance checks for every rule"
+        ],
+        "requirement_ids": [
+          "r_09",
+          "r_10",
+          "r_11",
+          "r_13"
+        ],
+        "documents": [
+          "product_spec",
+          "acceptance"
+        ]
+      },
+      {
+        "id": "t_10",
+        "workstream_id": "ws_app",
+        "kind": "code",
+        "owner_worker_id": "w_eng",
+        "title": "The owner's app",
+        "inputs": "Spec, acceptance checks, the forecast, the rule on record",
+        "expected_output": "store.py, demand.py, offers.py, app.py, index.html and their tests",
+        "dependencies": [
+          "t_06",
+          "t_08",
+          "t_09"
+        ],
+        "deadline_day": 5,
+        "milestone_id": "m_2",
+        "acceptance_criteria": [
+          "Every acceptance check passes as a test",
+          "GET /health and GET / answer 200",
+          "No payment or diner route"
+        ],
+        "requirement_ids": [
+          "r_07",
+          "r_09",
+          "r_10",
+          "r_11"
+        ]
+      },
+      {
+        "id": "t_11",
+        "workstream_id": "ws_release",
+        "kind": "review_merge",
+        "owner_worker_id": "w_cto",
+        "title": "Review and merge release 1",
+        "inputs": "Integration branch",
+        "expected_output": "Release 1 on main",
+        "dependencies": [
+          "t_10"
+        ],
+        "deadline_day": 6,
+        "milestone_id": "m_3",
+        "acceptance_criteria": [
+          "Every test passes on main after the merge"
+        ],
+        "requirement_ids": [
+          "r_09",
+          "r_10"
+        ]
+      },
+      {
+        "id": "t_12",
+        "workstream_id": "ws_release",
+        "kind": "deploy",
+        "owner_worker_id": "w_cto",
+        "title": "Put Bluedip live",
+        "inputs": "Main",
+        "expected_output": "Bluedip at a live address",
+        "dependencies": [
+          "t_11"
+        ],
+        "deadline_day": 6,
+        "milestone_id": "m_3",
+        "acceptance_criteria": [
+          "Health and smoke checks pass on the live address"
+        ],
+        "requirement_ids": [
+          "r_12"
+        ]
+      }
+    ]
+  },
+  "assign": {
+    "t_02": {
+      "artifacts": [
+        "t_01/business_brief.md"
+      ],
+      "context_ref": "objective v1, business brief",
+      "acceptance_check": "Who pays for Bluedip, what they use today, and how to reach the first restaurants. Mark every estimate as an assumption: the CFO builds the financial model on your launch numbers."
+    },
+    "t_03": {
+      "artifacts": [
+        "t_01/business_brief.md"
+      ],
+      "context_ref": "objective v1, business brief",
+      "acceptance_check": "When does a discount earn a restaurant money, and when does it only give it away? The Data Scientist and the engineer build the recommendations on your answer."
+    },
+    "t_04": {
+      "artifacts": [
+        "t_01/business_brief.md"
+      ],
+      "context_ref": "objective v1, business brief",
+      "acceptance_check": "The rules that apply to advertising offers, to data and to tax on discounted bills, each with its source and who must confirm it."
+    },
+    "t_05": {
+      "artifacts": [
+        "t_01/business_brief.md"
+      ],
+      "context_ref": "objective v1, business brief",
+      "acceptance_check": "Explain the models the owner's numbers come from: covers a day, by hour and meal, the correction during the day, and an offer's estimate; and how each is evaluated."
+    },
+    "t_06": {
+      "artifacts": [
+        "t_05/method.md"
+      ],
+      "context_ref": "objective v1, the method",
+      "acceptance_check": "forecast.py with forecast(history, horizon) and its tests. The platform backtests it on days it has not seen, against last week's numbers."
+    },
+    "t_07": {
+      "artifacts": [
+        "t_01/business_brief.md",
+        "t_02/market_analysis.md",
+        "t_02/launch_plan.md"
+      ],
+      "context_ref": "objective v1, the Market Analyst's handoff",
+      "acceptance_check": "Price, costs, break-even and funding, built on the launch plan's numbers. Say which assumptions move the answer most."
+    },
+    "t_08": {
+      "artifacts": [
+        "t_03/revenue_management_report.md",
+        "t_07/financial_model.md"
+      ],
+      "context_ref": "objective v1, the Specialist's report",
+      "acceptance_check": "Owners will set their own discounts. Bring the founder one rule on how far an offer may go, with its cost."
+    },
+    "t_10": {
+      "artifacts": [
+        "t_09/product_spec.md",
+        "t_09/acceptance.md",
+        "t_05/method.md"
+      ],
+      "context_ref": "objective v1, the decided rule on offers",
+      "acceptance_check": "Build store.py, demand.py (on forecast.py), offers.py, app.py (JSON API and /health, PORT from the environment) and index.html, with test_offers.py and test_app.py covering acceptance checks 1 to 9. Offers follow the decided rule. No payment or diner route."
+    }
+  },
+  "work": {
+    "t_01": [
+      {
+        "result": "done",
+        "summary": "Business brief: what Bluedip is, why owners need it, how it works, and the risks.",
+        "files": {
+          "business_brief.md": "@files/t_01/business_brief.md"
+        },
+        "acceptance_check": "The founder's constraints and success criteria are all addressed."
+      }
+    ],
+    "t_02": [
+      {
+        "result": "done",
+        "summary": "Market analysis and launch plan; competitors described by what they do, no market size invented.",
+        "files": {
+          "market_analysis.md": "@files/t_02/market_analysis.md",
+          "launch_plan.md": "@files/t_02/launch_plan.md"
+        },
+        "acceptance_check": "Customers, competitors, positioning and sources; channels, launch and metrics."
+      }
+    ],
+    "t_03": [
+      {
+        "result": "done",
+        "summary": "Why margin, not revenue, decides an offer; five recommendations; what to confirm.",
+        "files": {
+          "revenue_management_report.md": "@files/t_03/revenue_management_report.md"
+        },
+        "acceptance_check": "Findings, recommendations, sources, confirm with a professional."
+      }
+    ],
+    "t_04": [
+      {
+        "result": "done",
+        "summary": "Five rules with their sources, four risks and who must confirm what.",
+        "files": {
+          "compliance_register.md": "@files/t_04/compliance_register.md"
+        },
+        "acceptance_check": "Regulations, risks, confirm with a professional."
+      }
+    ],
+    "t_05": [
+      {
+        "result": "done",
+        "summary": "The five steps from history to an offer's estimate, and how each is evaluated.",
+        "files": {
+          "method.md": "@files/t_05/method.md"
+        },
+        "acceptance_check": "Method and evaluation."
+      }
+    ],
+    "t_06": [
+      {
+        "result": "done",
+        "summary": "Forecast: the average of the last four weeks, and six tests.",
+        "files": {
+          "forecast.py": "@files/t_06/attempt1/forecast.py",
+          "test_forecast.py": "@files/t_06/test_forecast.py"
+        },
+        "acceptance_check": "python -m unittest test_forecast"
+      },
+      {
+        "result": "done",
+        "summary": "The backtest showed one average misses the week's pattern; now the same weekday over four weeks.",
+        "files": {
+          "forecast.py": "@files/t_06/forecast.py",
+          "test_forecast.py": "@files/t_06/test_forecast.py"
+        },
+        "acceptance_check": "python -m unittest test_forecast"
+      }
+    ],
+    "t_07": [
+      {
+        "result": "done",
+        "summary": "₹1,999 a month per restaurant; break-even in month 19; raise ₹85 lakh.",
+        "files": {
+          "financial_model.md": "@files/t_07/financial_model.md"
+        },
+        "acceptance_check": "Costs, pricing, revenue, funding, assumptions."
+      }
+    ],
+    "t_08": [
+      {
+        "result": "proposal",
+        "problem": "Owners will set their own discounts. A deep one can fill the room and still lose money, because customers who would have come anyway pay less too; an app that lets that happen without saying so loses the owner's trust.",
+        "recommendation": "No offer deeper than 50%, and none that takes the bill below its food cost. Every offer shows its margin change after food cost before it is created, and a better offer when there is one.",
+        "evidence_refs": [
+          "t_03/revenue_management_report.md",
+          "t_07/financial_model.md"
+        ],
+        "cost": "some owners will want deeper discounts than Bluedip allows",
+        "confidence": "medium",
+        "what_would_change_this": "Pilot results showing offers deeper than 50% adding margin in some restaurants."
+      }
+    ],
+    "t_09": [
+      {
+        "result": "done",
+        "summary": "App spec and nine acceptance checks.",
+        "files": {
+          "product_spec.md": "@files/t_09/product_spec.md",
+          "acceptance.md": "@files/t_09/acceptance.md"
+        },
+        "acceptance_check": "Every rule of the brief and the founder's constraints is covered."
+      }
+    ],
+    "t_10": [
+      {
+        "result": "blocked",
+        "category": "missing_input",
+        "description": "The spec says every offer shows its margin change after food cost, but no restaurant has entered its food cost yet, and the sample restaurant has none. I will not invent a food cost.",
+        "needs_from": "w_spec_revenue_management"
+      },
+      {
+        "result": "done",
+        "summary": "Demand by hour, the offer estimate and recommendations, the app and 23 tests.",
+        "files": {
+          "store.py": "@files/t_10/store.py",
+          "demand.py": "@files/t_10/demand.py",
+          "app.py": "@files/t_10/app.py",
+          "index.html": "@files/t_10/index.html",
+          "test_offers.py": "@files/t_10/test_offers.py",
+          "test_app.py": "@files/t_10/test_app.py",
+          "smoke.json": "@files/t_10/smoke.json",
+          "offers.py": "@files/t_10/attempt1/offers.py"
+        },
+        "acceptance_check": "python -m unittest"
+      },
+      {
+        "result": "done",
+        "summary": "Fixed the estimate: it ignored the cap, so a busy window showed more customers than the owner allowed.",
+        "files": {
+          "store.py": "@files/t_10/store.py",
+          "demand.py": "@files/t_10/demand.py",
+          "app.py": "@files/t_10/app.py",
+          "index.html": "@files/t_10/index.html",
+          "test_offers.py": "@files/t_10/test_offers.py",
+          "test_app.py": "@files/t_10/test_app.py",
+          "smoke.json": "@files/t_10/smoke.json",
+          "offers.py": "@files/t_10/offers.py"
+        },
+        "acceptance_check": "python -m unittest"
+      }
+    ],
+    "t_11": [
+      {
+        "result": "proposal",
+        "problem": "Release 1 of Bluedip is checked on the integration branch and not yet on main.",
+        "recommendation": "Approve the merge to main. Every test passes on the release candidate, including the forecast's.",
+        "cost": "no model cost: a test run and a merge on this machine",
+        "confidence": "high",
+        "what_would_change_this": "Any failing test."
+      }
+    ],
+    "t_12": [
+      {
+        "result": "proposal",
+        "problem": "Bluedip is merged and checked, but not live, so the pilot restaurants cannot use it yet.",
+        "recommendation": "Approve. Put release 1 live, then run the health check and the smoke test.",
+        "cost": "no model cost: a release on the company's own host",
+        "confidence": "high",
+        "what_would_change_this": "A failing smoke test.",
+        "side_action": {
+          "action_type": "external_message",
+          "target": "pilot restaurants",
+          "summary": "Email the twenty pilot restaurants that Bluedip is live."
+        }
+      }
+    ]
+  },
+  "answer_blocker": {
+    "t_10": {
+      "artifacts": [
+        "t_03/revenue_management_report.md"
+      ],
+      "context_ref": "revenue management report, recommendation 4",
+      "acceptance_check": "Use 35% of the average bill as the food cost until the owner enters their own, and show it on screen as an assumption, next to every margin figure. Ask for the real figure on first use. Never hide it: a margin figure is only as good as its food cost."
+    }
+  }
+}

@@ -1,6 +1,8 @@
 # Live reports
 
-`live_check.py` writes one JSON and one Markdown report per run here. Run folders
+**What:** reports of earlier runs on real AI models. **Why** they are kept: they are the evidence behind the
+real-model results in docs/3_STATUS_AND_ROADMAP.md. **How:** `live_check.py` writes one JSON and one Markdown report
+per run here. Run folders
 (`run_*`) are scratch and ignored by git.
 
 ## 26 September 2026, 17:05: PASS, command model (not a measured API result)

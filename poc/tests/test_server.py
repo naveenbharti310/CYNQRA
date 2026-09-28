@@ -84,7 +84,7 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(st["live_url"])
         self.assertEqual(st["budget"]["settings"]["budget_usd"], 2.5)
         self.assertEqual(st["objective"]["founder_constraints"], {"deadline": "a week"})
-        self.assertEqual({s["id"] for s in st["scenarios"]}, {"candidate_tracker", "restaurant_forecast"})
+        self.assertEqual({s["id"] for s in st["scenarios"]}, {"bluedip", "candidate_tracker", "restaurant_forecast"})
         code, rep = self.call("/api/replay/t_03")
         self.assertTrue(rep["complete"])
         code, g = self.call("/api/graph?q=approves&subject=deploy_production")

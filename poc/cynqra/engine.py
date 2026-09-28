@@ -39,7 +39,7 @@ from .intelligence_layer import IntelligenceSupply, SupplyError, VersionChanged,
 from .intelligence_layer.registry import RegistryError
 from .protocol import ProtocolError, build
 
-DEFAULT_SCENARIO = "candidate_tracker"
+DEFAULT_SCENARIO = "candidate_tracker"  # the smallest demo, for self-tests; the app opens on Bluedip (ui/app.js)
 # One model on this machine answers one call at a time: local calls take turns; hosted ones run side by side.
 _LOCAL_CALLS = threading.Lock()
 
@@ -62,7 +62,7 @@ class Engine:
     """The run. It implements the run contract (run.Run) for the engines, and the founder's controls for the app."""
 
     def __init__(self, data_dir: Path, intelligence=None, supply: IntelligenceSupply | None = None):
-        self.dir = Path(data_dir)
+        self.dir = Path(data_dir).resolve()  # workers' tests run from inside it: a relative path would break them
         self.dir.mkdir(parents=True, exist_ok=True)
         self.store = Store(str(self.dir / "cynqra.db"))
         self.paths = {k: self.dir / k for k in ("workspaces", "integration", "main", "releases", "live", "exports",

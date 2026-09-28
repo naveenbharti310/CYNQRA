@@ -1,5 +1,8 @@
 # Building the Cynqra desktop app
 
+**What:** how the installable Cynqra app for Windows, macOS and Linux is built. **Why:** a founder should be able to
+try Cynqra with one download, and run an AI on their own computer with nothing leaving it. **How:** below.
+
 `build.py` turns `poc/` into an installable app for one platform. GitHub Actions runs it on each
 platform (`.github/workflows/cynqra-desktop.yml`); you can also run it on a machine of that platform:
 
