@@ -35,6 +35,7 @@ Triggers:
 """
 from __future__ import annotations
 
+import re
 import shutil
 import time
 
@@ -47,14 +48,19 @@ from .probe import regression_check
 
 MAX_REPLACEMENTS = 2  # intelligence changes per task before the founder decides
 
-# Why a call failed, from what the provider said. Checked in this order; anything unrecognised counts as the
-# provider's side, which is the cautious reading: waiting costs time, replacing a capable AI costs its record.
-CAUSES = (
-    ("no_credit", ("402", "credit", "billing", "insufficient", "payment required", "exceeded your")),
-    ("access", ("401", "403", "unauthorized", "forbidden", "api key", "invalid key", "authentication")),
-    ("rate_limit", ("429", "rate limit", "too many requests", "quota")),
-    ("timeout", ("timed out", "timeout")),
-    ("withdrawn", ("retired", "connection was removed", "regression check")),
+# Why a call failed. The provider's HTTP status says it best ("HTTP 402 from provider: ..."); the words of the
+# message are read only when there is no status, and only as whole phrases, so a port number such as :40312 or a
+# local "insufficient memory" is never mistaken for a refused key or an empty account. Anything unrecognised counts
+# as the provider's side, the cautious reading: waiting costs time, replacing a capable AI costs its record.
+_STATUS = re.compile(r"\bHTTP (\d{3})\b")
+_CREDIT = re.compile(r"credits?\b|billing|payment required|insufficient[_ ](quota|credit|balance|funds)", re.I)
+PHRASES = (
+    ("no_credit", _CREDIT),
+    ("access", re.compile(r"invalid api key|unauthori[sz]ed|forbidden|authentication|is not set\b|"
+                          r"credential is missing|stored key is missing", re.I)),
+    ("rate_limit", re.compile(r"rate limit|too many requests", re.I)),
+    ("timeout", re.compile(r"timed out|\btimeout\b", re.I)),
+    ("withdrawn", re.compile(r"\bretired\b|connection was removed|regression check", re.I)),
 )
 PLAIN = {"outage": "its provider is not answering", "timeout": "its provider took too long to answer",
          "rate_limit": "its provider is limiting how often it may be called",
@@ -69,9 +75,23 @@ def diagnose(error: str) -> str:
     """Why a call failed: outage, timeout, rate_limit, no_credit, access, or withdrawn (the AI can no longer be used).
     None of these says the AI cannot do the work; that is known only from its work (verification, cut-offs,
     protocol violations, its measured record)."""
-    e = (error or "").lower()
-    for cause, signs in CAUSES:
-        if any(x in e for x in signs):
+    e = error or ""
+    m = _STATUS.search(e)
+    if m:
+        code = int(m.group(1))
+        if code == 402 or (code == 429 and _CREDIT.search(e)):  # an empty account can answer 429 too
+            return "no_credit"
+        if code in (401, 403):
+            return "access"
+        if code == 404:  # the provider no longer serves this model
+            return "withdrawn"
+        if code == 429:
+            return "rate_limit"
+        if code in (408, 504):
+            return "timeout"
+        return "outage"
+    for cause, pattern in PHRASES:
+        if pattern.search(e):
             return cause
     return "outage"
 

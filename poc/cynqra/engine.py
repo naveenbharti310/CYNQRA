@@ -44,6 +44,12 @@ DEFAULT_SCENARIO = "candidate_tracker"  # the smallest demo, for self-tests; the
 _LOCAL_CALLS = threading.Lock()
 
 
+# Decisions the proposer can revise with the CEO's note. For the others (an escalation, the budget cap, a provider
+# account, an outage, the delivery, a change of objective) "request more evidence" would act as a rejection, which
+# can stop the run, so it is refused: those take approve or reject.
+EVIDENCE_KINDS = ("decision", "review_merge", "deploy", "approve_workforce", "approve_roadmap")
+
+
 class EngineError(RuntimeError):
     pass
 
@@ -488,6 +494,8 @@ class Engine:
                 raise EngineError(f"decision {decision_id} is already {d['status']}")
             if action not in ("approve", "reject", "request_evidence"):
                 raise EngineError(f"unknown action {action}")
+            if action == "request_evidence" and d["kind"] not in EVIDENCE_KINDS:
+                raise EngineError("this decision takes approve or reject; there is no proposal to revise")
             edited = {k: v for k, v in (edited or {}).items() if v not in (None, "", [])}
             if action == "approve" and edited:
                 self._check_edit(d, edited)  # a refused edit leaves the decision pending, nothing recorded
@@ -761,6 +769,8 @@ class Engine:
                        if k in objective.FIELDS and str(v).strip() and str(v).strip() != obj["structured"][k]}
             if not changes:
                 return obj
+            if self.meta["phase"] == "paused_objective":  # a second change would remember "paused" as the phase to
+                raise EngineError("a change of objective is already waiting for your answer; answer it first")
             affected = [t["id"] for t in self.tasks() if t["status"] != "VERIFIED"]
             self.decision("objective_change", problem="You changed the objective during a run. The run is paused.",
                           recommendation="Reconfirm with the change. Verified work stays; open tasks continue against "

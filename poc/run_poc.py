@@ -18,7 +18,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from cynqra.server import App, make_server  # noqa: E402
+from cynqra.server import App, make_server, stop_on_terminate  # noqa: E402
 
 
 def main() -> int:
@@ -31,6 +31,7 @@ def main() -> int:
     server = make_server(app, args.port)
     url = f"http://127.0.0.1:{server.server_address[1]}"
     print(f"Cynqra POC running at {url}  (Ctrl+C to stop)", flush=True)
+    stop_on_terminate()
     if not args.no_browser:
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()
     try:

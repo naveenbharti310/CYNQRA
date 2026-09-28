@@ -9,7 +9,7 @@ POST /api/covers      {"date": "YYYY-MM-DD", "covers": n}: record a day's covers
 import json
 import math
 import os
-from datetime import date, timedelta
+from datetime import timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 

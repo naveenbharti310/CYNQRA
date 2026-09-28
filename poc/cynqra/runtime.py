@@ -2,7 +2,7 @@
 
 The desktop app ships llama-server. On first use this module downloads the model's GGUF file
 from Hugging Face (resumable, checked against the published size and SHA-256), starts
-llama-server with the settings from the research (poc/research/local_open_models_2026-09.md),
+llama-server with the settings from the research (archive/05_model_research/local_open_models_2026-09.md),
 and points model_adapter at its OpenAI-compatible endpoint on 127.0.0.1. Prompts and answers
 never leave the machine; the only network traffic is the one-time model download.
 """
@@ -32,7 +32,7 @@ GB = 1024 ** 3
 
 # The models, best first. Each names the exact file at its publisher, then mirrors of the same quantization.
 # size_gb is the download in GiB; min_gb the machine memory it needs beside the app. The choices by memory
-# come from the research (poc/research/) and a measured race on a 16 GB machine without a GPU
+# come from the research (archive/05_model_research/) and a measured race on a 16 GB machine without a GPU
 # (.github/workflows/cynqra-model-race.yml, 26 Sep 2026): on Cynqra's own work, Qwen3.6 35B-A3B at 2 and 3
 # bits read about twice as fast as the dense Qwen3.5 9B and wrote about 1.5 times as fast, and still passed
 # with 5 GB of the 16 held by other programs. The smallest 2-bit file failed and is kept out of the list.

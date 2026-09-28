@@ -51,6 +51,29 @@ class ApiTests(unittest.TestCase):
         except urllib.error.HTTPError as exc:
             return exc.code, json.loads(exc.read() or b"{}")
 
+    def test_other_websites_cannot_use_the_api(self):
+        """Found in the audit: a page on any website could send commands to this server (for example connect a
+        "provider" at its own address with the founder's key from the environment), and a name pointed at
+        127.0.0.1 could read it."""
+        def raw(path, headers, body=None):
+            req = urllib.request.Request(self.base + path, data=body, headers=headers,
+                                         method="POST" if body is not None else "GET")
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return r.status
+            except urllib.error.HTTPError as exc:
+                return exc.code
+        cmd = json.dumps({"on": True}).encode()
+        port = self.srv.server_address[1]
+        self.assertEqual(raw("/api/state", {"Host": f"attacker.example:{port}"}), 403, "DNS rebinding")
+        self.assertEqual(raw("/api/killswitch", {"Origin": "https://attacker.example", "Content-Type": "application/json"},
+                             cmd), 403, "a page on another website")
+        self.assertEqual(raw("/api/killswitch", {"Content-Type": "text/plain"}, cmd), 403, "a form or no-cors request")
+        self.assertFalse(self.app.engine.meta["frozen"], "nothing was done")
+        self.assertEqual(raw("/api/killswitch", {"Origin": f"http://127.0.0.1:{port}",
+                                                 "Content-Type": "application/json"}, cmd), 200, "Cynqra's own page")
+        self.assertEqual(raw("/api/state", {"Host": f"localhost:{port}"}), 200)
+
     def test_serves_the_ui_and_blocks_traversal(self):
         code, body = self.call("/")
         self.assertEqual(code, 200)
@@ -129,7 +152,8 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.call("/api/company", {"name": "X", "scenario": "../../etc"})[0], 400)
         self.assertEqual(self.call("/api/decisions/dec_nope", {"action": "approve"})[0], 400)
         self.assertEqual(self.call("/api/replay/t_99")[0], 400)
-        req = urllib.request.Request(self.base + "/api/company", data=b"not json", method="POST")
+        req = urllib.request.Request(self.base + "/api/company", data=b"not json", method="POST",
+                                     headers={"Content-Type": "application/json"})
         with self.assertRaises(urllib.error.HTTPError) as ctx:
             urllib.request.urlopen(req, timeout=5)
         self.assertEqual(ctx.exception.code, 400)

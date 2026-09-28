@@ -6,4 +6,6 @@ run or build Cynqra; start with the [README](../README.md).
 
 Kept unchanged for reference: the original canon books and decisions (`00_canon/`), the earlier experiment harness
 (`02_harness/`, still used by the `cynqra-spikes` and `cynqra-hf` workflows), the earlier browser reports
-(`03_pages/`), and earlier notes, reviews and run logs (`old_docs/`).
+(`03_pages/`), the first screen mock-ups the UI was built from (`04_design_mockups/`), the September 2026 research
+on open models for laptops that the desktop app's model choices come from (`05_model_research/`), and earlier notes,
+reviews and run logs (`old_docs/`).

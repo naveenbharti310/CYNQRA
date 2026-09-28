@@ -1,6 +1,6 @@
 "use strict";
 /* Cynqra POC web UI. Plain JavaScript, no build step. Polls /api/state and renders.
-   Screens follow the mockups in poc/design/mockups (Book 0 sections 21 and 22). */
+   Screens follow the mockups in archive/04_design_mockups/mockups (Book 0 sections 21 and 22). */
 
 const S = {
   st: null, view: "company", worker: null, replayTask: null, replay: null, replayKey: "",
@@ -23,6 +23,8 @@ const KIND_TITLE = {
   objective_change: "Objective change", approve_workforce: "Proposed workforce", approve_roadmap: "Roadmap and budget",
   provider_outage: "An AI provider stopped answering", provider_account: "A provider account needs you",
 };
+// Decisions the proposer can revise with the CEO's note (cynqra/engine.py EVIDENCE_KINDS); the others take approve or reject.
+const EVIDENCE_KINDS = ["decision", "review_merge", "deploy", "approve_workforce", "approve_roadmap"];
 const AREA_TITLE = { product: "Product", functional: "Functional", non_functional: "Non-functional", ai_ml: "AI and ML", data: "Data",
   design: "Design", security: "Security", qa: "QA", devops: "DevOps", deployment: "Deployment" };
 const CONSTRAINTS = [["deadline", "Deadline"], ["geography", "Geography"], ["technology", "Technology"], ["compliance", "Compliance"], ["risk_tolerance", "Risk tolerance"]];
@@ -760,7 +762,7 @@ function vDecisions() {
       <label class="lbl" for="note_${d.id}">Reason, if you reject or ask for more</label><textarea class="note" id="note_${d.id}" data-keep="yes"></textarea>
       <div class="row"><button class="btn primary" data-decide="approve" data-id="${d.id}" ${S.busy ? "disabled" : ""}>Approve</button>
         <button class="btn" data-decide="reject" data-id="${d.id}" ${S.busy ? "disabled" : ""}>Reject</button>
-        <button class="btn" data-decide="request_evidence" data-id="${d.id}" ${S.busy ? "disabled" : ""}>Request more evidence</button></div></div>`;
+        ${EVIDENCE_KINDS.includes(d.kind) ? `<button class="btn" data-decide="request_evidence" data-id="${d.id}" ${S.busy ? "disabled" : ""}>Request more evidence</button>` : ""}</div></div>`;
   };
   const answered = (st.decisions.answered || []).map((d) => `<div class="kv"><span>${esc(KIND_TITLE[d.kind] || d.kind)}${d.task_id ? " · " + esc(d.task_id) : ""}</span>
     <span style="color:${d.status === "approved" ? "var(--green)" : "var(--red)"}">${esc(d.outcome_label)}</span></div>`).join("") || `<span class="muted small">Nothing yet.</span>`;

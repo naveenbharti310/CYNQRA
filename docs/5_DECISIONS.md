@@ -26,7 +26,7 @@ founder's explicit agreement, and record the change here.
 | T2 | **Members coordinate by Handoff (done) and Blocker (doubt)**, to the right colleague, not through the CEO. | The colleague who knows answers faster and better, and every exchange stays on record. |
 | T3 | **AI thinking runs in parallel; recording results runs one at a time.** | Speed from parallel AI calls, without the records ever conflicting. |
 | T4 | **Cynqra first finds out why a member stopped.** A provider outage or an account problem is not the AI's fault: the member waits (or a stand-in the CEO allowed covers the wait) and nothing is replaced. **Only an AI that cannot do the role's work is replaced**, by a better one that passes a check first, and **the CEO is told, with the price** of the better AI against the old one. The member keeps its identity, role and history. A new model version runs only after it passes a check. | Replacing a capable AI for a provider's outage throws away its record; a better AI usually costs more, so the CEO must know. |
-| T5 | **US dollars are the only budget.** A breaker stops all work at the cap until the CEO decides. | One currency the CEO understands, and no surprise bills. |
+| T5 | **US dollars are the only budget.** A breaker stops all work at the cap until the CEO decides. AI calls already running when the cap is reached finish, so spending can pass the cap by up to one round of calls. | One currency the CEO understands, and no surprise bills. |
 
 ## Intelligence
 
@@ -48,3 +48,4 @@ founder's explicit agreement, and record the change here.
 | E2 | **The repository is private.** Heavy GitHub runs start only when asked. | The free minutes stay for when they matter. |
 | E3 | **Every change keeps all tests passing** before it is pushed. | The whole flow keeps working after every change. |
 | E4 | **Documentation is these five documents and the README**, each answering what, why and how. Anything historical goes to `archive/`, unchanged. | One place to read, and nothing stale to mislead. |
+| E5 | **Cynqra's local server answers only Cynqra's own page and tools:** requests must be addressed to this computer by name, a browser request must come from Cynqra's page, and a command must be JSON. | Any website open in the same browser could otherwise send it commands, for example to send a key from the environment to an address of its choosing. |

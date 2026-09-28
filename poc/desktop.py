@@ -39,7 +39,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 from cynqra.runtime import BY_ID, CATALOG, ModelRuntimeError, Runtime, argv, recommended, resolve  # noqa: E402
-from cynqra.server import App, make_server  # noqa: E402
+from cynqra.server import App, make_server, stop_on_terminate  # noqa: E402
 
 VERSION = (HERE / "VERSION").read_text(encoding="utf-8").strip() if (HERE / "VERSION").exists() else "dev"
 ICON = HERE / "ui" / "icon.png"
@@ -233,6 +233,7 @@ def run_app(args) -> int:
     (d / "instance.json").write_text(json.dumps({"url": desk.url, "pid": os.getpid()}), encoding="utf-8")
     desk.autostart()
     print(f"Cynqra {VERSION} running at {desk.url}", flush=True)
+    stop_on_terminate()
     try:
         if args.headless:
             desk.app.quit.wait()

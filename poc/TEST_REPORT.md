@@ -9,13 +9,13 @@ Run on 28 September 2026. Linux, Python 3.11.15, Node 22 with Playwright and Chr
 
 ## Result
 
-248 tests, 248 passed, 0 failed, 0 skipped. Run time about 280 seconds.
+251 tests, 251 passed, 0 failed, 0 skipped. Run time about 280 seconds.
 
 | Module | Tests | What it proves |
 | --- | --- | --- |
 | test_core | 30 | Append only events, the D-18 envelope, personal data keys refused (D-22), content addressed objects, policy for every tier and role, protocol objects that content cannot reroute, the test runner, workers never see keys, and the verifiers: document types' sections, numbered checks and cited requirement ids, the objective lint for briefs and specifications, the forecast backtest rejecting a flat mean and accepting a weekday mean |
 | test_journey | 32 | All three demos end to end. Bluedip (the demo that opens first): the team the idea needs, a Data Scientist and a Restaurant Revenue Management Specialist among them; the Company Pack with every foundation document checked and its sourced, assumed and confirm-with-a-professional sections, and the brief answering what, why and how; the platform's backtest rejecting the first forecast and a test catching the ignored cap; the engineer's doubt answered by the Specialist without the CEO; the CEO deciding only the CFO's rule on offers, the merge, going live and acceptance; the live app showing the owner's 50% offer losing margin and a better one earning it; every task replays. Candidate tracker: accepted and live, the workforce synthesized then approved, the roadmap and budget as a second gate, twelve fields per task including its dollar budget, a Blocker cleared without the founder, a defect caught before verified, a prohibited email denied, every task replays, the scripted source staffed and metered through the registry, the orchestrator implementing the run contract. Restaurant forecast: nine workers, fourteen tasks, the backtest rejecting the first forecast, eight documents and the decided rule in the repository, a deploy proposed by DevOps |
-| test_controls | 23 | Gateway: workspace rules, audit, a credential never written. Decisions: every field, edit, reject, request evidence, the D-29 escalation budget. Budget in dollars: machine time priced, warnings at 50, 80 and 95, the breaker, a refused cap raise leaving the decision open, raising the cap resuming the run, bad budgets refused. Kill switch, objective change (D-30), a run surviving a restart |
+| test_controls | 25 | Gateway: workspace rules, audit, a credential never written. Decisions: every field, edit, reject, request evidence, "more evidence" never stopping the run, the D-29 escalation budget. Budget in dollars: machine time priced, warnings at 50, 80 and 95, the breaker, a refused cap raise leaving the decision open, raising the cap resuming the run, bad budgets refused. Kill switch, objective change (D-30), a second change waiting for the first, a run surviving a restart |
 | test_failure_paths | 13 | Three invalid replies go to the Replacement Engine and then the founder; three failed verifications likewise, with the failing test named and nothing integrated; retries recover; refused writes; a failing release candidate is not merged; a failed live smoke test rolls back; rejected delivery; a refused breaker stops the run |
 | test_product_flow | 17 | Requirements, workforce and plan validators; the platform closing what the catalog requires (a role for an uncovered area, added and labelled; a founder's edit refused instead); section 3's twelve-worker organization; authority from the catalog; the workforce gate (reject revises, edits only under governance and checked first); the roadmap gate; the Budget Engine's layers and charges; performance thresholds; all three scenarios passing the validators a model's answers do |
 | test_workforce | 13 | Three OpenAI-compatible provider connections to llama-server test doubles: registry facts, removing a connection retires its models, selection from measured outcomes, staffing and metering, why a call failed (outage, timeout, rate limit, no credit, refused key, withdrawn); an offline model diagnosed, not replaced, with one CEO question, a stand-in and the return to its own AI; the CEO choosing to wait; no credit going to the CEO with nothing replaced; a task rerouted to a peer, the dollar breaker, keep or replace on evidence, the regression gate, a successor inheriting the work and the CEO told its price |
@@ -26,7 +26,7 @@ Run on 28 September 2026. Linux, Python 3.11.15, Node 22 with Playwright and Chr
 | test_desktop | 25 | The desktop app: model download and runtime, the app's API, the self-test, --e2e and --check-model (the registry's probe) against the test double, the workforce demonstration |
 | test_intelligence_supply | 17 | The locked V1 decisions and their ten demonstrations: OpenAI-compatible, Anthropic and local connections discovered and registered; the key only in the secrets layer and resolved per call; Bedrock planned, not connectable; a new adapter plugged in with nothing else changed; workers holding no intelligence, several sharing one, different workers on different intelligence by evidence; a run through the gateway, metered; a better intelligence detected and the worker rebound with its identity kept; a new version regression-checked; the fallback preferred; every decision an audit event; a catalogue model no provider serves skipped, not fatal; a hosted call giving up after ten minutes; the demonstration picking the newest served model of each family; the company serving a Hugging Face model pinned on every call, kept while live, and a change of it treated as a new version |
 | test_parallel_team | 2 | The team works at the same time: in the restaurant demo several experts act in one round after the brief, each worker one piece at a time; four workers' model calls overlap while the run stays consistent, and the project is accepted |
-| test_server | 6 | HTTP API: provider connections (connect, update, fault, remove, a key never shown, Bedrock refused); the UI served, path traversal blocked, the full journey over HTTP, bad requests are 400, auto run and archive; and the browser test, the whole journey clicked through the real UI in Chromium |
+| test_server | 7 | HTTP API: other websites refused (DNS rebinding, another site's page, a non-JSON command); provider connections (connect, update, fault, remove, a key never shown, Bedrock refused); the UI served, path traversal blocked, the full journey over HTTP, bad requests are 400, auto run and archive; and the browser test, the whole journey clicked through the real UI in Chromium |
 
 ## Coverage
 
@@ -34,39 +34,48 @@ Statement coverage of the platform code, measured with coverage.py over the full
 
 | File | Statements | Missed | Cover |
 | --- | --- | --- | --- |
-| cynqra/budget.py | 140 | 4 | 97% |
-| cynqra/db.py | 89 | 1 | 99% |
-| cynqra/delivery.py | 98 | 0 | 100% |
+| cynqra/binding.py | 22 | 1 | 95% |
+| cynqra/budget.py | 141 | 4 | 97% |
+| cynqra/db.py | 92 | 1 | 99% |
+| cynqra/delivery.py | 107 | 0 | 100% |
 | cynqra/deploy.py | 149 | 9 | 94% |
-| cynqra/engine.py | 531 | 27 | 95% |
+| cynqra/engine.py | 581 | 34 | 94% |
 | cynqra/execution.py | 310 | 19 | 94% |
 | cynqra/gateway.py | 75 | 2 | 97% |
-| cynqra/intelligence.py | 283 | 9 | 97% |
+| cynqra/intelligence.py | 284 | 10 | 96% |
+| cynqra/intelligence_layer/__init__.py | 70 | 4 | 94% |
+| cynqra/intelligence_layer/adapters.py | 290 | 26 | 91% |
+| cynqra/intelligence_layer/connections.py | 85 | 4 | 95% |
+| cynqra/intelligence_layer/contracts.py | 7 | 0 | 100% |
+| cynqra/intelligence_layer/credentials.py | 82 | 10 | 88% |
+| cynqra/intelligence_layer/gateway.py | 60 | 14 | 77% |
+| cynqra/intelligence_layer/registry.py | 177 | 5 | 97% |
+| cynqra/intelligence_layer/router.py | 60 | 2 | 97% |
 | cynqra/model_adapter.py | 259 | 27 | 90% |
 | cynqra/objective.py | 112 | 4 | 96% |
-| cynqra/performance.py | 58 | 4 | 93% |
+| cynqra/performance.py | 61 | 4 | 93% |
 | cynqra/planner.py | 120 | 10 | 92% |
 | cynqra/policy.py | 44 | 2 | 95% |
-| cynqra/probe.py | 110 | 16 | 85% |
+| cynqra/probe.py | 117 | 16 | 86% |
 | cynqra/protocol.py | 24 | 0 | 100% |
-| cynqra/registry.py | 232 | 31 | 87% |
-| cynqra/replacement.py | 140 | 5 | 96% |
-| cynqra/roles.py | 71 | 2 | 97% |
-| cynqra/router.py | 60 | 2 | 97% |
+| cynqra/replacement.py | 379 | 51 | 87% |
+| cynqra/roles.py | 82 | 2 | 98% |
 | cynqra/run.py | 10 | 0 | 100% |
-| cynqra/runtime.py | 398 | 82 | 79% |
-| cynqra/server.py | 229 | 33 | 86% |
-| cynqra/settings.py | 27 | 0 | 100% |
-| cynqra/synthesis.py | 117 | 5 | 96% |
+| cynqra/runtime.py | 391 | 79 | 80% |
+| cynqra/server.py | 264 | 37 | 86% |
+| cynqra/settings.py | 29 | 1 | 97% |
+| cynqra/synthesis.py | 153 | 5 | 97% |
 | cynqra/testrunner.py | 72 | 4 | 94% |
 | cynqra/verifier.py | 189 | 8 | 96% |
-| Total | 3947 | 306 | 92% |
+| TOTAL | 4898 | 395 | 92% |
 
-`runtime.py` (79%) is the desktop app's model download and llama-server manager; its GPU and platform branches
+`runtime.py` (80%) is the desktop app's model download and llama-server manager; its GPU and platform branches
 run on the build machines of `.github/workflows/cynqra-desktop.yml`, not here.
 
 ## Also checked
 
-- The demo video's recording script (`demo/record_demo.js`) runs the whole current flow in headless Chromium:
-  232 seconds, no errors. Encoding the MP4 needs ffmpeg, which this machine does not have.
-- pyflakes reports nothing on `cynqra/`, the tests and the entry points.
+- The browser walk-through (`tests/e2e/walk.js`) of the Bluedip demo, in Chromium with Playwright: the whole
+  journey through the real screens, the four CEO decisions, the live Bluedip app used, no errors (28 September).
+- pyflakes reports nothing on `cynqra/`, the tests, the entry points and the demos' code.
+- The demo video's recording script (`demo/record_demo.js`) was not rerun: it still records the earlier
+  candidate-tracker demo, and re-recording it on Bluedip is on the roadmap.

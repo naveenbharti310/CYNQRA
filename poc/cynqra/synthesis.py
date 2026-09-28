@@ -178,8 +178,9 @@ def propose(run, note: str = "") -> dict:
     prop["cost_by_role"] = cost_by_role(run, prop)
     run.store.put("proposal", prop["id"], prop)
     run.store.put("workforce", "proposal", {"id": prop["id"]})
-    run.event("workforce.proposed", "organization", "org_1", {"proposal": prop["id"], "roles": {
-        r["role"]: r["quantity"] for r in prop["roles"]}, "workers": len(prop["workers"])}, actor="workforce_synthesizer")
+    run.event("workforce.proposed", "organization", "org_1", {"proposal": prop["id"], "roles": {  # by title: two
+        r.get("title") or r["role"]: r["quantity"] for r in prop["roles"]}, "workers": len(prop["workers"])},  # Specialists stay two
+              actor="workforce_synthesizer")
     total = sum(r["quantity"] for r in prop["roles"])
     costs = prop["cost_by_role"]
     run.decision("approve_workforce",

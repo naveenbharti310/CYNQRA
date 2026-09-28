@@ -98,6 +98,15 @@ class DecisionTests(Base):  # A9
         self.e.decide(self.d["id"], "request_evidence", note="Show me recruiter feedback")
         self.assertEqual(self.e.store.get("decision", self.d["id"])["outcome_label"], "more_evidence_requested")
 
+    def test_more_evidence_never_stops_the_run(self):
+        """Found in the audit: on an escalation, "request more evidence" acted as a rejection and stopped the run."""
+        esc = self.e.decision("escalation", problem="p", recommendation="r", risk="LOW", confidence="low", cost="c",
+                              evidence=[], change="c", source="w_pm", task_id="t_02")
+        with self.assertRaises(EngineError):
+            self.e.decide(esc["id"], "request_evidence")
+        self.assertEqual(self.e.store.get("decision", esc["id"])["status"], "pending", "still waiting for an answer")
+        self.assertEqual(self.e.meta["phase"], "running")
+
     def test_cannot_decide_twice_or_badly(self):
         self.e.decide(self.d["id"], "approve")
         with self.assertRaises(EngineError):
@@ -240,6 +249,17 @@ class ObjectiveTests(Base):  # A2
         self.e.decide(d["id"], "approve")
         o = self.e.objective()
         self.assertEqual((o["version"], o["structured"]["constraints"]), (2, "No public careers site, no email"))
+        self.assertEqual(self.e.meta["phase"], "running")
+
+    def test_a_second_change_waits_for_the_first(self):
+        """Found in the audit: two changes answered in order left the run paused for good."""
+        self.e.close()
+        self.e = engine_to_running(self.tmp.path / "d")
+        self.e.edit_objective({"product": "Something else"})
+        with self.assertRaises(EngineError):
+            self.e.edit_objective({"priorities": "Speed first"})
+        d = [x for x in self.e.pending_decisions() if x["kind"] == "objective_change"][0]
+        self.e.decide(d["id"], "approve")
         self.assertEqual(self.e.meta["phase"], "running")
 
     def test_change_rejected_keeps_version_one(self):

@@ -40,6 +40,7 @@ import json
 import mimetypes
 import re
 import shutil
+import signal
 import threading
 import time
 from datetime import datetime
@@ -205,10 +206,40 @@ class App:
         stop_all()
 
 
+LOCAL_NAMES = ("127.0.0.1", "localhost")
+
+
+def stop_on_terminate() -> None:
+    """A terminate signal (a shutdown, a task or service manager) stops Cynqra as Ctrl+C does, so its clean-up runs
+    and the product it deployed and the model server stop with it, instead of being left running unwatched."""
+    def handler(signum, frame):
+        raise KeyboardInterrupt
+    try:
+        signal.signal(signal.SIGTERM, handler)
+    except (ValueError, OSError, AttributeError):  # not the main thread, or no such signal here
+        pass
+
+
 def make_server(app: App, port: int = 8750) -> ThreadingHTTPServer:
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):
             return
+
+        def _local(self) -> bool:
+            """Only Cynqra's own page and tools may use the API. Binding to 127.0.0.1 is not enough: any website open
+            in the same browser can send requests to it, and a name an attacker controls can be pointed at
+            127.0.0.1 (DNS rebinding). So the request must be addressed to this machine by name, a browser request
+            must come from Cynqra's own page, and a command must be JSON, which a page elsewhere cannot send
+            without the browser first asking this server, which never agrees."""
+            host = (self.headers.get("Host") or "").rsplit(":", 1)[0].lower()
+            if host not in LOCAL_NAMES:
+                return False
+            origin = self.headers.get("Origin")
+            if origin:
+                o = urlparse(origin)
+                if o.hostname not in LOCAL_NAMES or o.port != self.server.server_address[1]:
+                    return False
+            return self.command != "POST" or self.headers.get_content_type() == "application/json"
 
         def _send(self, code: int, body, kind: str = "application/json", extra: dict | None = None):
             data = body if isinstance(body, (bytes, bytearray)) else json.dumps(body, default=str).encode("utf-8")
@@ -239,6 +270,8 @@ def make_server(app: App, port: int = 8750) -> ThreadingHTTPServer:
                 return self._send(500, {"error": f"{type(exc).__name__}: {exc}"})
 
         def do_GET(self):
+            if not self._local():
+                return self._send(403, {"error": "only Cynqra's own page may use this server"})
             u = urlparse(self.path)
             path = u.path
             if path == "/favicon.ico":
@@ -273,6 +306,8 @@ def make_server(app: App, port: int = 8750) -> ThreadingHTTPServer:
             return self._send(404, {"error": "not found"})
 
         def do_POST(self):
+            if not self._local():
+                return self._send(403, {"error": "only Cynqra's own page may use this server"})
             path = urlparse(self.path).path
             try:
                 body = self._body()

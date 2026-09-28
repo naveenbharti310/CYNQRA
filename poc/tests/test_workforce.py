@@ -240,7 +240,15 @@ class WorkforceTests(unittest.TestCase):
                             ("could not reach https://router.huggingface.co: connection refused", "outage"),
                             ("Model A is offline (a fault set on it in the model registry)", "outage"),
                             ("Model A is retired: superseded", "withdrawn"),
-                            ("Model A changed version to 2 and failed its regression check", "withdrawn")]:
+                            ("Model A changed version to 2 and failed its regression check", "withdrawn"),
+                            # found in the audit: a port number or a laptop's memory is not an account problem
+                            ("network error: could not reach http://127.0.0.1:40312: connection refused", "outage"),
+                            ("RuntimeError: the model on this machine could not start: insufficient memory", "outage"),
+                            ("HTTP 429 from provider: You have exceeded your rate limit", "rate_limit"),
+                            ("HTTP 429 from provider: insufficient_quota, check your plan and billing", "no_credit"),
+                            ("HTTP 404 from provider: model claude-2 not found", "withdrawn"),
+                            ("HTTP 504 from provider: gateway timeout", "timeout"),
+                            ("HF_TOKEN is not set", "access")]:
             self.assertEqual(diagnose(text), cause, text)
 
     def test_a_task_is_rerouted_to_a_peer_on_a_better_model(self):

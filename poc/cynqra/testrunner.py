@@ -43,7 +43,7 @@ def _text(data) -> str:
 def run_unittests(folder: Path, timeout: int = 120) -> dict:
     """Run every test_*.py in folder. Returns pass/fail, test ids and their status, and, when the run
     itself went wrong (it hung, or the process died), a problem that says so and names the test."""
-    folder = Path(folder)
+    folder = Path(folder).resolve()  # unittest is started inside the folder: a relative path would not resolve
     if not any(folder.glob("test_*.py")):
         return {"ran": 0, "passed": False, "tests": [], "failed": [], "output": "no test files", "returncode": None,
                 "problem": ""}
