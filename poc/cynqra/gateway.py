@@ -7,21 +7,18 @@ PROHIBITED one is refused whoever asks. The tools a worker can reach are exactly
 """
 from __future__ import annotations
 
-import re
 import shutil
 import time
 import uuid
 from pathlib import Path
 
 from . import binding, budget, policy
-from .db import digest, now
+from .db import SECRET, digest, now
 from .testrunner import run_unittests
 
 ALLOWED_EXT = {".py", ".md", ".html", ".json", ".txt", ".css", ".js"}
 MAX_FILE = 200_000  # bytes
 # Output a worker may never write: credentials. Found in a write, the write is refused and the refusal audited.
-SECRET = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----|\bsk-ant-[\w-]{20,}|\bsk-[A-Za-z0-9]{32,}|\bhf_[A-Za-z0-9]{30,}"
-                    r"|\bAKIA[0-9A-Z]{16}\b|\bghp_[A-Za-z0-9]{36}\b")
 NO_COST = ("deploy_production", "product_rule_decision", "assign_task", "answer_blocker", "send_protocol",
            "read_artifact", "review_work")
 

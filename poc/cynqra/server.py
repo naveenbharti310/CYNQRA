@@ -207,6 +207,19 @@ class App:
 
 
 LOCAL_NAMES = ("127.0.0.1", "localhost")
+MAX_BODY = 2_000_000  # a command is a small JSON object; nothing Cynqra's page sends comes near this
+# Every response: no other site may show Cynqra's pages inside its own (a hidden frame could trick a click on
+# "approve"), load its answers as images or scripts, or run anything on its pages but Cynqra's own scripts.
+SECURITY_HEADERS = {
+    "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+                               "img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; "
+                               "base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "X-Frame-Options": "DENY",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Cross-Origin-Resource-Policy": "same-origin",
+    "Cross-Origin-Opener-Policy": "same-origin",
+}
 
 
 def stop_on_terminate() -> None:
@@ -234,6 +247,13 @@ def make_server(app: App, port: int = 8750) -> ThreadingHTTPServer:
             host = (self.headers.get("Host") or "").rsplit(":", 1)[0].lower()
             if host not in LOCAL_NAMES:
                 return False
+            # a browser says where a request comes from; one from another site is refused even without an Origin
+            # (a plain link or image), except opening Cynqra's page itself
+            fetch_site = (self.headers.get("Sec-Fetch-Site") or "").lower()
+            if fetch_site in ("cross-site", "same-site") and not (
+                    self.command == "GET" and self.headers.get("Sec-Fetch-Mode") == "navigate"
+                    and urlparse(self.path).path in ("/", "/index.html")):
+                return False
             origin = self.headers.get("Origin")
             if origin:
                 o = urlparse(origin)
@@ -247,13 +267,20 @@ def make_server(app: App, port: int = 8750) -> ThreadingHTTPServer:
             self.send_header("Content-Type", kind)
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "no-store")
+            for k, v in SECURITY_HEADERS.items():
+                self.send_header(k, v)
             for k, v in (extra or {}).items():
                 self.send_header(k, v)
             self.end_headers()
             self.wfile.write(data)
 
         def _body(self) -> dict:
-            n = int(self.headers.get("Content-Length") or 0)
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                raise EngineError("Content-Length must be a number") from None
+            if n < 0 or n > MAX_BODY:
+                raise EngineError(f"a command must be between 0 and {MAX_BODY} bytes")
             if not n:
                 return {}
             data = json.loads(self.rfile.read(n).decode("utf-8"))

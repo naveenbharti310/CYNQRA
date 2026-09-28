@@ -171,10 +171,20 @@ class _Retryable(RuntimeError):
         self.wait = wait
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A call that carries a key never follows a redirect: urllib would send the key on to wherever it points."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
 def _post_once(url: str, body: bytes, headers: dict, timeout: float = TIMEOUT_S) -> dict:
     req = urllib.request.Request(url, data=body, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _OPENER.open(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = ""

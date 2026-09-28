@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import os
 import re
+import signal
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 # unittest -v writes "name (module.Class.name) ... ok". The result can come lines later: after a docstring, or after
@@ -36,6 +38,32 @@ def clean_env(extra: dict | None = None) -> dict:
     return keep
 
 
+def own_process_group() -> dict:
+    """Popen arguments that put the code the team wrote, and everything it starts, in a group of its own, so that
+    stopping it stops all of it."""
+    if os.name == "nt":
+        return {"creationflags": NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+def stop_process_group(proc: subprocess.Popen) -> None:
+    """Stop a process and everything it started. A test that timed out, or left a server running, leaves nothing."""
+    try:
+        if os.name == "nt":
+            if proc.poll() is None:
+                subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True,
+                               creationflags=NO_WINDOW, check=False)
+        else:
+            os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+
+
+def _read(f) -> bytes:
+    f.seek(0)
+    return f.read()
+
+
 def _text(data) -> str:
     return data.decode("utf-8", "replace") if isinstance(data, bytes) else (data or "")
 
@@ -48,17 +76,24 @@ def run_unittests(folder: Path, timeout: int = 120) -> dict:
         return {"ran": 0, "passed": False, "tests": [], "failed": [], "output": "no test files", "returncode": None,
                 "problem": ""}
     timed_out = False
-    try:
-        proc = subprocess.run(
+    # Output goes to files, not pipes: something a test started and left running would hold a pipe open, and the
+    # run would look hung after its tests had finished.
+    with tempfile.TemporaryFile() as out_f, tempfile.TemporaryFile() as err_f:
+        proc = subprocess.Popen(
             [python_exe(), "-m", "unittest", "discover", "-s", str(folder), "-p", "test_*.py", "-v"],
-            cwd=str(folder), capture_output=True, encoding="utf-8", errors="replace", timeout=timeout, env=clean_env(),
-            creationflags=NO_WINDOW,
+            cwd=str(folder), stdout=out_f, stderr=err_f, stdin=subprocess.DEVNULL, env=clean_env(),
+            **own_process_group(),
         )
-        out = (proc.stdout or "") + (proc.stderr or "")
-        code = proc.returncode
-    except subprocess.TimeoutExpired as exc:
-        out = _text(exc.stdout) + _text(exc.stderr) + f"\n[stopped: the tests did not finish within {timeout} s]"
-        code, timed_out = -1, True
+        try:
+            code = proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            code, timed_out = -1, True
+        finally:
+            stop_process_group(proc)  # whatever the tests started and left running (a server, a sleeper) stops too
+            proc.wait()
+        out = "".join(_text(_read(f)) for f in (out_f, err_f))
+    if timed_out:
+        out += f"\n[stopped: the tests did not finish within {timeout} s]"
     tests, failed = [], []
     pending = None
     for raw in out.splitlines():

@@ -13,10 +13,28 @@ from __future__ import annotations
 
 import threading
 import uuid
+from urllib.parse import urlparse
 
 from ..db import now
 from .contracts import AUTH_METHODS, SupplyError
 
+
+
+LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
+
+
+def check_endpoint(endpoint: str, auth_method: str) -> None:
+    """An endpoint is a web address. A key travels only encrypted (https), except to this computer: over plain http
+    anyone on the network between here and the server could read it."""
+    if not endpoint:
+        return
+    u = urlparse(endpoint)
+    if u.scheme not in ("http", "https") or not u.hostname:
+        raise ConnectionsError("the endpoint must be a web address starting with https:// (or http:// for a server "
+                               "on this computer or one that needs no key)")
+    if auth_method != "none" and u.scheme == "http" and u.hostname not in LOCAL_HOSTS:
+        raise ConnectionsError("a key is only sent over https:// to another computer; over http:// anyone on the "
+                               "network could read it")
 
 class ConnectionsError(SupplyError):
     pass
@@ -48,6 +66,7 @@ class Connections:
         if auth_method not in self.adapters[ptype].auth_methods or auth_method not in AUTH_METHODS:
             raise ConnectionsError(f"a {self.adapters[ptype].title} connection authenticates with "
                                    f"{' or '.join(self.adapters[ptype].auth_methods)}")
+        check_endpoint(spec.get("endpoint") or "", auth_method)
         models = spec.get("models") or []
         if isinstance(models, str):
             models = [m.strip() for m in models.split(",")]

@@ -9,7 +9,7 @@ Run on 28 September 2026. Linux, Python 3.11.15, Node 22 with Playwright and Chr
 
 ## Result
 
-258 tests, 258 passed, 0 failed, 0 skipped. Run time about 350 seconds (with coverage measuring).
+264 tests, 264 passed, 0 failed, 0 skipped. Run time about 350 seconds (with coverage measuring).
 
 | Module | Tests | What it proves |
 | --- | --- | --- |
@@ -27,7 +27,8 @@ Run on 28 September 2026. Linux, Python 3.11.15, Node 22 with Playwright and Chr
 | test_intelligence_supply | 17 | The locked V1 decisions and their ten demonstrations: OpenAI-compatible, Anthropic and local connections discovered and registered; the key only in the secrets layer and resolved per call; Bedrock planned, not connectable; a new adapter plugged in with nothing else changed; workers holding no intelligence, several sharing one, different workers on different intelligence by evidence; a run through the gateway, metered; a better intelligence detected and the worker rebound with its identity kept; a new version regression-checked; the fallback preferred; every decision an audit event; a catalogue model no provider serves skipped, not fatal; a hosted call giving up after ten minutes; the demonstration picking the newest served model of each family; the company serving a Hugging Face model pinned on every call, kept while live, and a change of it treated as a new version |
 | test_parallel_team | 2 | The team works at the same time: in the restaurant demo several experts act in one round after the brief, each worker one piece at a time; four workers' model calls overlap while the run stays consistent, and the project is accepted |
 | test_robustness | 5 | A model's answer is read, not trusted: the demos' answers garbled at random (fields dropped, text arriving as numbers, lists as objects) end every run cleanly, on the seeds that reached each of the five crashes the second audit found; protocol objects take the template's shape; only a prepared demo can be opened; the screen reads only the newest events |
-| test_server | 7 | HTTP API: other websites refused (DNS rebinding, another site's page, a non-JSON command); provider connections (connect, update, fault, remove, a key never shown, Bedrock refused); the UI served, path traversal blocked, the full journey over HTTP, bad requests are 400, auto run and archive; and the browser test, the whole journey clicked through the real UI in Chromium |
+| test_security | 5 | What the security audit found, kept fixed: a key never follows a redirect (all five kinds) to another server; a key only over https to another computer, and a provider's address only a web address, never a file; a key quoted in an error never written to the database; a hung test, and a passing one, leave nothing they started running |
+| test_server | 8 | HTTP API: other websites refused (DNS rebinding, another site's page, a non-JSON command, a link or image from another site); Cynqra's pages refuse to be framed or embedded and run only Cynqra's scripts; commands over 2 MB refused; provider connections (connect, update, fault, remove, a key never shown, Bedrock refused); the UI served, path traversal blocked, the full journey over HTTP, bad requests are 400, auto run and archive; and the browser test, the whole journey clicked through the real UI in Chromium |
 
 ## Coverage
 
@@ -37,22 +38,22 @@ Statement coverage of the platform code, measured with coverage.py over the full
 | --- | --- | --- | --- |
 | cynqra/binding.py | 22 | 1 | 95% |
 | cynqra/budget.py | 141 | 4 | 97% |
-| cynqra/db.py | 96 | 1 | 99% |
+| cynqra/db.py | 101 | 1 | 99% |
 | cynqra/delivery.py | 107 | 0 | 100% |
-| cynqra/deploy.py | 155 | 9 | 94% |
+| cynqra/deploy.py | 159 | 9 | 94% |
 | cynqra/engine.py | 583 | 32 | 95% |
 | cynqra/execution.py | 312 | 18 | 94% |
-| cynqra/gateway.py | 75 | 2 | 97% |
+| cynqra/gateway.py | 73 | 2 | 97% |
 | cynqra/intelligence.py | 284 | 10 | 96% |
 | cynqra/intelligence_layer/__init__.py | 70 | 4 | 94% |
-| cynqra/intelligence_layer/adapters.py | 290 | 26 | 91% |
-| cynqra/intelligence_layer/connections.py | 85 | 4 | 95% |
+| cynqra/intelligence_layer/adapters.py | 294 | 25 | 91% |
+| cynqra/intelligence_layer/connections.py | 96 | 5 | 95% |
 | cynqra/intelligence_layer/contracts.py | 7 | 0 | 100% |
 | cynqra/intelligence_layer/credentials.py | 82 | 10 | 88% |
 | cynqra/intelligence_layer/gateway.py | 60 | 14 | 77% |
 | cynqra/intelligence_layer/registry.py | 177 | 5 | 97% |
 | cynqra/intelligence_layer/router.py | 60 | 2 | 97% |
-| cynqra/model_adapter.py | 259 | 27 | 90% |
+| cynqra/model_adapter.py | 263 | 27 | 90% |
 | cynqra/objective.py | 112 | 2 | 98% |
 | cynqra/performance.py | 61 | 3 | 95% |
 | cynqra/planner.py | 120 | 10 | 92% |
@@ -62,13 +63,13 @@ Statement coverage of the platform code, measured with coverage.py over the full
 | cynqra/replacement.py | 379 | 34 | 91% |
 | cynqra/roles.py | 82 | 2 | 98% |
 | cynqra/run.py | 10 | 0 | 100% |
-| cynqra/runtime.py | 391 | 82 | 79% |
-| cynqra/server.py | 272 | 43 | 84% |
+| cynqra/runtime.py | 391 | 79 | 80% |
+| cynqra/server.py | 284 | 45 | 84% |
 | cynqra/settings.py | 29 | 1 | 97% |
 | cynqra/synthesis.py | 153 | 4 | 97% |
-| cynqra/testrunner.py | 72 | 4 | 94% |
+| cynqra/testrunner.py | 93 | 7 | 92% |
 | cynqra/verifier.py | 189 | 8 | 96% |
-| TOTAL | 4930 | 381 | 92% |
+| TOTAL | 4989 | 383 | 92% |
 
 `runtime.py` (79%) is the desktop app's model download and llama-server manager; its GPU and platform branches
 run on the build machines of `.github/workflows/cynqra-desktop.yml`, not here.
@@ -78,6 +79,9 @@ run on the build machines of `.github/workflows/cynqra-desktop.yml`, not here.
 - The browser walk-through (`tests/e2e/walk.js`) of the Bluedip demo, in Chromium with Playwright: the whole
   journey through the real screens, the four CEO decisions, the live Bluedip app used, no errors (28 September).
   Walked again at phone width (`WALK_WIDTH=390`): every screen fits a 390-pixel screen with no sideways scrolling.
+- Security: a hostile demo team whose every answer carries markup that would run code if the screen inserted it
+  as HTML, walked through every screen in Chromium: shown as text, run nowhere. Another site's page framing
+  Cynqra: refused by the browser. A provider that redirects: nothing reaches the other server.
 - Fuzzing: 360 runs (120 per demo) of the three demos with their answers garbled at random (the harness the robustness test is
   drawn from); no run crashes after the fixes. Before them, five kinds of answer crashed the run.
 - pyflakes reports nothing on `cynqra/`, the tests, the entry points and the demos' code.

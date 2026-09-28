@@ -47,10 +47,20 @@ NOT_CHAT = ("embed", "tts", "whisper", "dall-e", "moderation", "image", "audio",
             "davinci", "babbage", "computer-use")
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A call that carries a key never follows a redirect: urllib would send the key on to wherever it points."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
 def _get_json(url: str, headers: dict, timeout: float = 30.0):
     req = urllib.request.Request(url, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with _OPENER.open(req, timeout=timeout) as r:
             return json.loads(r.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         raise SupplyError(f"{url} answered HTTP {exc.code}: {exc.read()[:200].decode(errors='replace')}") from exc

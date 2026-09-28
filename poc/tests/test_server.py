@@ -74,6 +74,32 @@ class ApiTests(unittest.TestCase):
                                                  "Content-Type": "application/json"}, cmd), 200, "Cynqra's own page")
         self.assertEqual(raw("/api/state", {"Host": f"localhost:{port}"}), 200)
 
+    def test_no_other_site_can_frame_embed_or_flood_it(self):
+        """Found in the security audit: any website could show Cynqra in a hidden frame and trick a click on
+        "approve"; a request another site's page makes without an Origin (a link, an image) was answered; and a
+        command could be any size."""
+        def raw(path, headers, body=None):
+            req = urllib.request.Request(self.base + path, data=body, headers=headers,
+                                         method="POST" if body is not None else "GET")
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return r.status, r.headers
+            except urllib.error.HTTPError as exc:
+                return exc.code, exc.headers
+        code, h = raw("/", {})
+        self.assertEqual(code, 200)
+        self.assertIn("frame-ancestors 'none'", h["Content-Security-Policy"])
+        self.assertIn("script-src 'self'", h["Content-Security-Policy"])
+        self.assertEqual((h["X-Frame-Options"], h["X-Content-Type-Options"]), ("DENY", "nosniff"))
+        self.assertEqual(raw("/api/state", {})[1]["Cross-Origin-Resource-Policy"], "same-origin")
+        self.assertEqual(raw("/api/state", {"Sec-Fetch-Site": "cross-site"})[0], 403, "an image or link elsewhere")
+        self.assertEqual(raw("/api/state", {"Sec-Fetch-Site": "same-site"})[0], 403, "another port on this computer")
+        self.assertEqual(raw("/", {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate"})[0], 200,
+                         "a link to Cynqra still opens it (and the page refuses to be framed)")
+        self.assertEqual(raw("/api/state", {"Sec-Fetch-Site": "same-origin"})[0], 200)
+        json_cmd = {"Content-Type": "application/json"}
+        self.assertEqual(raw("/api/run/step", {**json_cmd, "Content-Length": "5000000"}, b"{}")[0], 400)
+
     def test_serves_the_ui_and_blocks_traversal(self):
         code, body = self.call("/")
         self.assertEqual(code, 200)

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 import threading
 import uuid
@@ -67,6 +68,17 @@ def now() -> str:
     return datetime.now(IST).isoformat(timespec="milliseconds")
 
 
+# What a key looks like. A key is never written to the database, whatever carried it there (a provider's error
+# message quoting it, say): it is replaced before the write. The gateway refuses files that hold one.
+SECRET = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----|\bsk-ant-[\w-]{20,}|\bsk-[A-Za-z0-9_-]{32,}"
+                    r"|\bhf_[A-Za-z0-9]{30,}|\bAKIA[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{36,}\b")
+KEY_REMOVED = "[key removed]"
+
+
+def scrub(text: str) -> str:
+    return SECRET.sub(KEY_REMOVED, text)
+
+
 def canonical(obj) -> str:
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
@@ -118,7 +130,7 @@ class Store:
                 "command_id": "cmd_" + uuid.uuid4().hex[:12],
                 "idempotency_key": "idem_" + uuid.uuid4().hex[:16],
                 "context_refs": json.dumps(context_refs or []),
-                "payload": canonical(payload),
+                "payload": scrub(canonical(payload)),
                 "payload_schema_version": 1,
                 "source_service": source_service,
                 "created_at": now(),
@@ -167,7 +179,7 @@ class Store:
             self.conn.execute(
                 "INSERT INTO entities(kind,id,data,updated_at) VALUES (?,?,?,?) "
                 "ON CONFLICT(kind,id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at",
-                (kind, id_, json.dumps(data), now()),
+                (kind, id_, scrub(json.dumps(data)), now()),
             )
             return data
 

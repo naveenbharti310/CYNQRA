@@ -17,7 +17,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-from .testrunner import NO_WINDOW, clean_env, python_exe, run_unittests
+from .testrunner import clean_env, own_process_group, python_exe, run_unittests, stop_process_group
 
 STAGES = ["BUILD", "TEST", "PACKAGE", "PREVIEW", "VERIFY", "APPROVAL", "DEPLOY", "HEALTH_CHECK", "SMOKE_TEST", "LIVE"]
 _PROCS: list[subprocess.Popen] = []
@@ -37,7 +37,7 @@ def start(folder: Path, port: int, data_file: Path, log_file: Path | None = None
             [python_exe(), "app.py"], cwd=str(folder),
             env=clean_env({"PORT": str(port), "DATA_FILE": str(data_file)}),
             stdout=log, stderr=subprocess.STDOUT if log_file else subprocess.DEVNULL, stdin=subprocess.DEVNULL,
-            creationflags=NO_WINDOW,
+            **own_process_group(),
         )
     finally:
         if log_file:
@@ -54,12 +54,17 @@ def tail(log_file: Path, n: int = 1200) -> str:
 
 
 def stop(proc: subprocess.Popen | None) -> None:
-    if proc and proc.poll() is None:
+    """Stop the product and anything it started."""
+    if not proc:
+        return
+    if proc.poll() is None:
         proc.terminate()
         try:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            proc.kill()
+            pass
+    stop_process_group(proc)
+    proc.wait()
 
 
 def stop_all() -> None:
