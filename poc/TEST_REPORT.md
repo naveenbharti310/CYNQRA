@@ -85,6 +85,7 @@ run on the build machines of `.github/workflows/cynqra-desktop.yml`.
   Cynqra: refused by the browser. A provider that redirects: nothing reaches the other server.
 - Fuzzing: 360 runs (120 per demo) of the three demos with their answers garbled at random (the harness the robustness test is
   drawn from); no run crashes after the fixes. Before them, five kinds of answer crashed the run.
+- After the cofounder change, 75 more runs (25 per demo) with the cofounders', teams' and reviews' answers garbled too: no run crashes. A hostile team whose every answer carries markup that would run code, walked through every screen including the org chart: shown as text, run nowhere.
 - pyflakes reports nothing on `cynqra/`, the tests, the entry points and the demos' code.
 - The demo video's recording script (`demo/record_demo.js`) was not rerun: it still records the earlier
   candidate-tracker demo, and re-recording it on Bluedip is on the roadmap.
