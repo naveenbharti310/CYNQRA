@@ -9,7 +9,7 @@ Run on 28 September 2026. Linux, Python 3.11.15, Node 22 with Playwright and Chr
 
 ## Result
 
-251 tests, 251 passed, 0 failed, 0 skipped. Run time about 280 seconds.
+258 tests, 258 passed, 0 failed, 0 skipped. Run time about 350 seconds (with coverage measuring).
 
 | Module | Tests | What it proves |
 | --- | --- | --- |
@@ -18,14 +18,15 @@ Run on 28 September 2026. Linux, Python 3.11.15, Node 22 with Playwright and Chr
 | test_controls | 25 | Gateway: workspace rules, audit, a credential never written. Decisions: every field, edit, reject, request evidence, "more evidence" never stopping the run, the D-29 escalation budget. Budget in dollars: machine time priced, warnings at 50, 80 and 95, the breaker, a refused cap raise leaving the decision open, raising the cap resuming the run, bad budgets refused. Kill switch, objective change (D-30), a second change waiting for the first, a run surviving a restart |
 | test_failure_paths | 13 | Three invalid replies go to the Replacement Engine and then the founder; three failed verifications likewise, with the failing test named and nothing integrated; retries recover; refused writes; a failing release candidate is not merged; a failed live smoke test rolls back; rejected delivery; a refused breaker stops the run |
 | test_product_flow | 17 | Requirements, workforce and plan validators; the platform closing what the catalog requires (a role for an uncovered area, added and labelled; a founder's edit refused instead); section 3's twelve-worker organization; authority from the catalog; the workforce gate (reject revises, edits only under governance and checked first); the roadmap gate; the Budget Engine's layers and charges; performance thresholds; all three scenarios passing the validators a model's answers do |
-| test_workforce | 13 | Three OpenAI-compatible provider connections to llama-server test doubles: registry facts, removing a connection retires its models, selection from measured outcomes, staffing and metering, why a call failed (outage, timeout, rate limit, no credit, refused key, withdrawn); an offline model diagnosed, not replaced, with one CEO question, a stand-in and the return to its own AI; the CEO choosing to wait; no credit going to the CEO with nothing replaced; a task rerouted to a peer, the dollar breaker, keep or replace on evidence, the regression gate, a successor inheriting the work and the CEO told its price |
+| test_workforce | 14 | Three OpenAI-compatible provider connections to llama-server test doubles: registry facts, removing a connection retires its models, selection from measured outcomes, staffing and metering, why a call failed (outage, timeout, rate limit, no credit, refused key, withdrawn); an offline model diagnosed, not replaced, with one CEO question, a stand-in and the return to its own AI; an AI withdrawn mid-run moving every worker on it, the CEO told; the CEO choosing to wait; no credit going to the CEO with nothing replaced; a task rerouted to a peer, the dollar breaker, keep or replace on evidence, the regression gate, a successor inheriting the work and the CEO told its price |
 | test_real_model_paths | 19 | Model ids renumbered, money never taken from the model, a refused plan retried once with the reason, replies without files, nested files, a broken delivery contract, bad assignments, escalations returning to the failed stage, a slow model not blocking the screen or the kill switch, outages resuming, the HTTP API's decision trail |
-| test_live_and_deploy | 12 | Live mode needs a model and writes nothing without one; the environment's model registered and staffed; a failing model with no alternative is waited for, invents nothing, and recovers; a reopened run whose model is gone still opens; the deployment service with rollback; the demo products' own tests |
+| test_live_and_deploy | 13 | Live mode needs a model and writes nothing without one; the environment's model registered and staffed; a failing model with no alternative is waited for, invents nothing, and recovers; a reopened run whose model is gone still opens; the deployment service with rollback; a product that listens on every network address refused before preview; the demo products' own tests |
 | test_adapter | 15 | The Anthropic and OpenAI wire formats against a local fake provider, retired models, a provider outage waited out with the CEO told, JSON retries, and live_check.py with the Budget Engine's breaker as its spend cap |
 | test_local_models | 21 | Local servers (Ollama, llama.cpp), Hugging Face providers, file blocks, cut-off replies, blank objective fields inferred in one follow-up, the environment model priced at its list price |
 | test_desktop | 25 | The desktop app: model download and runtime, the app's API, the self-test, --e2e and --check-model (the registry's probe) against the test double, the workforce demonstration |
 | test_intelligence_supply | 17 | The locked V1 decisions and their ten demonstrations: OpenAI-compatible, Anthropic and local connections discovered and registered; the key only in the secrets layer and resolved per call; Bedrock planned, not connectable; a new adapter plugged in with nothing else changed; workers holding no intelligence, several sharing one, different workers on different intelligence by evidence; a run through the gateway, metered; a better intelligence detected and the worker rebound with its identity kept; a new version regression-checked; the fallback preferred; every decision an audit event; a catalogue model no provider serves skipped, not fatal; a hosted call giving up after ten minutes; the demonstration picking the newest served model of each family; the company serving a Hugging Face model pinned on every call, kept while live, and a change of it treated as a new version |
 | test_parallel_team | 2 | The team works at the same time: in the restaurant demo several experts act in one round after the brief, each worker one piece at a time; four workers' model calls overlap while the run stays consistent, and the project is accepted |
+| test_robustness | 5 | A model's answer is read, not trusted: the demos' answers garbled at random (fields dropped, text arriving as numbers, lists as objects) end every run cleanly, on the seeds that reached each of the five crashes the second audit found; protocol objects take the template's shape; only a prepared demo can be opened; the screen reads only the newest events |
 | test_server | 7 | HTTP API: other websites refused (DNS rebinding, another site's page, a non-JSON command); provider connections (connect, update, fault, remove, a key never shown, Bedrock refused); the UI served, path traversal blocked, the full journey over HTTP, bad requests are 400, auto run and archive; and the browser test, the whole journey clicked through the real UI in Chromium |
 
 ## Coverage
@@ -36,11 +37,11 @@ Statement coverage of the platform code, measured with coverage.py over the full
 | --- | --- | --- | --- |
 | cynqra/binding.py | 22 | 1 | 95% |
 | cynqra/budget.py | 141 | 4 | 97% |
-| cynqra/db.py | 92 | 1 | 99% |
+| cynqra/db.py | 96 | 1 | 99% |
 | cynqra/delivery.py | 107 | 0 | 100% |
-| cynqra/deploy.py | 149 | 9 | 94% |
-| cynqra/engine.py | 581 | 34 | 94% |
-| cynqra/execution.py | 310 | 19 | 94% |
+| cynqra/deploy.py | 155 | 9 | 94% |
+| cynqra/engine.py | 583 | 32 | 95% |
+| cynqra/execution.py | 312 | 18 | 94% |
 | cynqra/gateway.py | 75 | 2 | 97% |
 | cynqra/intelligence.py | 284 | 10 | 96% |
 | cynqra/intelligence_layer/__init__.py | 70 | 4 | 94% |
@@ -52,30 +53,33 @@ Statement coverage of the platform code, measured with coverage.py over the full
 | cynqra/intelligence_layer/registry.py | 177 | 5 | 97% |
 | cynqra/intelligence_layer/router.py | 60 | 2 | 97% |
 | cynqra/model_adapter.py | 259 | 27 | 90% |
-| cynqra/objective.py | 112 | 4 | 96% |
-| cynqra/performance.py | 61 | 4 | 93% |
+| cynqra/objective.py | 112 | 2 | 98% |
+| cynqra/performance.py | 61 | 3 | 95% |
 | cynqra/planner.py | 120 | 10 | 92% |
 | cynqra/policy.py | 44 | 2 | 95% |
 | cynqra/probe.py | 117 | 16 | 86% |
-| cynqra/protocol.py | 24 | 0 | 100% |
-| cynqra/replacement.py | 379 | 51 | 87% |
+| cynqra/protocol.py | 34 | 1 | 97% |
+| cynqra/replacement.py | 379 | 34 | 91% |
 | cynqra/roles.py | 82 | 2 | 98% |
 | cynqra/run.py | 10 | 0 | 100% |
-| cynqra/runtime.py | 391 | 79 | 80% |
-| cynqra/server.py | 264 | 37 | 86% |
+| cynqra/runtime.py | 391 | 82 | 79% |
+| cynqra/server.py | 272 | 43 | 84% |
 | cynqra/settings.py | 29 | 1 | 97% |
-| cynqra/synthesis.py | 153 | 5 | 97% |
+| cynqra/synthesis.py | 153 | 4 | 97% |
 | cynqra/testrunner.py | 72 | 4 | 94% |
 | cynqra/verifier.py | 189 | 8 | 96% |
-| TOTAL | 4898 | 395 | 92% |
+| TOTAL | 4930 | 381 | 92% |
 
-`runtime.py` (80%) is the desktop app's model download and llama-server manager; its GPU and platform branches
+`runtime.py` (79%) is the desktop app's model download and llama-server manager; its GPU and platform branches
 run on the build machines of `.github/workflows/cynqra-desktop.yml`, not here.
 
 ## Also checked
 
 - The browser walk-through (`tests/e2e/walk.js`) of the Bluedip demo, in Chromium with Playwright: the whole
   journey through the real screens, the four CEO decisions, the live Bluedip app used, no errors (28 September).
+  Walked again at phone width (`WALK_WIDTH=390`): every screen fits a 390-pixel screen with no sideways scrolling.
+- Fuzzing: 360 runs (120 per demo) of the three demos with their answers garbled at random (the harness the robustness test is
+  drawn from); no run crashes after the fixes. Before them, five kinds of answer crashed the run.
 - pyflakes reports nothing on `cynqra/`, the tests, the entry points and the demos' code.
 - The demo video's recording script (`demo/record_demo.js`) was not rerun: it still records the earlier
   candidate-tracker demo, and re-recording it on Bluedip is on the roadmap.

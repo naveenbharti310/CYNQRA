@@ -94,9 +94,10 @@ class Engine:
         return self.store.get("meta", "run")
 
     def set_meta(self, **kw) -> dict:
-        m = self.meta
-        m.update(kw)
-        return self.store.put("meta", "run", m)
+        with self.store.lock:  # read, change and write as one: the kill switch from another request is never lost
+            m = self.meta
+            m.update(kw)
+            return self.store.put("meta", "run", m)
 
     @property
     def cid(self) -> str:
@@ -231,6 +232,10 @@ class Engine:
     def decision(self, kind: str, *, problem: str, recommendation: str, risk: str, confidence: str, cost: str,
                  evidence: list, change: str, task_id: str | None = None, action_type: str | None = None,
                  severity: str = "SEV-3", source: str = "orchestrator", extra: dict | None = None) -> dict:
+        # what a model wrote is shown to the CEO as text, whatever type it arrived as
+        problem, recommendation, confidence, cost, change = (
+            v if isinstance(v, str) else "" if v is None else json.dumps(v, ensure_ascii=False)
+            for v in (problem, recommendation, confidence, cost, change))
         today = datetime.now(IST).date().isoformat()
         worker_raised = source.startswith("w_")
         todays = [d for d in self.store.all("decision")
@@ -318,8 +323,8 @@ class Engine:
         h = self.store.put_object("protocol", obj)
         entry = {"id": obj["object_hash"], "hash": h, "kind": kind, "task_id": task_id, "sender": sender,
                  "to": obj.get("to_worker") or obj.get("needs_from") or obj.get("owner") or "",
-                 "created_at": obj["created_at"], "summary": (obj.get("acceptance_check") or obj.get("description")
-                                                              or obj.get("recommendation") or obj.get("issue") or "")[:300],
+                 "created_at": obj["created_at"], "summary": str(obj.get("acceptance_check") or obj.get("description")
+                                                                  or obj.get("recommendation") or obj.get("issue") or "")[:300],
                  "artifacts": obj.get("artifacts", [])}
         self.store.put("protocol", obj["object_hash"], entry)
         self.event("protocol.sent", "protocol", obj["object_hash"], {"kind": kind, "from": sender, "to": entry["to"],
@@ -381,7 +386,7 @@ class Engine:
             if mode not in ("demo", "live"):
                 raise EngineError("mode must be demo or live")
             scenario = scenario or DEFAULT_SCENARIO
-            if mode == "demo" and not (SCENARIOS / scenario / "scenario.json").exists():
+            if mode == "demo" and scenario not in {x["id"] for x in scenarios()}:
                 raise EngineError(f"no demo scenario {scenario!r}")
             self.set_meta(mode=mode, scenario=scenario if mode == "demo" else None)
             try:
@@ -880,7 +885,7 @@ class Engine:
             "metrics": self.metrics() if company else {},
             "rules": self.rules(),
             "live_url": self.live_url(),
-            "events": self.store.events()[-60:],
+            "events": self.store.last_events(60),
             "exports": sorted(p.name for p in self.paths["exports"].glob("*.zip")),
         }
 

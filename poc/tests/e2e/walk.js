@@ -1,5 +1,6 @@
 // Browser end to end test (A16): the whole journey through the real UI in Chromium.
-// Usage: node walk.js <base_url> [screenshot_dir]
+// Usage: node walk.js <base_url> [screenshot_dir]   (WALK_WIDTH=390 walks it at phone width, and fails on
+// any screen that scrolls sideways)
 // Prints one JSON line: {"ok": bool, "phase": "...", "errors": [...], "steps": [...]}
 const path = require("path");
 const { execSync } = require("child_process");
@@ -16,11 +17,18 @@ function loadPlaywright() {
   const fs = require("fs");
   for (const p of ["/opt/pw-browsers/chromium-1194/chrome-linux/chrome"]) if (fs.existsSync(p)) opts.executablePath = p;
   const browser = await chromium.launch(opts);
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const width = Number(process.env.WALK_WIDTH || 1440);
+  const page = await browser.newPage({ viewport: { width, height: width < 800 ? 844 : 900 } });
   const errors = [], steps = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
-  const shot = async (n) => { if (shots) await page.screenshot({ path: path.join(shots, n + ".png") }); };
+  const shot = async (n) => {
+    if (width < 800) {
+      const sw = await page.evaluate(() => document.documentElement.scrollWidth);
+      if (sw > width + 1) errors.push(`${n}: the page is ${sw}px wide on a ${width}px screen`);
+    }
+    if (shots) await page.screenshot({ path: path.join(shots, n + ".png") });
+  };
   try {
     await page.goto(base + "/");
     await page.waitForSelector("#structure");
@@ -86,7 +94,7 @@ function loadPlaywright() {
     await page.click('button[data-view="delivery"]');
     await page.waitForTimeout(300);
     const live = await page.getAttribute("#live-link", "href");
-    const app = await browser.newPage();
+    const app = await browser.newPage({ viewport: { width, height: width < 800 ? 844 : 900 } });
     await app.goto(live);
     await app.waitForSelector("#meals .meal");
     await app.waitForSelector("#estimate .est");
@@ -95,6 +103,10 @@ function loadPlaywright() {
     await app.click("button[type=submit]");
     await app.waitForSelector("#offers td");
     const rows = await app.$$eval("#offers tr", (r) => r.length);
+    if (width < 800) {
+      const sw = await app.evaluate(() => document.documentElement.scrollWidth);
+      if (sw > width + 1) errors.push(`the live product is ${sw}px wide on a ${width}px screen`);
+    }
     steps.push(`live product has ${rows} offer row(s)`);
     const phase = await page.evaluate(async () => (await (await fetch("/api/state")).json()).meta.phase);
     await page.waitForTimeout(900);

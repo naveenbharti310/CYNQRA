@@ -231,6 +231,25 @@ class WorkforceTests(unittest.TestCase):
         self.assertTrue(all(binding.intelligence_of(e.store, w["id"]) == "model-a" for w in e.workers()))
         e.close()
 
+    def test_a_withdrawn_ai_moves_every_worker_on_it_and_the_ceo_is_told(self):
+        """An AI that can no longer be used (here retired mid-run) is not waited for: every worker on it is given
+        another through the same evaluation, the work continues, and the CEO is informed, not asked."""
+        e = self.engine()
+        self.assertTrue(all(binding.intelligence_of(e.store, w["id"]) == "model-a" for w in e.workers()))
+        self.reg.retire("model-a", "superseded by its provider")
+        run_journey(e, max_rounds=40)
+        self.assertEqual(e.meta["phase"], "accepted", e.meta.get("notice"))
+        self.assertFalse([w["id"] for w in e.workers() if binding.intelligence_of(e.store, w["id"]) == "model-a"],
+                         "no worker is left on the withdrawn AI")
+        stopped = [x for x in e.store.events() if x["event_type"] == "worker.stopped"]
+        self.assertTrue(stopped and stopped[0]["payload"]["cause"] == "withdrawn", stopped[:1])
+        notes = [n for n in e.store.all("ceo_notice") if n["kind"] == "intelligence_replaced"]
+        self.assertTrue(notes, "the CEO is told which AI replaced it")
+        self.assertIn("Model A", notes[0]["headline"] + notes[0]["detail"])
+        self.assertFalse([d for d in e.pending_decisions() if d["kind"] in ("provider_outage", "provider_account")],
+                         "a withdrawn AI is not an outage to wait out")
+        e.close()
+
     def test_why_a_call_failed(self):
         from cynqra.replacement import diagnose
         for text, cause in [("HTTP 402: You have exceeded your monthly included credits", "no_credit"),

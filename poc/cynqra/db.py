@@ -151,6 +151,12 @@ class Store:
                 out.append(d)
             return out
 
+    def last_events(self, n: int) -> list[dict]:
+        """The newest n events, oldest first, without reading the whole log (the screen asks for them every poll)."""
+        with self.lock:
+            row = self.conn.execute("SELECT seq FROM events ORDER BY seq DESC LIMIT 1 OFFSET ?", (n,)).fetchone()
+        return self.events(after=row[0] if row else 0)
+
     def count_events(self) -> int:
         with self.lock:
             return self.conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]

@@ -26,6 +26,11 @@ def artifact_index(run) -> list[str]:
     return [a["id"] for a in run.store.all("artifact")]
 
 
+def _as_list(value) -> list:
+    """A model may name one artifact as text, or answer with something that is not a list at all."""
+    return [value] if isinstance(value, str) else value if isinstance(value, list) else []
+
+
 def _deliver_artifacts(run, t: dict, ids: list[str]) -> None:
     inbox = run.workspace(t["owner_worker_id"], t["id"]) / "inbox"
     for aid in ids:
@@ -66,7 +71,7 @@ def assign(run, t: dict) -> dict:
         if run.meta["frozen"]:
             return frozen_during_call(run, t)
         known = set(artifact_index(run))
-        content["artifacts"] = [a for a in (content.get("artifacts") or []) if a in known]
+        content["artifacts"] = [a for a in _as_list(content.get("artifacts")) if isinstance(a, str) and a in known]
     handoff = run.send("Handoff", content, {"from_worker": sender, "to_worker": owner, "task_id": t["id"]}, t["id"], sender)
     _deliver_artifacts(run, t, handoff["artifacts"])
     t.update({"status": "ASSIGNED", "handoff_hash": handoff["object_hash"], "handoff": handoff})
@@ -221,7 +226,7 @@ def propose(run, t: dict, result: dict) -> dict:
     missing = [k for k in ("recommendation", "confidence", "what_would_change_this") if not str(result.get(k) or "").strip()]
     if missing:
         raise ProtocolError(f"proposal is missing {', '.join(missing)}")
-    evidence, extra = list(result.get("evidence_refs") or []), {}
+    evidence, extra = [str(e) for e in _as_list(result.get("evidence_refs")) if isinstance(e, (str, int, float))], {}
     action_type = PROPOSAL_ACTIONS[t["kind"]]
     if t["kind"] == "review_merge":
         g = run.gateway(owner, t["id"], "run_tests", target="integration", cwd=run.paths["integration"])
@@ -249,8 +254,8 @@ def propose(run, t: dict, result: dict) -> dict:
         evidence.append(f"{len(pre.get('test_ids', []))} tests passed in the build, preview health and smoke passed")
         side = result.get("side_action")
         if isinstance(side, dict) and side:
-            g = run.gateway(owner, t["id"], side.get("action_type", ""), target=side.get("target", ""))
-            extra["side_action"] = {"summary": side.get("summary", ""), "status": g["status"],
+            g = run.gateway(owner, t["id"], str(side.get("action_type") or ""), target=str(side.get("target") or ""))
+            extra["side_action"] = {"summary": str(side.get("summary") or ""), "status": g["status"],
                                     "reason": g["policy"]["reason"]}
     g = run.gateway(owner, t["id"], action_type, target=t["id"])
     if g["status"] == "denied":
@@ -295,7 +300,7 @@ def answer(run, t: dict) -> dict:
     if run.meta["frozen"]:
         return frozen_during_call(run, t)
     known = set(artifact_index(run))
-    content["artifacts"] = [a for a in (content.get("artifacts") or []) if a in known]
+    content["artifacts"] = [a for a in _as_list(content.get("artifacts")) if isinstance(a, str) and a in known]
     reply = run.send("Handoff", content, {"from_worker": who, "to_worker": t["owner_worker_id"], "task_id": t["id"]},
                      t["id"], who)
     _deliver_artifacts(run, t, reply["artifacts"])

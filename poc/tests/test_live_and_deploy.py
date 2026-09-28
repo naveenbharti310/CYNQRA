@@ -135,6 +135,14 @@ class DeployServiceTests(unittest.TestCase):  # A12
         self.assertFalse(pre["ok"])
         self.assertEqual(pre["log"][-1]["stage"], "BUILD")
 
+    def test_a_product_open_to_the_network_is_refused(self):
+        app = self.main / "app.py"
+        app.write_text(app.read_text().replace('("127.0.0.1", port)', '("0.0.0.0", port)'))
+        pre = deploy.build_to_verify(self.main, self.tmp.path / "rel", "r", [])
+        self.assertFalse(pre["ok"])
+        self.assertEqual(pre["log"][-1]["stage"], "BUILD")
+        self.assertEqual(pre["log"][-1]["note"], deploy.OPEN_TO_ALL)
+
     def test_failing_tests_stop_the_build(self):
         shutil.copy(FILES / "t_03/attempt1/store.py", self.main / "store.py")
         pre = deploy.build_to_verify(self.main, self.tmp.path / "rel", "r", [])

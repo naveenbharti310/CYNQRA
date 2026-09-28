@@ -7,6 +7,7 @@ release, if any, keeps serving. In the POC a deployment is a local process on 12
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import socket
 import subprocess
@@ -147,6 +148,17 @@ def contract_check(folder: Path, smoke_checks: list[dict]) -> dict:
         shutil.rmtree(work, ignore_errors=True)
 
 
+OPEN_TO_ALL = "app.py listens on every network address; the product must listen on 127.0.0.1 only"
+_EVERY_ADDRESS = re.compile(r"""["'](0\.0\.0\.0|::)["']|(Server|bind)\s*\(\s*\(\s*(""|'')\s*,""")
+
+
+def binds_every_address(folder: Path) -> bool:
+    """A model could write a server that anyone on the network can reach. Until products run in a sandbox (known
+    limit in docs/3_STATUS_AND_ROADMAP.md), a release whose code names every address is refused before preview."""
+    return any(_EVERY_ADDRESS.search(p.read_text(encoding="utf-8", errors="replace"))
+               for p in folder.rglob("*.py") if "__pycache__" not in p.parts)
+
+
 def build_to_verify(main: Path, releases: Path, release_id: str, smoke_checks: list[dict]) -> dict:
     """BUILD to VERIFY, run before the founder is asked. Returns the stage log and a preview report."""
     log = []
@@ -155,8 +167,11 @@ def build_to_verify(main: Path, releases: Path, release_id: str, smoke_checks: l
         shutil.rmtree(folder)
     shutil.copytree(main, folder)
     ok = (folder / "app.py").exists()
-    log.append({"stage": "BUILD", "ok": ok, "note": "copied main" if ok else "app.py missing, delivery contract broken"})
-    if not ok:
+    open_to_all = ok and binds_every_address(folder)
+    log.append({"stage": "BUILD", "ok": ok and not open_to_all,
+                "note": "app.py missing, delivery contract broken" if not ok else OPEN_TO_ALL if open_to_all
+                else "copied main"})
+    if not ok or open_to_all:
         return {"ok": False, "log": log, "folder": str(folder)}
     tests = run_unittests(folder)
     log.append({"stage": "TEST", "ok": tests["passed"], "note": f"{tests['ran']} tests", "test_ids": [t["id"] for t in tests["tests"]]})

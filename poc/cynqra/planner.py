@@ -115,12 +115,12 @@ def validate_plan(plan: dict, workers: list[dict], requirement_ids: list[str] | 
     if any(tasks.index(merge) < [x["id"] for x in tasks].index(b) for b in builds):
         raise IntelligenceError("review_merge must come after every build task")
     ws = [{"id": str(w["id"]).strip(), "name": str(w.get("name") or w["id"]).strip()}
-          for w in plan.get("workstreams") or [] if isinstance(w, dict) and str(w.get("id") or "").strip()]
+          for w in (plan.get("workstreams") if isinstance(plan.get("workstreams"), list) else []) if isinstance(w, dict) and str(w.get("id") or "").strip()]
     for t in tasks:
         if t["workstream_id"] not in {w["id"] for w in ws}:
             ws.append({"id": t["workstream_id"], "name": t["workstream_id"]})
     ms = [{"id": str(m["id"]).strip(), "name": str(m.get("name") or m["id"]).strip(), "due_day": as_int(m.get("due_day"), 0)}
-          for m in plan.get("milestones") or [] if isinstance(m, dict) and str(m.get("id") or "").strip()]
+          for m in (plan.get("milestones") if isinstance(plan.get("milestones"), list) else []) if isinstance(m, dict) and str(m.get("id") or "").strip()]
     if not ms:  # one milestone per workstream, in plan order, said to be derived
         ms = [{"id": "m_" + w["id"], "name": w["name"], "due_day": 0, "derived": True} for w in ws]
         for t in tasks:

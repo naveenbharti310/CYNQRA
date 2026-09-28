@@ -228,7 +228,8 @@ textarea.note{min-height:70px;resize:vertical;font-size:14px}
   header.top{height:auto;flex-wrap:wrap;padding:12px 16px;position:static}
   header.top .row{flex-wrap:wrap}
   .view{padding:16px}
-  .wiz-top{padding:0 16px}
+  .wiz-top{height:auto;min-height:64px;padding:10px 16px;flex-wrap:wrap;row-gap:8px}
+  .wiz-top .row{flex-wrap:wrap;row-gap:6px}
   .wiz-body{padding:16px}
   .hero{font-size:32px}
   .modes{flex-direction:column}
@@ -237,7 +238,9 @@ textarea.note{min-height:70px;resize:vertical;font-size:14px}
   .cols{grid-template-columns:1fr}
   .ribbon{grid-template-columns:repeat(3,minmax(0,1fr))}
   .stepper{grid-template-columns:repeat(5,minmax(0,1fr))}
-  .plan-table{display:block;overflow-x:auto}
+  .plan-table,table.tbl{display:block;overflow-x:auto;max-width:100%}
+  .row{flex-wrap:wrap;row-gap:8px}
+  .pill{max-width:100%;white-space:normal}
   .card{padding:16px}
   .dcard{padding:18px}
   .tree{padding:12px 0}
@@ -290,3 +293,8 @@ pre.log{max-height:220px;overflow:auto;font:12px/1.45 var(--mono);background:var
 .onode.founder{background:var(--paper)}
 .onode small{font-size:12px;color:var(--muted)}
 .plan-table tr.ms td{background:var(--paper);padding-top:10px}
+@media (max-width:760px){
+  .toasts{left:12px;right:12px}
+  .toast{min-width:0;max-width:none;padding:8px 12px;font-size:13px}
+  .toasts .toast:nth-last-child(n+2){display:none}
+}

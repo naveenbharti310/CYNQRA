@@ -13,7 +13,7 @@ been proven end to end on strong real AI models in its current form.
 
 | Area | Status |
 | --- | --- |
-| The full flow (idea → team → plan → parallel work → checks → delivery) | ✅ Built. 251 automated tests pass. |
+| The full flow (idea → team → plan → parallel work → checks → delivery) | ✅ Built. 258 automated tests pass. |
 | Demo mode (scripted words; real code, models, tests and going live) | ✅ Works end to end. It opens on Bluedip: nine members, twelve tasks, two mistakes caught by the checks, one question settled between colleagues, four CEO decisions, the Company Pack. Two smaller demos are in the list. |
 | Team built from the idea, with Specialists named from it | ✅ Built and tested. |
 | Team works in parallel, hands over, asks each other | ✅ Built and tested. |
@@ -63,6 +63,10 @@ Hugging Face PRO. Nothing in it is scripted: it is the test of whether real AI m
 - **Code the AI team writes runs on this computer without a sandbox**, as the same user, when it is tested and put
   live. Keys are kept out of its environment, but it could read files the user can read. Run only ideas you trust
   on a computer that holds nothing sensitive until the sandbox (roadmap 11) is built.
+- A release whose code listens on every network address (so anyone on the same network could use it) is refused
+  before preview. The check reads the code for the usual ways of writing that; it is a guard until the sandbox,
+  not a proof.
+- Times are recorded in Indian Standard Time.
 - The deployed product is a process on this computer; it stops when Cynqra closes and does not start again with it.
 - Workers answer in text; they do not yet use tools (search, calculators, file editing).
 - One model on a laptop answers one call at a time; laptop models are slow (5 to 10 words a second).

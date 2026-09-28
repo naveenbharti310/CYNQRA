@@ -23,9 +23,15 @@ class ObjectiveError(ValueError):
     pass
 
 
+# What a model may call an area, mapped to the catalog's name. "business" is an area of its own (roles.AREAS): it is
+# not an alias of product, or a business requirement would be filed as a product one.
 AREA_ALIASES = {"ai": "ai_ml", "ml": "ai_ml", "ai/ml": "ai_ml", "machine_learning": "ai_ml", "nonfunctional": "non_functional",
                 "non-functional": "non_functional", "ux": "design", "ui": "design", "testing": "qa", "quality": "qa",
-                "infrastructure": "devops", "ops": "devops", "deploy": "deployment", "business": "product"}
+                "infrastructure": "devops", "ops": "devops", "deploy": "deployment", "strategy": "business",
+                "operations": "business", "financial": "finance", "financials": "finance", "pricing": "finance",
+                "marketing": "market", "go_to_market": "market", "gtm": "market", "sales": "market",
+                "compliance": "legal", "regulatory": "legal", "regulation": "legal", "privacy": "legal",
+                "specialist": "domain", "domain_expertise": "domain", "industry": "domain"}
 
 
 def _slug_list(value) -> list[str]:
@@ -104,13 +110,13 @@ def draft(run, messy: str) -> dict:
     data, usage = run.intel.structure_objective(messy)
     run.record_call("objective", "objective_intelligence", "structure_objective", usage)
     structured = {k: str(data.get(k) or "").strip() for k in FIELDS}
-    inferred = [k for k in (data.get("inferred_fields") or []) if k in FIELDS]
+    inferred = [k for k in _slug_list(data.get("inferred_fields")) if k in FIELDS]
     prev = run.objective()
     version = prev["version"] + 1 if prev else 1
     obj = {"id": "obj_1", "company_id": run.cid, "statement": messy.strip(), "structured": structured,
            "inferred_fields": inferred, "missing_fields": [k for k in FIELDS if not structured[k]],
            "founder_constraints": (prev or {}).get("founder_constraints") or {}, "status": "draft", "version": version,
-           "notice": data.get("notice", ""), "intelligence": usage["label"], "created_at": now()}
+           "notice": str(data.get("notice") or ""), "intelligence": usage["label"], "created_at": now()}
     run.store.put("objective", "obj_1", obj)
     run.event("objective.created" if version == 1 else "objective.changed", "objective", "obj_1",
               {"version": version, "status": "draft", "statement_hash": digest(messy.strip()),

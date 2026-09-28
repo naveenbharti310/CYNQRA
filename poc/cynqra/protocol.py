@@ -5,6 +5,8 @@ for. Routing fields are always set by the platform, never taken from model text.
 """
 from __future__ import annotations
 
+import json
+
 from .db import digest, now
 
 TEMPLATES = {
@@ -33,14 +35,27 @@ class ProtocolError(ValueError):
     pass
 
 
+def _shape(value, template):
+    """A model's value in the template's shape: a list of text where the template holds a list, else one text.
+    A model that answers a field with a number, a list or an object is read, not trusted to be the right type."""
+    if isinstance(template, list):
+        value = [value] if isinstance(value, str) else value if isinstance(value, list) else []
+        return [v.strip() for v in value if isinstance(v, str) and v.strip()]
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)[:4000]
+    return str(value)
+
+
 def build(kind: str, content: dict | None, routing: dict, correlation_id: str) -> dict:
     """Template, then model content (non routing keys only), then routing, then envelope."""
     if kind not in TEMPLATES:
         raise ProtocolError(f"unknown protocol {kind}")
     obj = dict(TEMPLATES[kind])
-    for key, value in (content or {}).items():
+    for key, value in (content if isinstance(content, dict) else {}).items():
         if key in obj and key not in ROUTING:
-            obj[key] = value
+            obj[key] = _shape(value, obj[key])
     obj.update(routing)
     obj["protocol"] = kind
     obj["protocol_version"] = 1
