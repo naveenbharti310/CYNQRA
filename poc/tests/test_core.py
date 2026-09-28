@@ -78,7 +78,8 @@ class PolicyTests(unittest.TestCase):  # A13
     def test_low_work_in_workspace_is_allowed(self):
         self.assertEqual(self.ev("Engineer", "write_file"), "ALLOW")
         self.assertEqual(self.ev("Engineer", "run_tests"), "ALLOW")
-        self.assertEqual(self.ev("PM", "assign_task"), "ALLOW")
+        self.assertEqual(self.ev("CTO", "assign_task"), "ALLOW", "a cofounder hands out its team's work")
+        self.assertEqual(self.ev("PM", "assign_task"), "DENY", "a team member does not hand out work")
 
     def test_medium_goes_to_the_founder_d17(self):
         for role, action in (("Engineer", "merge_to_main"), ("CTO", "merge_to_main"), ("PM", "product_rule_decision")):

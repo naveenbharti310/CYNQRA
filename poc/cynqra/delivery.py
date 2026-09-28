@@ -38,6 +38,9 @@ def metrics(run) -> dict:
         "tasks_verified": len(verified),
         "defects_caught_before_verified": len([v for v in ver if v["verdict"] in ("REQUIRES_REWORK", "REQUIRES_HUMAN")]),
         "blockers_cleared_without_founder": len([b for b in run.store.all("blocker_cleared") if not b["founder_involved"]]),
+        "sent_back_by_cofounders": sum(int(t.get("review_rounds") or 0) for t in tasks),
+        "reviewed_by_cofounders": len([t for t in tasks if any(r["verdict"] == "approve" for r in t.get("reviews") or [])]),
+        "review_concerns": [{"task": t["id"], **t["review_concern"]} for t in tasks if t.get("review_concern")],
         "actions_stopped_by_policy": len([a for a in run.store.all("action") if a["status"] == "denied"]),
         "fixed_by_workers_own_checks": len([e for e in run.store.events() if e["event_type"] == "worker.self_checked"
                                             and not e["payload"].get("passed")]),
@@ -129,12 +132,17 @@ def company_pack(run) -> dict:
                      "files": [o.get("file") for o in t.get("outputs") or [] if isinstance(o, dict)],
                      "verified": t["status"] == "VERIFIED"})
     decided = [d for d in run.store.all("decision") if d["status"] != "pending"]
-    return {"documents": docs,
+    workers = run.workers()
+    org = [{"cofounder": c["title"], "why": c.get("why", ""),
+            "team": [{"title": w["title"], "why": w.get("why", "")} for w in workers if w.get("reports_to") == c["id"]]}
+           for c in workers if c.get("tier") == "cofounder"]
+    return {"organization": org, "documents": docs,
             "ceo_decisions": [{"kind": d["kind"], "problem": d["problem"][:200], "outcome": d.get("outcome_label")}
                               for d in decided],
             "ceo_informed": [{k: n[k] for k in ("kind", "headline", "detail", "usd_difference")}
                              for n in run.store.all("ceo_notice")],
             "settled_by_the_team": len([b for b in run.store.all("blocker_cleared") if not b["founder_involved"]]),
+            "sent_back_by_cofounders": sum(int(t.get("review_rounds") or 0) for t in run.tasks()),
             "ceo_interventions": run.count("intervention")}
 
 
@@ -157,6 +165,8 @@ def replay(run, task_id: str) -> dict:
         "result": [o.get("file") or o for o in (t.get("outputs") or [])] or ([t["decision_id"]] if t.get("decision_id") else []),
         "verification": [f"{v['verdict']} by {v['method']}, {len(v['test_ids'])} test ids" for v in verifs],
     }
+    if t.get("reviews"):
+        facts["reviews"] = [f"{r['verdict']} by {r['by']}: {r['note'][:160]}" for r in t["reviews"]]
     missing = [k for k, v in facts.items() if not v]
     return {"task_id": task_id, "facts": facts, "missing": missing, "complete": not missing, "events": len(events),
             "protocols": [p for p in protos if p], "test_ids": sorted({i for v in verifs for i in v["test_ids"]})}

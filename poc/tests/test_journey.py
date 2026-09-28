@@ -61,16 +61,17 @@ class JourneyTests(unittest.TestCase):
 
     def test_workforce_synthesized_then_approved(self):  # A3, Stages 2 and 3
         prop = self.e.proposal()
-        self.assertEqual({r["role"]: r["quantity"] for r in prop["roles"]}, {"CTO": 1, "PM": 1, "Engineer": 2})
+        self.assertEqual({r["role"]: r["quantity"] for r in prop["roles"]}, {"CTO": 1, "CPO": 1, "PM": 1, "Engineer": 2})
+        self.assertEqual(prop["cofounders"], ["CTO", "CPO"], "a simple internal tool: two cofounders")
         self.assertTrue(all(r["why"] for r in prop["roles"]))
         self.assertTrue(all(prop["coverage"].values()), "every requirement covered by a proposed role")
         gate = [d for d in self.e.store.all("decision") if d["kind"] == "approve_workforce"][0]
         self.assertEqual(gate["outcome_label"], "approved")
         ws = self.e.store.all("worker")
-        self.assertEqual(sorted(w["id"] for w in ws), ["w_cto", "w_eng_a", "w_eng_b", "w_pm"])
+        self.assertEqual(sorted(w["id"] for w in ws), ["w_cpo", "w_cto", "w_eng_a", "w_eng_b", "w_pm"])
         self.assertEqual({w["id"]: w["reports_to"] for w in ws},
-                         {"w_cto": "founder", "w_pm": "w_cto", "w_eng_a": "w_pm", "w_eng_b": "w_pm"},
-                         "reporting lines generated from the roles present")
+                         {"w_cto": "founder", "w_cpo": "founder", "w_pm": "w_cpo", "w_eng_a": "w_cto",
+                          "w_eng_b": "w_cto"}, "each team member reports to the cofounder who chose it")
         org = self.e.store.get("organization", "org_1")
         self.assertEqual((org["proposal"], org["status"]), (prop["id"], "active"))
 
@@ -81,7 +82,10 @@ class JourneyTests(unittest.TestCase):
         self.assertTrue(plan["escalation_conditions"])
         for t in self.e.tasks():
             self.assertTrue(t["acceptance_criteria"] and t["verification_gate"] and t["accountable"], t["id"])
-        self.assertEqual(self.e.task("t_03")["accountable"], "w_pm")
+        t3 = self.e.task("t_03")
+        self.assertEqual((t3["accountable"], t3["handoff_from"], t3["reviewed_by"], t3["blockers_to"][0]),
+                         ("w_cto", "w_cto", "w_cto", "w_cto"), "the CTO runs the engineers' work")
+        self.assertEqual(self.e.task("t_05")["handoff_from"], "orchestrator", "a cofounder's own task comes from the plan")
         f = self.e.store.get("forecast", "current")
         self.assertEqual(set(f["layers"]), {"inference", "tools", "infrastructure", "verification", "reserve"})
         self.assertTrue(f["fits"])
@@ -95,7 +99,7 @@ class JourneyTests(unittest.TestCase):
         r = self.e.final_report()
         self.assertIn("app.py", r["artifacts"])
         self.assertTrue(r["live_url"])
-        self.assertEqual({c["worker_id"] for c in r["performance"]}, {"w_cto", "w_pm", "w_eng_a", "w_eng_b"})
+        self.assertEqual({c["worker_id"] for c in r["performance"]}, {"w_cto", "w_cpo", "w_pm", "w_eng_a", "w_eng_b"})
         eng = next(c for c in r["performance"] if c["worker_id"] == "w_eng_a")["overall"]
         self.assertEqual((eng["quality"]["verifications"], eng["quality"]["acceptance_rate"]), (2, 0.5))
         pack = r["company_pack"]  # what the founding team hands the CEO
@@ -189,7 +193,8 @@ class JourneyTests(unittest.TestCase):
 
     def test_the_script_is_staffed_and_metered_like_a_model(self):  # WORKER is not MODEL, even in the demo
         view = self.e.workforce_view()
-        self.assertEqual(view["models_in_use"], {"scripted-demo-candidate-tracker": ["w_cto", "w_pm", "w_eng_a", "w_eng_b"]})
+        self.assertEqual(sorted(view["models_in_use"]["scripted-demo-candidate-tracker"]),
+                         ["w_cpo", "w_cto", "w_eng_a", "w_eng_b", "w_pm"])
         self.assertEqual([m["runtime"] for m in view["registry"]], ["scripted"])
         calls = self.e.store.all("call")
         self.assertTrue(calls and all(c["model_id"] == "scripted-demo-candidate-tracker" for c in calls))
@@ -225,18 +230,44 @@ class BluedipJourneyTests(unittest.TestCase):
         with urllib.request.urlopen(req, timeout=5) as r:
             return json.loads(r.read())
 
-    def test_the_team_follows_the_idea(self):
-        titles = sorted(w["title"] for w in self.e.workers())
-        self.assertEqual(titles, sorted(["Business Lead", "Project Manager", "Senior Data Scientist",
-                                         "Restaurant Revenue Management Specialist", "CFO", "Market Analyst",
-                                         "Legal and Compliance Advisor", "CTO", "Software Engineer"]))
+    def test_three_cofounders_each_with_the_team_it_chose(self):
+        ws = self.e.workers()
+        by = {w["id"]: w for w in ws}
+        self.assertEqual(sorted(w["title"] for w in ws if w["tier"] == "cofounder"),
+                         ["CFO", "CTO", "Chief Product Officer"])
+        team = lambda lead: sorted(w["title"] for w in ws if w["reports_to"] == lead)
+        self.assertEqual(team("w_cto"), ["Backend Engineer", "DevOps Engineer", "Frontend Engineer", "QA Engineer",
+                                         "Senior Data Scientist"])
+        self.assertEqual(team("w_cpo"), ["Market Analyst", "Product Designer", "Project Manager",
+                                         "Restaurant Revenue Management Specialist"])
+        self.assertEqual(team("w_cfo"), ["Legal and Compliance Advisor"])
+        self.assertTrue(all(by[w]["reports_to"] == "founder" for w in ("w_cto", "w_cpo", "w_cfo")))
+        self.assertFalse([w for w in ws if w["role"] == "CEO"], "the founder is the CEO")
+
+    def test_cofounders_ran_their_areas(self):
+        for t in self.e.tasks():
+            owner = self.e.worker(t["owner_worker_id"])
+            if owner["tier"] == "cofounder":
+                self.assertEqual((t["handoff_from"], t.get("reviewed_by")), ("orchestrator", None), t["id"])
+            else:
+                self.assertEqual(t["handoff_from"], owner["reports_to"], t["id"])
+                self.assertEqual(t["reviewed_by"], owner["reports_to"], t["id"])
+                self.assertEqual(t["reviews"][-1]["verdict"], "approve", t["id"])
+        design = self.e.task("t_10")
+        self.assertEqual([r["verdict"] for r in design["reviews"]], ["revise", "approve"], "the CPO sent it back once")
+        self.assertIn("margin", design["reviews"][0]["note"])
+        self.assertIn("Margin change after food cost", (self.e.paths["main"] / "docs" / "design.md").read_text()
+                      .replace("**margin change after food cost**", "Margin change after food cost"))
+        self.assertEqual(self.e.metrics()["sent_back_by_cofounders"], 1)
 
     def test_the_company_pack_holds_the_foundation_all_checked(self):
         self.assertEqual(self.e.meta["phase"], "accepted")
         pack = self.e.final_report()["company_pack"]
         authors = {d["author"] for d in pack["documents"] if d["verified"]}
-        self.assertTrue({"Business Lead", "Market Analyst", "Restaurant Revenue Management Specialist",
-                         "Legal and Compliance Advisor", "CFO", "Senior Data Scientist", "Project Manager"} <= authors)
+        self.assertTrue({"Chief Product Officer", "Market Analyst", "Restaurant Revenue Management Specialist",
+                         "Legal and Compliance Advisor", "CFO", "Senior Data Scientist", "Project Manager",
+                         "Product Designer", "QA Engineer", "DevOps Engineer"} <= authors)
+        self.assertEqual([o["cofounder"] for o in pack["organization"]], ["CTO", "Chief Product Officer", "CFO"])
         docs = self.e.paths["main"] / "docs"
         for name, marks in (("market_analysis.md", ["Assumption", "No market-size figure"]),
                             ("revenue_management_report.md", ["Sourced", "Confirm with a professional"]),
@@ -248,19 +279,21 @@ class BluedipJourneyTests(unittest.TestCase):
                 self.assertIn(m, text, f"{name}: trust is the product")
 
     def test_the_checks_caught_two_mistakes_before_they_counted(self):
-        vs = {t: [v["verdict"] for v in self.e.store.all("verification") if v["task_id"] == t] for t in ("t_06", "t_10")}
-        self.assertEqual(vs, {"t_06": ["REQUIRES_REWORK", "VERIFIED"], "t_10": ["REQUIRES_REWORK", "VERIFIED"]})
+        vs = {t: [v["verdict"] for v in self.e.store.all("verification") if v["task_id"] == t] for t in ("t_06", "t_11")}
+        self.assertEqual(vs, {"t_06": ["REQUIRES_REWORK", "VERIFIED"], "t_11": ["REQUIRES_REWORK", "VERIFIED"]})
         first = next(v for v in self.e.store.all("verification") if v["task_id"] == "t_06")
         self.assertGreater(first["checks"]["backtest"]["model_mae"], first["checks"]["backtest"]["baseline_mae"])
 
-    def test_a_doubt_went_to_the_right_colleague_not_the_ceo(self):
+    def test_doubts_went_to_the_colleague_who_knows_or_the_cofounder_never_the_ceo(self):
         cleared = self.e.store.all("blocker_cleared")
         self.assertEqual([(b["task_id"], b["by"], b["founder_involved"]) for b in cleared],
-                         [("t_10", "w_spec_revenue_management", False)])
+                         [("t_11", "w_spec_revenue_management", False), ("t_12", "w_cto", False)])
 
     def test_the_ceo_decided_only_ceo_questions(self):
         self.assertEqual([d["kind"] for d in self.answered], ["decision", "review_merge", "deploy", "accept_delivery"])
         self.assertEqual(self.answered[0]["source"], "w_cfo")
+        self.assertEqual((self.answered[2]["source"], self.answered[2]["extra"]["endorsed_by"]), ("w_devops", "w_cto"),
+                         "DevOps's proposal reached the CEO through the CTO")
         self.assertIn("50%", (self.e.paths["main"] / "docs" / "DECISIONS.md").read_text(encoding="utf-8"))
 
     def test_the_live_app_shows_the_owners_example_loses_money_and_a_better_offer(self):
@@ -307,11 +340,12 @@ class RestaurantJourneyTests(unittest.TestCase):
 
     def test_the_organization_was_synthesized_for_the_objective(self):
         roles = sorted(w["role"] for w in self.e.workers())
-        self.assertEqual(roles, sorted(["CEO", "CTO", "PM", "DataScientist", "BackendEngineer", "FrontendEngineer",
+        self.assertEqual(roles, sorted(["CPO", "CTO", "PM", "DataScientist", "BackendEngineer", "FrontendEngineer",
                                         "Designer", "DevOps", "QA"]))
-        self.assertEqual(self.e.worker("w_ceo")["reports_to"], "founder")
-        self.assertEqual(self.e.worker("w_ds")["reports_to"], "w_ceo")
-        self.assertEqual(self.e.worker("w_devops")["reports_to"], "w_pm")
+        self.assertEqual(self.e.worker("w_cpo")["reports_to"], "founder")
+        self.assertEqual(self.e.worker("w_ds")["reports_to"], "w_cto")
+        self.assertEqual(self.e.worker("w_devops")["reports_to"], "w_cto")
+        self.assertEqual(self.e.worker("w_design")["reports_to"], "w_cpo")
 
     def test_the_backtest_rejected_the_first_forecast(self):
         vs = [v for v in self.e.store.all("verification") if v["task_id"] == "t_07"]

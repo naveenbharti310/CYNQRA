@@ -5,16 +5,18 @@ work, and asks you only what a CEO should decide.**
 
 | | |
 | --- | --- |
-| **What** | An expert team on demand, for any idea. You are the CEO. Cynqra works out which experts your idea needs, gives each the best AI for its job, and they work together like a real company. You receive the Company Pack: the foundation documents, the product, your decisions and what it cost. |
+| **What** | An expert team on demand, for any idea, built the way a founder builds a real company. You are the CEO. Cynqra proposes the cofounders your company needs, each cofounder chooses the team for its area, and each member gets the best AI for its job. You receive the Company Pack: the foundation documents, the product, your decisions and what it cost. |
 | **Why** | Building a product has become cheap. Knowing what a real company needs, and trusting AI work you cannot judge yourself, has not. With a single AI chat you must know what to ask and check every answer; with Cynqra, the team does, and the work is checked before it counts. |
-| **How** | You describe the company. Cynqra proposes the team; you approve it, then the plan and budget. The team works at the same time, hands work over, and asks the right colleague when in doubt. Every piece of work passes an independent check. You decide only the real choices: money, risk, going live. |
+| **How** | You describe the company. Cynqra proposes your cofounders, each cofounder chooses its team, and you approve the whole organization once, then the plan and budget. Cofounders run their areas: they hand out their team's work, answer its doubts and review it after an independent check. You decide only the real choices: money, risk, going live. |
 
 ## See it: the Bluedip demo
 
 A founder describes **Bluedip**, an app that predicts a restaurant's footfall and revenue hour by hour and estimates
-what an offer will do before the owner runs it. Cynqra builds the team the idea needs: a Data Scientist, a Restaurant
-Revenue Management Specialist, a CFO, a Market Analyst, a Legal and Compliance Advisor, a Project Manager, a CTO and
-an engineer. They lay the company's foundation, build and check the models and the app, and put it live.
+what an offer will do before the owner runs it. Cynqra proposes three cofounders: a CTO, a Chief Product Officer and
+a CFO. The CTO builds a team of a Data Scientist, Backend and Frontend Engineers, DevOps and QA; the Chief Product
+Officer a Project Manager, a Designer, a Market Analyst and a Restaurant Revenue Management Specialist; the CFO a
+Legal and Compliance Advisor. They lay the company's foundation, build and check the models and the app, and put it
+live.
 
 In the live app, the owner's own idea, 50% off for at most 15 customers from 1 pm to 4 pm, turns out to raise revenue
 and **lose money after food cost**, because customers who would have come anyway pay half too. Bluedip recommends 20%

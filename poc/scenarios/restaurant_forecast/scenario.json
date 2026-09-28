@@ -1,7 +1,7 @@
 {
   "id": "restaurant_forecast",
   "title": "Restaurant covers forecast",
-  "about": "A nine-worker organization (CEO, CTO, PM, Data Scientist, Backend, Frontend, Designer, DevOps, QA) builds a 14-day covers forecast and prep plan for a restaurant kitchen: seven documents, one product rule for the founder, a forecast the platform backtests (the first method fails and is reworked), the store, the app, acceptance tests, a merge and a deploy by DevOps.",
+  "about": "A nine-worker organization with two cofounders: a CTO leading a Data Scientist, Backend, Frontend, DevOps and QA, and a Chief Product Officer leading a Project Manager and a Designer. builds a 14-day covers forecast and prep plan for a restaurant kitchen: seven documents, one product rule for the founder, a forecast the platform backtests (the first method fails and is reworked), the store, the app, acceptance tests, a merge and a deploy by DevOps.",
   "note": "Prepared script for demo mode. Every word a worker says in demo mode comes from this file, and the product shows that. Code in files/ is real and is tested, backtested and deployed for real.",
   "settings": {
     "self_checks": 0
@@ -139,86 +139,96 @@
     ]
   },
   "workforce": {
-    "summary": "A forecasting product needs a data scientist to own the method and its evidence, engineers for the store and the page, a designer for the kitchen's screen, QA for acceptance, and DevOps to ship it; a CEO sets the business rule, a PM coordinates, a CTO owns architecture and the merge.",
-    "roles": [
-      {
-        "role": "CEO",
-        "quantity": 1,
-        "why": "Owns the business brief and the prep margin, a trade-off between waste and running short.",
-        "requirement_ids": [
-          "r_01",
-          "r_06"
-        ]
-      },
+    "summary": "A forecasting product for one kitchen needs a CTO to own the method, the build and the release, and a Chief Product Officer to own what the kitchen reads each morning and the business rule on prep.",
+    "cofounders": [
       {
         "role": "CTO",
-        "quantity": 1,
-        "why": "Owns the architecture and reviews and merges the release.",
+        "why": "Owns the architecture, the engineering team, and reviews and merges the release.",
         "requirement_ids": [
           "r_07"
         ]
       },
       {
-        "role": "PM",
-        "quantity": 1,
-        "why": "Writes the spec and the acceptance checks, assigns the work and clears Blockers.",
+        "role": "CPO",
+        "why": "Owns the business brief and the prep margin, a trade-off between waste and running out.",
         "requirement_ids": [
           "r_01",
-          "r_02",
-          "r_08"
-        ]
-      },
-      {
-        "role": "DataScientist",
-        "quantity": 1,
-        "why": "Owns the forecasting method, its evaluation and forecast.py.",
-        "requirement_ids": [
-          "r_03",
-          "r_04"
-        ]
-      },
-      {
-        "role": "BackendEngineer",
-        "quantity": 1,
-        "why": "Builds the covers history store.",
-        "requirement_ids": [
-          "r_02",
-          "r_04"
-        ]
-      },
-      {
-        "role": "FrontendEngineer",
-        "quantity": 1,
-        "why": "Builds the app and the kitchen's page.",
-        "requirement_ids": [
-          "r_05"
-        ]
-      },
-      {
-        "role": "Designer",
-        "quantity": 1,
-        "why": "Designs the one screen the kitchen reads every morning.",
-        "requirement_ids": [
-          "r_05"
-        ]
-      },
-      {
-        "role": "DevOps",
-        "quantity": 1,
-        "why": "Writes the runbook and proposes and runs the deploy on the office computer.",
-        "requirement_ids": [
-          "r_09"
-        ]
-      },
-      {
-        "role": "QA",
-        "quantity": 1,
-        "why": "Writes the test plan and the automated acceptance tests.",
-        "requirement_ids": [
-          "r_08"
+          "r_06"
         ]
       }
-    ]
+    ],
+    "teams": {
+      "CTO": {
+        "summary": "A data scientist owns the method and its evidence, engineers the store and the page, QA the acceptance tests, and DevOps ships it.",
+        "roles": [
+          {
+            "role": "DataScientist",
+            "quantity": 1,
+            "why": "Owns the forecasting method, its evaluation and forecast.py.",
+            "requirement_ids": [
+              "r_03",
+              "r_04"
+            ]
+          },
+          {
+            "role": "BackendEngineer",
+            "quantity": 1,
+            "why": "Builds the covers history store.",
+            "requirement_ids": [
+              "r_02",
+              "r_04"
+            ]
+          },
+          {
+            "role": "FrontendEngineer",
+            "quantity": 1,
+            "why": "Builds the app and the kitchen's page.",
+            "requirement_ids": [
+              "r_05"
+            ]
+          },
+          {
+            "role": "QA",
+            "quantity": 1,
+            "why": "Writes the test plan and the automated acceptance tests.",
+            "requirement_ids": [
+              "r_08"
+            ]
+          },
+          {
+            "role": "DevOps",
+            "quantity": 1,
+            "why": "Writes the runbook and proposes and runs the deploy on the office computer.",
+            "requirement_ids": [
+              "r_09"
+            ]
+          }
+        ]
+      },
+      "CPO": {
+        "summary": "A Project Manager writes the spec and coordinates; a Designer designs the one screen the kitchen reads every morning.",
+        "roles": [
+          {
+            "role": "PM",
+            "quantity": 1,
+            "why": "Writes the spec and the acceptance checks, assigns the work and clears Blockers.",
+            "requirement_ids": [
+              "r_01",
+              "r_02",
+              "r_08"
+            ]
+          },
+          {
+            "role": "Designer",
+            "quantity": 1,
+            "why": "Designs the one screen the kitchen reads every morning.",
+            "requirement_ids": [
+              "r_05"
+            ]
+          }
+        ]
+      }
+    }
   },
   "plan": {
     "workstreams": [
@@ -265,7 +275,7 @@
         "id": "t_01",
         "workstream_id": "ws_brief",
         "kind": "document",
-        "owner_worker_id": "w_ceo",
+        "owner_worker_id": "w_cpo",
         "title": "Business brief",
         "inputs": "",
         "expected_output": "business_brief.md",
@@ -316,7 +326,7 @@
         "id": "t_03",
         "workstream_id": "ws_brief",
         "kind": "decision",
-        "owner_worker_id": "w_ceo",
+        "owner_worker_id": "w_cpo",
         "title": "Prep margin",
         "inputs": "",
         "expected_output": "A product rule for the prep margin, as an Approval",
@@ -584,6 +594,13 @@
     ]
   },
   "assign": {
+    "t_02": {
+      "artifacts": [
+        "t_01/business_brief.md"
+      ],
+      "context_ref": "objective v1, the business brief",
+      "acceptance_check": "The spec for the kitchen's forecast and numbered acceptance checks for every rule of the brief."
+    },
     "t_04": {
       "artifacts": [
         "t_02/product_spec.md",
@@ -814,5 +831,9 @@
       }
     ]
   },
-  "answer_blocker": {}
+  "answer_blocker": {},
+  "review_default": {
+    "verdict": "approve",
+    "note": "Checked against the handoff and its acceptance criteria. Approved."
+  }
 }

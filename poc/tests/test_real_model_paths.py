@@ -261,7 +261,7 @@ class OutageTests(unittest.TestCase):
         e.resume()
         self.assertEqual(e.meta["phase"], "planning")
         self.assertEqual([d["kind"] for d in e.pending_decisions()], ["approve_roadmap"])
-        self.assertEqual(len([x for x in e.store.events() if x["event_type"] == "worker.hired"]), 4)
+        self.assertEqual(len([x for x in e.store.events() if x["event_type"] == "worker.hired"]), 5)
         e.close()
 
 

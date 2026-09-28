@@ -52,9 +52,12 @@ function loadPlaywright() {
     if (st.objective.structured.priorities !== "Honest estimates first, then recommendations, then growth") errors.push("objective edit was lost");
     if (st.meta.mode !== "demo") errors.push(`mode is ${st.meta.mode}, expected demo`);
     steps.push("founder edits to a field, the budget and a constraint were kept");
-    const roles = await page.$$eval(".wiz-right .tbl tbody tr", (r) => r.length);
-    if (roles !== 9) errors.push(`expected 9 proposed roles, saw ${roles}`);
-    steps.push("workforce proposed");
+    const cofs = await page.$$eval(".wiz-right .tbl tbody tr.cof-row", (r) => r.length);
+    const team = await page.$$eval(".wiz-right .tbl tbody tr.team-row", (r) => r.length);
+    if (cofs !== 3 || team !== 10) errors.push(`expected 3 cofounders and 10 team members, saw ${cofs} and ${team}`);
+    const chart = await page.$$eval(".ochart .onode.cofounder", (n) => n.length);
+    if (chart !== 3) errors.push(`the org chart shows ${chart} cofounders`);
+    steps.push("3 cofounders and the 10 team members they chose, as an org chart");
     await shot("02_workforce");
     await page.click("#approve-workforce");
     await page.waitForSelector("#approve-plan");

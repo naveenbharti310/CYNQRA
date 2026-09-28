@@ -13,10 +13,11 @@ been proven end to end on strong real AI models in its current form.
 
 | Area | Status |
 | --- | --- |
-| The full flow (idea → team → plan → parallel work → checks → delivery) | ✅ Built. 264 automated tests pass. |
-| Demo mode (scripted words; real code, models, tests and going live) | ✅ Works end to end. It opens on Bluedip: nine members, twelve tasks, two mistakes caught by the checks, one question settled between colleagues, four CEO decisions, the Company Pack. Two smaller demos are in the list. |
-| Team built from the idea, with Specialists named from it | ✅ Built and tested. |
-| Team works in parallel, hands over, asks each other | ✅ Built and tested. |
+| The full flow (idea → team → plan → parallel work → checks → delivery) | ✅ Built. 272 automated tests pass. |
+| Demo mode (scripted words; real code, models, tests and going live) | ✅ Works end to end. It opens on Bluedip: three cofounders and the ten team members they chose, seventeen tasks, two mistakes caught by the checks, one piece of work sent back by a cofounder, two questions settled inside the team, four CEO decisions, the Company Pack. Two smaller demos are in the list. |
+| Cofounders proposed from the idea, each choosing its own team, Specialists named from it | ✅ Built and tested. |
+| Cofounders run their areas: hand out, answer doubts, review before work counts, endorse proposals to the CEO | ✅ Built and tested. |
+| Team works in parallel | ✅ Built and tested. |
 | Best AI per member, measured | ✅ Built and tested. |
 | When a member stops: finds out why first; replaces only an AI that cannot do the work, and tells the CEO the cost | ✅ Built and tested. |
 | Prediction models checked on data they have not seen | ✅ Built and tested (a backtest against last week's numbers). |
@@ -75,6 +76,10 @@ Hugging Face PRO. Nothing in it is scripted: it is the test of whether real AI m
 - The deployed product is a process on this computer; it stops when Cynqra closes and does not start again with it.
 - Workers answer in text; they do not yet use tools (search, calculators, file editing).
 - One model on a laptop answers one call at a time; laptop models are slow (5 to 10 words a second).
+- A cofounder does one thing at a time, like every member: with a large team, its hand-outs and reviews can make the
+  others wait. How much this slows a real run is to be measured on real models.
+- A cofounder's proposal of its own team is written in that cofounder's role by the AI Cynqra uses for planning;
+  each cofounder gets its own AI once the organization is approved.
 - The evidence for choosing models is thin (1 to 3 trial tasks per model) until more projects run.
 - The desktop app keeps everything on one computer; there is no multi-user version.
 - The demo video (`poc/demo/`) still shows the earlier candidate-tracker demo.

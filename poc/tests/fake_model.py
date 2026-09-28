@@ -42,8 +42,13 @@ def answer(prompt: str) -> str:
         out = S["objective"]
     elif "Decompose the objective into requirements" in prompt:
         out = S["requirements"]
-    elif "Synthesize the workforce for this objective" in prompt:
-        out = S["workforce"]
+    elif "choose the cofounders this company needs" in prompt:
+        out = {"summary": S["workforce"]["summary"], "cofounders": S["workforce"]["cofounders"]}
+    elif "Propose the team you need for your own area" in prompt:
+        lead = next((c for c in S["workforce"]["teams"] if f"(w_{c.lower()})" in prompt), None)
+        out = S["workforce"]["teams"].get(lead) or {"summary": "", "roles": []}
+    elif "Review it as the cofounder accountable for this area" in prompt:
+        out = S.get("review_default") or {"verdict": "approve", "note": "Checked against the handoff. Approved."}
     elif "Plan the work for this organization" in prompt:
         out = S["plan"]
     elif _task_in(prompt, "Assign task "):

@@ -1,20 +1,25 @@
 """The catalog: every role Cynqra can staff an organization with, the kinds of work there are, and how each kind
 of work is proven done.
 
-Product definition (Cynqra Product Flows and Architecture v1), section 2: the organization is synthesized from the
-objective, not fixed. Everything a role or a task type means to the platform is declared here, and nowhere else:
+The organization is built the way a founder builds a real company. The founder is the CEO. Cynqra first proposes
+the cofounders the company needs (a CTO, a Chief Product Officer, a CFO, and a Chief Compliance Officer for a
+regulated business), each with a reason; then each cofounder proposes the team for its own area. Cofounders run
+their areas: they hand out their team's work, answer its doubts, review its work before it counts, and bring the
+founder only the decisions a CEO should make. Everything a role or a task type means to the platform is declared
+here, and nowhere else:
 
 TASK_TYPES   what a task can be, its risk tier, and the verifier that decides it is done
 DOC_TYPES    the documents a worker can write, and the rules their verifier checks
 ROLES        for each role:
+               tier        "cofounder" (leads an area and reports to the founder) or "team" (works in a cofounder's
+                           area and reports to that cofounder)
                owns        the task types a worker in this role may own
                documents   the document types it writes
                areas       the requirement areas it covers (the synthesizer checks every requirement is covered)
                authority   its row of the authority matrix (policy.MATRIX is built from these rows)
-               assigns     may hand work to other workers with a Handoff
                answers     may clear another worker's Blocker
-               reports_to  the roles it reports to, in order of preference; the first one present is used, else
-                           the founder. Reporting lines are generated from who is present.
+               reports_to  for a team role, the cofounders who may lead it, in order of preference: the one that
+                           hired it, else the first of these present, else the first cofounder present
                max         most workers of this role in one organization
 """
 from __future__ import annotations
@@ -69,161 +74,161 @@ DOC_TYPES: dict[str, dict] = {
                           "trust": True},
 }
 
+LEAD = {"assign_task": E, "answer_blocker": E, "review_work": E}  # what every cofounder does for its team
+
 ROLES: dict[str, dict] = {
-    "CEO": {
-        "title": "Business Lead", "slug": "ceo",
-        "charter": "The founder is the CEO; the Business Lead runs the business side for them: direction, "
-                   "prioritization and the trade-offs between scope, time and money. Writes the business brief and "
-                   "settles product rules the objective leaves open, and brings the founder only real decisions.",
-        "capabilities": ["strategy", "prioritization", "business reasoning"],
-        "areas": ["product", "business"], "owns": ["document", "decision"], "documents": ["business_brief"],
-        "assigns": True, "answers": True,
-        "authority": {**BASE, "assign_task": E, "answer_blocker": E, "review_work": E, "product_rule_decision": P},
-        "reports_to": [], "max": 1},
+    # --- cofounders: the founder is the CEO; these lead the company with them ----------------------------------
     "CTO": {
-        "title": "CTO", "slug": "cto",
-        "charter": "Accountable for architecture and engineering. Decides the technical approach, reviews work "
-                   "against the objective, and proposes merges and deploys. Never deploys or messages anyone itself.",
-        "capabilities": ["architecture", "review", "release", "security"],
+        "title": "CTO", "slug": "cto", "tier": "cofounder",
+        "charter": "Cofounder accountable for technology: the architecture, the engineering team and the release. "
+                   "Decides the technical approach, hands out and reviews the engineering team's work, answers its "
+                   "doubts, and proposes merges. Never deploys or messages anyone itself.",
+        "capabilities": ["architecture", "engineering leadership", "review", "release"],
         "areas": ["non_functional", "security", "devops", "deployment"],
-        "owns": ["document", "review_merge", "deploy"], "documents": ["architecture"],
-        "assigns": True, "answers": True,
-        "authority": {**BASE, "assign_task": E, "answer_blocker": E, "review_work": E, "product_rule_decision": P,
-                      "merge_to_main": P, "install_package": P, "deploy_production": P},
-        "reports_to": ["CEO"], "max": 1},
+        "owns": ["document", "review_merge", "deploy"], "documents": ["architecture"], "answers": True,
+        "authority": {**BASE, **LEAD, "product_rule_decision": P, "merge_to_main": P, "install_package": P,
+                      "deploy_production": P},
+        "reports_to": [], "max": 1},
     "CPO": {
-        "title": "CPO", "slug": "cpo",
-        "charter": "Owns the product definition: who it is for, the customer workflow and what comes first. Writes "
-                   "product specifications and acceptance checks, and settles product rules.",
-        "capabilities": ["product discovery", "UX", "prioritization"],
-        "areas": ["product", "functional", "design"], "owns": ["document", "decision"],
-        "documents": ["product_spec", "acceptance"], "assigns": False, "answers": True,
-        "authority": {**BASE, "answer_blocker": E, "review_work": E, "product_rule_decision": P},
-        "reports_to": ["CEO"], "max": 1},
+        "title": "Chief Product Officer", "slug": "cpo", "tier": "cofounder",
+        "charter": "Cofounder accountable for the product and the business it serves: who it is for, what it must "
+                   "do for them and what comes first. Writes the business brief everyone works from, leads the "
+                   "product team, reviews its work, and settles product rules the objective leaves open.",
+        "capabilities": ["product strategy", "customer discovery", "UX", "prioritization"],
+        "areas": ["product", "business", "functional", "design"], "owns": ["document", "decision"],
+        "documents": ["business_brief", "product_spec"], "answers": True,
+        "authority": {**BASE, **LEAD, "product_rule_decision": P},
+        "reports_to": [], "max": 1},
+    "CFO": {
+        "title": "CFO", "slug": "cfo", "tier": "cofounder",
+        "charter": "Cofounder accountable for the money: costs, pricing, the revenue model, funding needs and runway, "
+                   "in a financial model whose every number is either sourced or marked as an assumption. Challenges "
+                   "any plan whose cost it cannot justify, settles pricing rules the objective leaves open, and leads "
+                   "the finance and legal work.",
+        "capabilities": ["financial modelling", "pricing", "unit economics", "fundraising"],
+        "areas": ["finance"], "owns": ["document", "decision"], "documents": ["financial_model"], "answers": True,
+        "authority": {**BASE, **LEAD, "product_rule_decision": P},
+        "reports_to": [], "max": 1},
+    # --- the teams ----------------------------------------------------------------------------------------------
     "PM": {
-        "title": "Project Manager", "slug": "pm",
-        "charter": "Coordinates the work: specs and acceptance checks, milestones, dependencies and reporting. "
-                   "Assigns tasks and clears Blockers from the objective and the decided rules. Never writes "
-                   "product code.",
-        "capabilities": ["product", "specs", "planning", "coordination"],
+        "title": "Project Manager", "slug": "pm", "tier": "team",
+        "charter": "Plans and coordinates the work: the roadmap, specifications and acceptance checks, milestones "
+                   "and dependencies. Never writes product code.",
+        "capabilities": ["planning", "specs", "coordination"],
         "areas": ["product", "functional", "qa"], "owns": ["document", "decision"],
-        "documents": ["product_spec", "acceptance"], "assigns": True, "answers": True,
-        "authority": {**BASE, "assign_task": E, "answer_blocker": E, "review_work": E, "product_rule_decision": P},
-        "reports_to": ["CEO", "CTO"], "max": 1},
-    "DataScientist": {
-        "title": "Senior Data Scientist", "slug": "ds",
-        "charter": "Owns forecasting, statistics and machine learning: the method, its evaluation and the code that "
-                   "computes it, with tests that check its numbers.",
-        "capabilities": ["statistics", "machine learning", "experimentation", "Python"],
-        "areas": ["ai_ml", "data"], "owns": ["document", "forecast", "code"], "documents": ["method"],
-        "assigns": False, "answers": True,
-        "authority": {**BASE, "answer_blocker": E, "install_package": P, "merge_to_main": P},
-        "reports_to": ["CEO", "CTO"], "max": 1},
-    "BackendEngineer": {
-        "title": "Backend Engineer", "slug": "be",
-        "charter": "Builds data services, storage and the HTTP API, with unittest tests, inside its own workspace.",
-        "capabilities": ["backend", "APIs", "databases", "testing"],
-        "areas": ["functional", "data", "non_functional"], "owns": ["code"], "documents": [],
-        "assigns": False, "answers": False,
-        "authority": {**BASE, "merge_to_main": P, "install_package": P},
-        "reports_to": ["PM", "CTO", "CEO"], "max": 3},
-    "FrontendEngineer": {
-        "title": "Frontend Engineer", "slug": "fe",
-        "charter": "Builds the product's web pages, dashboards and workflows, with unittest tests, inside its own "
-                   "workspace.",
-        "capabilities": ["frontend", "UI", "testing"],
-        "areas": ["functional", "design"], "owns": ["code"], "documents": [],
-        "assigns": False, "answers": False,
-        "authority": {**BASE, "merge_to_main": P, "install_package": P},
-        "reports_to": ["PM", "CTO", "CEO"], "max": 3},
+        "documents": ["product_spec", "acceptance"], "answers": True,
+        "authority": {**BASE, "answer_blocker": E, "review_work": E, "product_rule_decision": P},
+        "reports_to": ["CPO", "CTO"], "max": 1},
     "Engineer": {
-        "title": "Software Engineer", "slug": "eng",
+        "title": "Software Engineer", "slug": "eng", "tier": "team",
         "charter": "Full-stack engineer: writes Python and unittest tests, backend and web page, inside its own "
                    "workspace only.",
         "capabilities": ["backend", "frontend", "testing"],
         "areas": ["functional", "data", "non_functional", "design"], "owns": ["code"], "documents": [],
-        "assigns": False, "answers": False,
+        "answers": False, "authority": {**BASE, "merge_to_main": P, "install_package": P},
+        "reports_to": ["CTO"], "max": 3},
+    "BackendEngineer": {
+        "title": "Backend Engineer", "slug": "be", "tier": "team",
+        "charter": "Builds the data, the business logic and the services behind the product, with unittest tests, "
+                   "inside its own workspace.",
+        "capabilities": ["backend", "APIs", "databases", "testing"],
+        "areas": ["functional", "data", "non_functional"], "owns": ["code"], "documents": [], "answers": False,
         "authority": {**BASE, "merge_to_main": P, "install_package": P},
-        "reports_to": ["PM", "CTO", "CEO"], "max": 3},
+        "reports_to": ["CTO"], "max": 3},
+    "FrontendEngineer": {
+        "title": "Frontend Engineer", "slug": "fe", "tier": "team",
+        "charter": "Builds the product's web app: its pages, dashboards and workflows and the web server that serves "
+                   "them, with unittest tests, inside its own workspace.",
+        "capabilities": ["frontend", "UI", "testing"],
+        "areas": ["functional", "design"], "owns": ["code"], "documents": [], "answers": False,
+        "authority": {**BASE, "merge_to_main": P, "install_package": P},
+        "reports_to": ["CTO"], "max": 3},
+    "DataScientist": {
+        "title": "Senior Data Scientist", "slug": "ds", "tier": "team",
+        "charter": "Owns forecasting, statistics and machine learning: the method, its evaluation and the code that "
+                   "computes it, with tests that check its numbers.",
+        "capabilities": ["statistics", "machine learning", "experimentation", "Python"],
+        "areas": ["ai_ml", "data"], "owns": ["document", "forecast", "code"], "documents": ["method"],
+        "answers": True, "authority": {**BASE, "answer_blocker": E, "install_package": P, "merge_to_main": P},
+        "reports_to": ["CTO"], "max": 1},
     "Designer": {
-        "title": "Product Designer", "slug": "design",
+        "title": "Product Designer", "slug": "design", "tier": "team",
         "charter": "Owns UX, information architecture and the design system: screens, flows and the words on them, "
                    "written as design specifications the engineers build from.",
         "capabilities": ["UX", "information architecture", "design systems"],
-        "areas": ["design"], "owns": ["document"], "documents": ["design"], "assigns": False, "answers": True,
+        "areas": ["design"], "owns": ["document"], "documents": ["design"], "answers": True,
         "authority": {**BASE, "answer_blocker": E},
-        "reports_to": ["PM", "CPO", "CTO", "CEO"], "max": 1},
+        "reports_to": ["CPO", "CTO"], "max": 1},
     "DevOps": {
-        "title": "DevOps Engineer", "slug": "devops",
+        "title": "DevOps Engineer", "slug": "devops", "tier": "team",
         "charter": "Owns infrastructure, the release pipeline, deployment and observability: run configuration, "
                    "smoke checks, the runbook and the deploy proposal.",
         "capabilities": ["CI/CD", "infrastructure", "deployment", "observability"],
         "areas": ["devops", "deployment", "security"], "owns": ["document", "code", "deploy"],
-        "documents": ["runbook"], "assigns": False, "answers": False,
+        "documents": ["runbook"], "answers": False,
         "authority": {**BASE, "install_package": P, "deploy_production": P},
-        "reports_to": ["PM", "CTO", "CEO"], "max": 1},
+        "reports_to": ["CTO"], "max": 1},
     "QA": {
-        "title": "QA Engineer", "slug": "qa",
+        "title": "QA Engineer", "slug": "qa", "tier": "team",
         "charter": "Owns the test strategy, regression and acceptance validation: writes the test plan and the "
                    "acceptance tests that check the product against its acceptance criteria.",
         "capabilities": ["test design", "regression", "acceptance validation"],
         "areas": ["qa", "non_functional"], "owns": ["document", "code"], "documents": ["test_plan", "acceptance"],
-        "assigns": False, "answers": False,
-        "authority": {**BASE, "review_work": E},
-        "reports_to": ["PM", "CTO", "CEO"], "max": 2},
-    "CFO": {
-        "title": "CFO", "slug": "cfo",
-        "charter": "Owns the money: costs, pricing, the revenue model, funding needs and runway, in a financial "
-                   "model whose every number is either sourced or marked as an assumption. Challenges any plan whose "
-                   "cost it cannot justify, and settles pricing rules the objective leaves open.",
-        "capabilities": ["financial modelling", "pricing", "unit economics", "fundraising"],
-        "areas": ["finance"], "owns": ["document", "decision"], "documents": ["financial_model"],
-        "assigns": False, "answers": True,
-        "authority": {**BASE, "answer_blocker": E, "review_work": E, "product_rule_decision": P},
-        "reports_to": ["CEO"], "max": 1},
+        "answers": False, "authority": {**BASE, "review_work": E},
+        "reports_to": ["CTO", "CPO"], "max": 2},
     "MarketAnalyst": {
-        "title": "Market Analyst", "slug": "market",
+        "title": "Market Analyst", "slug": "market", "tier": "team",
         "charter": "Owns the market: who the customers are, the competitors and how the company is positioned "
                    "against them, and the go-to-market plan, each claim with its source.",
         "capabilities": ["market research", "competitive analysis", "positioning", "go-to-market"],
-        "areas": ["market"], "owns": ["document"], "documents": ["market_analysis", "gtm_plan"],
-        "assigns": False, "answers": True,
+        "areas": ["market"], "owns": ["document"], "documents": ["market_analysis", "gtm_plan"], "answers": True,
         "authority": {**BASE, "answer_blocker": E, "review_work": E},
-        "reports_to": ["CEO", "CPO"], "max": 1},
+        "reports_to": ["CPO", "CFO"], "max": 1},
     "LegalAdvisor": {
-        "title": "Legal and Compliance Advisor", "slug": "legal",
+        "title": "Legal and Compliance Advisor", "slug": "legal", "tier": "team",
         "charter": "Owns legal and regulatory risk: the regulations that apply, data protection, terms and company "
                    "structure, in a risk and compliance register that says plainly what a qualified lawyer must "
                    "confirm. Blocks work that creates legal risk the founder has not accepted.",
         "capabilities": ["regulation", "data protection", "contracts", "compliance"],
-        "areas": ["legal"], "owns": ["document"], "documents": ["risk_compliance"],
-        "assigns": False, "answers": True,
+        "areas": ["legal"], "owns": ["document"], "documents": ["risk_compliance"], "answers": True,
         "authority": {**BASE, "answer_blocker": E, "review_work": E},
-        "reports_to": ["CEO"], "max": 1},
+        "reports_to": ["CCO", "CFO", "CPO"], "max": 1},
     "SecurityExpert": {
-        "title": "Security Expert", "slug": "sec",
+        "title": "Security Expert", "slug": "sec", "tier": "team",
         "charter": "Owns the security of the product and the company's data: the threat model, the controls it "
                    "requires and the security review of the architecture and the code.",
         "capabilities": ["threat modelling", "application security", "security review"],
-        "areas": ["security"], "owns": ["document"], "documents": ["threat_model"],
-        "assigns": False, "answers": True,
+        "areas": ["security"], "owns": ["document"], "documents": ["threat_model"], "answers": True,
         "authority": {**BASE, "answer_blocker": E, "review_work": E},
-        "reports_to": ["CTO", "CEO"], "max": 1},
-    # Not a fixed role: the objective names the field. The synthesizer proposes one Specialist per field the company
-    # needs and no role above holds, with its title ("Food Safety Specialist"); each is its own worker.
+        "reports_to": ["CTO", "CCO"], "max": 1},
+    # Not a fixed role: the objective names the field. One Specialist per field the company needs and no role above
+    # holds, with its title ("Food Safety Specialist"); each is its own worker, hired by the cofounder whose area the
+    # field serves.
     "Specialist": {
-        "title": "Specialist", "slug": "spec",
+        "title": "Specialist", "slug": "spec", "tier": "team",
         "charter": "The expert in a field this company needs that no general role holds. Advises the team from that "
                    "field, answers its questions, reviews work that touches it, and writes a specialist report on "
                    "what the company must get right there, each claim with its source.",
         "capabilities": ["domain expertise"],
-        "areas": ["domain"], "owns": ["document"], "documents": ["specialist_report"],
-        "assigns": False, "answers": True,
+        "areas": ["domain"], "owns": ["document"], "documents": ["specialist_report"], "answers": True,
         "authority": {**BASE, "answer_blocker": E, "review_work": E},
-        "reports_to": ["CEO", "CTO"], "max": 4},
+        "reports_to": ["CPO", "CTO", "CFO", "CCO"], "max": 4},
+    # A fourth cofounder for a regulated business (payments, lending, insurance, health, children's data). Listed
+    # last so that an uncovered legal requirement is given a Legal and Compliance Advisor unless the company needs a
+    # compliance cofounder.
+    "CCO": {
+        "title": "Chief Compliance Officer", "slug": "cco", "tier": "cofounder",
+        "charter": "Cofounder accountable for regulation in a regulated business: the licences it needs, the rules "
+                   "its product must follow and the evidence that it does, built in from the start. Leads the legal "
+                   "and compliance work and reviews anything that touches regulated activity.",
+        "capabilities": ["regulatory strategy", "licensing", "compliance by design", "audit"],
+        "areas": ["legal", "security"], "owns": ["document", "decision"], "documents": ["risk_compliance"],
+        "answers": True, "authority": {**BASE, **LEAD, "product_rule_decision": P},
+        "reports_to": [], "max": 1},
 }
 
-ASSIGNERS = ["PM", "CTO", "CEO"]  # who hands out work, in order of preference, among the roles present
+COFOUNDERS = [n for n, r in ROLES.items() if r["tier"] == "cofounder"]
+PLANNERS = ["PM", "CPO", "CTO", "CFO", "CCO"]  # who writes the roadmap, in order of preference, among the roles present
 MAX_WORKERS = 16
 
 
@@ -250,10 +255,26 @@ def worker_ids(name: str, quantity: int) -> list[str]:
     return [f"w_{slug}_{chr(ord('a') + i)}" for i in range(quantity)]
 
 
+def is_cofounder(name: str) -> bool:
+    return role(name)["tier"] == "cofounder"
+
+
+def lead_role(name: str, cofounders: list[str], hired_by: str | None = None) -> str | None:
+    """The cofounder a team role reports to: the one that hired it, else the first of its preferred leads present,
+    else the first cofounder present. None for a cofounder, and when there is no cofounder at all."""
+    if is_cofounder(name) or not cofounders:
+        return None
+    prefer = [c for c in role(name)["reports_to"] if c in cofounders]
+    if hired_by in cofounders and (hired_by in role(name)["reports_to"] or not prefer):
+        return hired_by  # the cofounder that hired it, when that cofounder may lead this role
+    return prefer[0] if prefer else cofounders[0]
+
+
 def instantiate(roles: list[dict]) -> list[dict]:
     """Roles and quantities to workers: id, role, title, capabilities, reporting line. Deterministic: the same
-    roles always give the same workers, and each worker reports to the first role it prefers that is present."""
-    present = {r["role"] for r in roles}
+    roles always give the same workers. Cofounders report to the founder; a team member reports to the cofounder
+    that hired it (the role's "lead"), else to the first cofounder its role prefers that is present."""
+    cofounders = [r["role"] for r in roles if is_cofounder(r["role"])]
     head: dict[str, str] = {}
     workers = []
     for r in roles:
@@ -265,33 +286,40 @@ def instantiate(roles: list[dict]) -> list[dict]:
         head.setdefault(r["role"], ids[0])
         for i, wid in enumerate(ids):
             title = r.get("title") or spec["title"] + (f" {chr(ord('A') + i)}" if len(ids) > 1 else "")
-            w = {"id": wid, "role": r["role"], "title": title, "capabilities": [r["field"]] if r.get("field")
-                 else list(spec["capabilities"]), "why": r.get("why", ""),
-                 "requirement_ids": list(r.get("requirement_ids") or [])}
+            w = {"id": wid, "role": r["role"], "tier": spec["tier"], "title": title,
+                 "capabilities": [r["field"]] if r.get("field") else list(spec["capabilities"]), "why": r.get("why", ""),
+                 "requirement_ids": list(r.get("requirement_ids") or []), "_lead": r.get("lead")}
             if r.get("field"):
                 w["field"] = r["field"]
             workers.append(w)
     for w in workers:
-        boss = next((b for b in role(w["role"])["reports_to"] if b in present), None)
-        w["reports_to"] = head[boss] if boss else "founder"
+        lead = lead_role(w["role"], cofounders, w.pop("_lead"))
+        w["reports_to"] = head[lead] if lead else "founder"
     return workers
 
 
 def field_slug(field: str) -> str:
     s = "".join(c if c.isalnum() else "_" for c in field.lower()).strip("_")
-    return "_".join(p for p in s.split("_") if p)[:24] or "field"
+    return "_".join(p for p in s.split("_") if p)[:24].strip("_") or "field"
 
 
 def owners_of(task_type: str, workers: list[dict]) -> list[str]:
     return [w["id"] for w in workers if task_type in role(w["role"])["owns"]]
 
 
-def assigner(workers: list[dict]) -> str | None:
-    for name in ASSIGNERS:
+def planner(workers: list[dict]) -> str | None:
+    """Who writes the roadmap: the Project Manager, else a cofounder, in PLANNERS order."""
+    for name in PLANNERS:
         for w in workers:
             if w["role"] == name:
                 return w["id"]
     return None
+
+
+def lead_of(worker: dict) -> str | None:
+    """The cofounder a team member reports to (its worker id); None for a cofounder."""
+    to = worker.get("reports_to")
+    return to if to and to != "founder" else None
 
 
 def answerers(workers: list[dict]) -> list[str]:
@@ -301,14 +329,23 @@ def answerers(workers: list[dict]) -> list[str]:
 def staffing_kinds(name: str) -> list[str]:
     """The kinds of work a role's model is chosen for: the task types it may own, and assigning when it assigns."""
     r = role(name)
-    return list(r["owns"]) + (["assign"] if r["assigns"] else [])
+    return list(r["owns"]) + (["assign", "review"] if r["tier"] == "cofounder" else [])
 
 
-def prompt_text(worker: dict) -> str:
+def prompt_text(worker: dict, workers: list[dict] | None = None) -> str:
     r = role(worker["role"])
     docs = "; ".join(f"{DOC_TYPES[d]['title']}" for d in r["documents"])
     field = f" Your field: {worker['field']}." if worker.get("field") else ""
-    return f"You are {worker['title']} ({worker['id']}). {r['charter']}{field}" + (f" You write: {docs}." if docs else "")
+    out = f"You are {worker['title']} ({worker['id']}). {r['charter']}{field}" + (f" You write: {docs}." if docs else "")
+    by_id = {w["id"]: w for w in workers or []}
+    if r["tier"] == "cofounder":
+        team = [w for w in workers or [] if w.get("reports_to") == worker["id"]]
+        out += (" You are a cofounder: the founder is the CEO and you report to them." +
+                (" Your team: " + ", ".join(f"{w['title']} ({w['id']})" for w in team) + "." if team else ""))
+    elif worker.get("reports_to") in by_id:
+        lead = by_id[worker["reports_to"]]
+        out += f" You report to {lead['title']} ({lead['id']}), the cofounder who leads your area."
+    return out
 
 
 def doc_rules(doc_type: str) -> str:
@@ -333,5 +370,6 @@ def matrix() -> dict:
 
 def catalog() -> list[dict]:
     """The catalog as the UI and the synthesizer's prompt show it."""
-    return [{"role": k, "title": r["title"], "charter": r["charter"], "areas": r["areas"], "owns": r["owns"],
-             "documents": r["documents"], "max": r["max"]} for k, r in ROLES.items()]
+    return [{"role": k, "title": r["title"], "tier": r["tier"], "charter": r["charter"], "areas": r["areas"],
+             "owns": r["owns"], "documents": r["documents"], "leads": r["reports_to"], "max": r["max"]}
+            for k, r in ROLES.items()]

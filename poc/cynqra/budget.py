@@ -4,7 +4,7 @@ Product definition, Stage 7. The budget is built in layers from the approved roa
 is actually spent:
 
   inference        each task's expected model cost on its owner's model (router.estimate: measured cost per attempt
-                   times the expected attempts), plus the Handoff that assigns it
+                   times the expected attempts), plus the Handoff and the review by the cofounder who leads it
   tools            the workers' own test runs, at the price of this machine's time
   infrastructure   hosting the deployed product for the plan's days
   verification     the Verification Service's runs and the regression checks of replacement models
@@ -146,7 +146,7 @@ def _measured_verify_seconds(store) -> dict[str, float]:
     return {k: sum(x) / len(x) for k, x in by.items()}
 
 
-def construct(store, tasks: list[dict], workers: list[dict], reg, assigner: str | None) -> dict:
+def construct(store, tasks: list[dict], workers: list[dict], reg) -> dict:
     """The forecast for a roadmap, in layers, with views by worker, workstream and milestone."""
     s = project_settings.get(store)
     rate = float(s["compute_usd_per_hour"]) / 3600
@@ -155,9 +155,10 @@ def construct(store, tasks: list[dict], workers: list[dict], reg, assigner: str 
     rows = []
     for t in tasks:
         e = estimate(reg, reg.get(wmodel[t["owner_worker_id"]]), t["kind"], s["time_value_per_hour"])
-        coord = 0.0
-        if assigner and t["owner_worker_id"] != assigner and t.get("handoff_from") == assigner:
-            coord = estimate(reg, reg.get(wmodel[assigner]), "assign", s["time_value_per_hour"])["usd_per_attempt"]
+        coord = 0.0  # the cofounder who hands the task over, and reviews it before it counts
+        for who, kind in ((t.get("handoff_from"), "assign"), (t.get("reviewed_by"), "review")):
+            if who in wmodel and who != t["owner_worker_id"]:
+                coord += estimate(reg, reg.get(wmodel[who]), kind, s["time_value_per_hour"])["usd_per_attempt"]
         checks = s["self_checks"] if t["kind"] in roles.BUILD_TYPES else 0
         v = vsec.get(t["kind"], 0.0) * e["expected_attempts"]
         rows.append({"task_id": t["id"], "owner": t["owner_worker_id"], "workstream": t.get("workstream_id"),
@@ -169,7 +170,7 @@ def construct(store, tasks: list[dict], workers: list[dict], reg, assigner: str 
     layers = {
         "inference": {"usd": round(sum(r["inference"] + r["coordination"] for r in rows), 4),
                       "basis": "each task's expected attempts on its owner's model at its measured cost per attempt, "
-                               "and the Handoff that assigns it"},
+                               "and the Handoff and review by the cofounder who leads it"},
         "tools": {"usd": round(sum(r["tools"] for r in rows), 4),
                   "basis": f"workers' own test runs at ${s['compute_usd_per_hour']}/h of this machine"},
         "infrastructure": {"usd": round(days * float(s["infra_usd_per_day"]), 4),

@@ -16,7 +16,7 @@ from cynqra.intelligence import IntelligenceError, ScriptedSource
 from cynqra.objective import validate_requirements
 from cynqra.planner import validate_plan
 from cynqra.intelligence_layer import IntelligenceSupply
-from cynqra.synthesis import validate_workforce
+from cynqra.synthesis import validate_cofounders, validate_team, validate_workforce
 
 # The restaurant demand forecasting example of section 6, as requirements and the section 3 workforce table.
 SECTION6_REQ = {"outcomes": ["Restaurants plan staff and stock from a demand forecast"], "requirements": [
@@ -32,8 +32,7 @@ SECTION6_REQ = {"outcomes": ["Restaurants plan staff and stock from a demand for
                     {"id": "ml", "name": "Forecasting", "requirement_ids": ["c"], "depends_on": ["data"]},
                     {"id": "app", "name": "Product", "requirement_ids": ["a", "d", "e", "f"], "depends_on": ["ml"]},
                     {"id": "ops", "name": "Release", "requirement_ids": ["g", "h"], "depends_on": ["app"]}]}
-SECTION3_ORG = {"summary": "Section 3's example organization", "roles": [
-    {"role": "CEO", "quantity": 1, "why": "Business direction and outcome ownership", "requirement_ids": ["a"]},
+SECTION3_ORG = {"summary": "Section 3's example organization, as cofounders and their teams", "roles": [
     {"role": "CTO", "quantity": 1, "why": "Architecture and engineering accountability", "requirement_ids": ["f"]},
     {"role": "CPO", "quantity": 1, "why": "Product definition and customer workflow", "requirement_ids": ["a"]},
     {"role": "DataScientist", "quantity": 1, "why": "Forecasting and evaluation", "requirement_ids": ["b", "c"]},
@@ -63,15 +62,44 @@ class CatalogAndSynthesisTests(unittest.TestCase):
     def test_section_three_organization_is_synthesized_with_its_reporting_lines(self):
         prop = validate_workforce(json.loads(json.dumps(SECTION3_ORG)), self.req)
         ws = prop["workers"]
-        self.assertEqual(len(ws), 12, "the twelve workers of the section 3 table")
+        self.assertEqual(len(ws), 11, "two cofounders and nine team members; the founder is the CEO")
         lines = {w["id"]: w["reports_to"] for w in ws}
-        self.assertEqual(lines["w_ceo"], "founder")
-        for top in ("w_cto", "w_cpo", "w_pm", "w_ds"):
-            self.assertEqual(lines[top], "w_ceo", top)
-        for low in ("w_be_a", "w_be_b", "w_fe_a", "w_fe_b", "w_design", "w_devops", "w_qa"):
-            self.assertEqual(lines[low], "w_pm", low)
+        for cof in ("w_cto", "w_cpo"):
+            self.assertEqual(lines[cof], "founder", cof)
+        for eng in ("w_ds", "w_be_a", "w_be_b", "w_fe_a", "w_fe_b", "w_devops", "w_qa"):
+            self.assertEqual(lines[eng], "w_cto", eng)
+        for prod in ("w_pm", "w_design"):
+            self.assertEqual(lines[prod], "w_cpo", prod)
         self.assertTrue(all(prop["coverage"].values()), "every requirement covered")
-        self.assertEqual(roles.assigner(ws), "w_pm")
+        self.assertEqual(roles.planner(ws), "w_pm")
+        self.assertEqual(prop["cofounders"], ["CTO", "CPO"])
+
+    def test_cofounders_first_then_each_builds_its_own_team(self):
+        req = self.req
+        cof = validate_cofounders({"summary": "s", "cofounders": [
+            {"role": "CTO", "why": "it is software"}, {"role": "CPO", "why": "who it is for"}]}, req)
+        self.assertEqual([c["role"] for c in cof["cofounders"]], ["CTO", "CPO"])
+        with self.assertRaises(IntelligenceError):  # only cofounder roles in the first step
+            validate_cofounders({"cofounders": [{"role": "Engineer", "why": "x"}]}, req)
+        with self.assertRaises(IntelligenceError):  # every cofounder says why
+            validate_cofounders({"cofounders": [{"role": "CTO", "why": ""}]}, req)
+        with self.assertRaises(IntelligenceError):  # one of each
+            validate_workforce({"roles": [{"role": "CTO", "quantity": 2, "why": "x"}]}, req)
+        names, taken = ["CTO", "CPO"], {}
+        cto = validate_team({"roles": [{"role": "BackendEngineer", "quantity": 2, "why": "APIs"},
+                                       {"role": "QA", "quantity": 1, "why": "tests"}]}, req, "CTO", names, taken)
+        self.assertEqual({r["lead"] for r in cto["roles"]}, {"CTO"})
+        with self.assertRaises(IntelligenceError):  # the product team is the CPO's to hire
+            validate_team({"roles": [{"role": "Designer", "quantity": 1, "why": "UX"}]}, req, "CFO", ["CTO", "CPO", "CFO"], {})
+        taken.update({"BackendEngineer": "CTO", "QA": "CTO"})
+        with self.assertRaises(IntelligenceError):  # nobody is hired twice
+            validate_team({"roles": [{"role": "QA", "quantity": 1, "why": "tests"}]}, req, "CPO", names, taken)
+        self.assertEqual(validate_team({"summary": "I do it myself", "roles": []}, req, "CPO", names, taken)["roles"], [],
+                         "a cofounder may do its part alone")
+        prop = validate_workforce({"summary": "s", "cofounders": cof["cofounders"], "teams": {"CTO": cto, "CPO": {
+            "roles": [{"role": "PM", "quantity": 1, "why": "plans"}]}}}, req)
+        lines = {w["id"]: w["reports_to"] for w in prop["workers"]}
+        self.assertEqual((lines["w_be_a"], lines["w_qa"], lines["w_pm"]), ("w_cto", "w_cto", "w_cpo"))
 
     def test_the_synthesizer_cannot_leave_the_pipeline_unstaffed_or_exceed_the_catalog(self):
         def bad(change):
@@ -80,7 +108,7 @@ class CatalogAndSynthesisTests(unittest.TestCase):
             with self.assertRaises(IntelligenceError):
                 validate_workforce(org, self.req)
         bad(lambda o: o["roles"].append({"role": "Astrologer", "quantity": 1, "why": "x", "requirement_ids": []}))
-        bad(lambda o: o["roles"][0].update(quantity=2))  # one CEO at most
+        bad(lambda o: o["roles"][0].update(quantity=2))  # one CTO at most
         bad(lambda o: o["roles"][1].update(why=""))
 
     def test_the_platform_closes_what_the_catalog_requires(self):
@@ -88,10 +116,10 @@ class CatalogAndSynthesisTests(unittest.TestCase):
         # requirement area, even when the refusal named the roles that close it; the catalog decides that, so the
         # platform adds the role, says what it closes, and the founder sees it at the gate
         org = json.loads(json.dumps(SECTION3_ORG))
-        org["roles"] = [r for r in org["roles"] if r["role"] not in ("CEO", "CPO", "PM")]
+        org["roles"] = [r for r in org["roles"] if r["role"] not in ("CPO", "PM")]
         prop = validate_workforce(org, self.req)
         added = [r for r in prop["roles"] if r.get("added_by") == "platform"]
-        self.assertEqual([r["role"] for r in added], ["CEO"], "the first catalog role that covers the product area")
+        self.assertEqual([r["role"] for r in added], ["CPO"], "the first catalog role that covers the product area")
         self.assertIn("Added by Cynqra", added[0]["why"])
         self.assertTrue(all(prop["coverage"].values()), "every requirement is covered")
         org = json.loads(json.dumps(SECTION3_ORG))
@@ -118,10 +146,14 @@ class CatalogAndSynthesisTests(unittest.TestCase):
         prop = validate_workforce(org, req)
         present = {r["role"] for r in prop["roles"]}
         self.assertTrue({"CFO", "MarketAnalyst", "LegalAdvisor"} <= present, present)
+        lead = {r["role"]: r.get("lead") for r in prop["roles"]}
+        self.assertEqual((lead["CFO"], lead["MarketAnalyst"], lead["LegalAdvisor"]), (None, "CPO", "CFO"),
+                         "a CFO is a cofounder; the added experts report to the cofounder whose area they serve")
         self.assertTrue(all(prop["coverage"].values()))
         self.assertIn("confirm", roles.doc_rules("risk_compliance"), "a non-expert founder is told what to confirm")
         self.assertIn("source", roles.doc_rules("market_analysis"))
-        self.assertEqual(roles.role("CEO")["title"], "Business Lead", "the founder is the CEO")
+        self.assertNotIn("CEO", roles.ROLES, "the founder is the CEO: there is no AI CEO")
+        self.assertEqual(roles.COFOUNDERS, ["CTO", "CPO", "CFO", "CCO"])
 
     def test_the_team_follows_the_objective_with_specialists_in_its_field(self):
         # a different company gets a different team: its field's experts are named from the objective
@@ -219,7 +251,7 @@ class GateTests(unittest.TestCase):
         d = approve(self.e, "approve_workforce", edited=self.EDIT)
         self.assertEqual(d["outcome_label"], "approved_edited")
         self.assertEqual(sorted(w["id"] for w in self.e.workers()), ["w_cto", "w_eng_a", "w_eng_b", "w_pm", "w_qa"])
-        self.assertEqual(self.e.worker("w_qa")["reports_to"], "w_pm")
+        self.assertEqual(self.e.worker("w_qa")["reports_to"], "w_cto", "QA reports to the CTO")
         self.assertTrue(self.e.proposal()["overridden"])
         self.assertIn("workforce.overridden", [x["event_type"] for x in self.e.store.events()])
 
@@ -257,7 +289,7 @@ class BudgetEngineTests(unittest.TestCase):
                                               "infra_usd_per_day": 0.25})  # $1 a second of this machine's time
             tasks = [{"id": "t_01", "owner_worker_id": "w_eng_a", "kind": "code", "workstream_id": "w",
                       "milestone_id": "m", "deadline_day": 2}]
-            f = budget.construct(e.store, tasks, [{"id": "w_eng_a"}], sup.registry, None)
+            f = budget.construct(e.store, tasks, [{"id": "w_eng_a"}], sup.registry)
             attempts = f["tasks"][0]["attempts"]
             self.assertEqual(f["layers"]["infrastructure"]["usd"], 0.5)
             self.assertAlmostEqual(f["layers"]["verification"]["usd"], round(20 * attempts, 4), places=3)
@@ -307,7 +339,13 @@ class ScenariosAreHonestTests(unittest.TestCase):
         src = ScriptedSource(scenario)
         src.bind(types.SimpleNamespace(intelligence_for=lambda worker: "scripted"))
         req = validate_requirements(src.decompose({})[0])
-        prop = validate_workforce(src.synthesize({}, req)[0], req)
+        cof = validate_cofounders(src.cofounders({}, req)[0], req)  # the same two steps a model's answers pass
+        names, taken, teams = [c["role"] for c in cof["cofounders"]], {}, {}
+        for lead in names:
+            teams[lead] = validate_team(src.build_team({}, req, cofounder=lead)[0], req, lead, names, taken)
+            taken.update({r["role"]: lead for r in teams[lead]["roles"]})
+        prop = validate_workforce({"summary": cof["summary"], "cofounders": cof["cofounders"], "teams": teams}, req)
+        self.assertFalse([r for r in prop["roles"] if r.get("added_by")], "the script needs nothing added")
         self.assertEqual(sum(r["quantity"] for r in prop["roles"]), workers_expected)
         self.assertTrue(all(prop["coverage"].values()))
         plan = validate_plan(src.plan({}, prop["workers"], req)[0], prop["workers"], [r["id"] for r in req["requirements"]])
@@ -315,18 +353,26 @@ class ScenariosAreHonestTests(unittest.TestCase):
         return prop, plan
 
     def test_candidate_tracker(self):
-        self.check("candidate_tracker", 4)
+        prop, _ = self.check("candidate_tracker", 5)
+        self.assertEqual(prop["cofounders"], ["CTO", "CPO"], "a simple tool: two cofounders")
 
     def test_bluedip(self):
-        prop, plan = self.check("bluedip", 9)
+        prop, plan = self.check("bluedip", 13)
+        self.assertEqual(prop["cofounders"], ["CTO", "CPO", "CFO"])
+        lead = {w["title"]: w["reports_to"] for w in prop["workers"]}
+        self.assertEqual({t for t, to in lead.items() if to == "w_cto"}, {
+            "Senior Data Scientist", "Backend Engineer", "Frontend Engineer", "DevOps Engineer", "QA Engineer"})
+        self.assertEqual({t for t, to in lead.items() if to == "w_cpo"}, {
+            "Project Manager", "Product Designer", "Market Analyst", "Restaurant Revenue Management Specialist"})
+        self.assertEqual({t for t, to in lead.items() if to == "w_cfo"}, {"Legal and Compliance Advisor"})
         spec = next(w for w in prop["workers"] if w["role"] == "Specialist")
         self.assertEqual((spec["id"], spec["title"]),
                          ("w_spec_revenue_management", "Restaurant Revenue Management Specialist"))
         docs = {d for t in plan["tasks"] if t["kind"] == "document" for d in t["documents"]}
         self.assertTrue({"market_analysis", "gtm_plan", "financial_model", "risk_compliance", "specialist_report",
-                         "method"} <= docs)
+                         "method", "design", "test_plan", "runbook"} <= docs)
         self.assertEqual([t["kind"] for t in plan["tasks"]].count("forecast"), 1, "the model is backtested")
-        self.assertEqual(roles.assigner(prop["workers"]), "w_pm")
+        self.assertEqual(roles.planner(prop["workers"]), "w_pm")
 
     def test_restaurant_forecast(self):
         prop, plan = self.check("restaurant_forecast", 9)
@@ -335,7 +381,7 @@ class ScenariosAreHonestTests(unittest.TestCase):
         self.assertEqual(sum(len(t["documents"]) for t in plan["tasks"] if t["kind"] == "document"), 8)
         self.assertEqual(kinds.count("forecast"), 1)
         self.assertEqual(plan["tasks"][-1]["owner_worker_id"], "w_devops", "DevOps proposes the deploy")
-        self.assertEqual(roles.assigner(prop["workers"]), "w_pm")
+        self.assertEqual(roles.planner(prop["workers"]), "w_pm")
 
 
 if __name__ == "__main__":

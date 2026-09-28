@@ -7,7 +7,7 @@ const CynqraTour = (() => {
   let WORKERS = [];
   const who = (id) => { if (id === "orchestrator") return "Cynqra"; const w = WORKERS.find((x) => x.id === id); return w ? `the ${w.title}` : id || "a team member"; };
   const Who = (id) => { const w = who(id); return w.charAt(0).toUpperCase() + w.slice(1); };
-  const CH = { objective: "Your idea", workforce: "The team", plan: "The plan and budget", work: "The team at work",
+  const CH = { objective: "Your idea", workforce: "Your cofounders and their teams", plan: "The plan and budget", work: "The team at work",
     decide: "A CEO decision", live: "Delivered" };
 
   function task(st, id) { return (st.tasks || []).find((t) => t.id === id) || {}; }
@@ -19,9 +19,10 @@ const CynqraTour = (() => {
 
   function forDecision(st, d) {
     const n = decisionsSoFar(st) + 1;
+    const via = d.extra && d.extra.endorsed_by ? `It reaches you through ${who(d.extra.endorsed_by)}, who leads this area and reviewed it first. ` : "";
     if (d.kind === "approve_workforce" || d.kind === "approve_roadmap") return null;
     if (d.kind === "decision") return { chapter: CH.decide, view: "decisions", title: "A business rule for you to decide",
-      body: `Nobody has said this yet, so ${who(d.source)} will not guess: "${d.problem}" ${Who(d.source)} proposes a rule, with its evidence, how sure it is, and what would change its mind. Rules like this are yours to decide. This is your decision ${n}: approve it, edit it, reject it with a reason, or ask for more evidence.` };
+      body: `Nobody has said this yet, so ${who(d.source)} will not guess: "${d.problem}" ${Who(d.source)} proposes a rule, with its evidence, how sure it is, and what would change its mind. ${via}Rules like this are yours to decide. This is your decision ${n}: approve it, edit it, reject it with a reason, or ask for more evidence.` };
     if (d.kind === "review_merge") {
       const tests = (d.evidence_refs || []).find((e) => /tests on the release candidate/.test(e)) || "every test ran on the finished version";
       return { chapter: CH.decide, view: "decisions", title: `${Who(d.source)} asks to merge the finished product`,
@@ -32,7 +33,7 @@ const CynqraTour = (() => {
       return { chapter: CH.decide, view: "decisions", title: side ? "Going live, and a message was stopped" : `${Who(d.source)} asks to put it live`,
         body: "The release was already built, tested and tried out in a preview. Going live always needs you. " +
           (side ? `${Who(d.source)} also tried to send a message: "${side.summary}" Team members may not message anyone outside the company, so Cynqra stopped it before anything was sent. ` : "") +
-          `This is your decision ${n}.` };
+          `${via}This is your decision ${n}.` };
     }
     if (d.kind === "accept_delivery") return { chapter: CH.live, view: "delivery", title: "Everything checked, the product is live",
       body: `The team hands you the Company Pack: every document, who wrote it and whether it passed its check; the product; the decisions you made; and what it all cost. Everything can be exported, so nothing is locked in. Accepting is your decision ${n}.` };
@@ -56,13 +57,16 @@ const CynqraTour = (() => {
     if (m.frozen) return { chapter: CH.work, view: "work", title: "Emergency stop: all work is frozen",
       body: "Nothing happens until you release the stop. An answer that arrives from an AI while it is on is thrown away." };
     if (m.phase === "new") return { chapter: CH.objective, title: "You describe the company",
-      body: "Cynqra starts from your idea in your own words, a budget and any limits. You do not name a team: Cynqra works out which experts the idea needs, which AI suits each one, the plan and the cost." };
+      body: "Cynqra starts from your idea in your own words, a budget and any limits. You are the CEO. You do not name a team: Cynqra proposes the cofounders your company needs, each cofounder chooses the team for its area, and Cynqra works out which AI suits each one, the plan and the cost." };
     if (m.phase === "objective") return { chapter: CH.objective, title: "Your words become a clear brief",
       body: `Cynqra turns your description into a brief: the product, the customers, the outcomes, what success looks like, the limits and the priorities. ${obj && obj.inferred_fields.length ? `${obj.inferred_fields.length} of them were filled in by Cynqra and are marked, so you can check exactly those.` : ""} Set the budget in dollars and any limits, then submit.` };
     if (m.phase === "workforce") {
-      const p = st.proposal || {}, req = st.requirements || { requirements: [] }, team = (p.workers || []).map((w) => w.title);
-      return { chapter: CH.workforce, title: "The team your company needs",
-        body: `Your idea became ${req.requirements.length} requirements. Cynqra proposes a team of ${team.length} that covers every one: ${team.join(", ")}, each with the reason it is needed. Approve the team, or reject it with a note and Cynqra revises it. This is your first approval.` };
+      const p = st.proposal || {}, req = st.requirements || { requirements: [] }, ws = p.workers || [];
+      const cofs = ws.filter((w) => w.tier === "cofounder");
+      const teams = cofs.map((c) => { const team = ws.filter((w) => w.reports_to === c.id).map((w) => w.title);
+        return `the ${c.title} chose ${team.length ? team.join(", ") : "no one: it does its part itself"}`; });
+      return { chapter: CH.workforce, title: "Your cofounders, and the teams they chose",
+        body: `Your idea became ${req.requirements.length} requirements. As a founder would, Cynqra proposes ${cofs.length} cofounders to lead the company with you: ${cofs.map((c) => c.title).join(", ")}, each with the reason it is needed. Then each cofounder chose the team for its own area: ${teams.join("; ")}. Approve the whole organization, or reject it with a note and Cynqra revises it. This is your first approval.` };
     }
     if (m.phase === "planning") return { chapter: CH.plan, title: "The plan and the budget",
       body: `Each team member now has the AI best suited to its work. The work is broken into ${((st.plan || {}).milestones || []).length} milestones and ${(st.tasks || []).length} tasks, each with an owner and a check it must pass, and priced against your budget. Nothing starts until you approve. This is your second approval.` };
@@ -70,12 +74,12 @@ const CynqraTour = (() => {
       body: "An AI or network error stopped this step. Cynqra never fills a gap with made-up work. Press Try the same step again once the AI is reachable." };
     if (m.phase === "stopped") return { chapter: CH.work, view: "work", title: "The project was stopped", body: m.notice || "" };
     if (m.phase === "accepted") return { chapter: CH.live, view: "company", title: "Delivered and accepted",
-      body: `You were needed ${decisionsSoFar(st)} times. Everything else, including ${plural(st.metrics.defects_caught_before_verified, "mistake")} caught by the checks, ${plural(st.metrics.blockers_cleared_without_founder, "question")} settled within the team and ${plural(st.metrics.actions_stopped_by_policy, "action")} stopped by the rules, the team handled itself, and every step is on record.` };
+      body: `You were needed ${decisionsSoFar(st)} times. Everything else, including ${plural(st.metrics.defects_caught_before_verified, "mistake")} caught by the checks, ${plural(st.metrics.sent_back_by_cofounders || 0, "piece")} of work sent back by a cofounder, ${plural(st.metrics.blockers_cleared_without_founder, "question")} settled within the team and ${plural(st.metrics.actions_stopped_by_policy, "action")} stopped by the rules, the team handled itself, and every step is on record.` };
     if (pend.length) { const n = forDecision(st, pend[0]); if (n) return n; }
     if (last.did === "approved" && last.kind === "approve_workforce") return { chapter: CH.plan, title: "The team is approved",
-      body: "Every member now exists, with a role, what it may and may not do, and who it reports to. Cynqra gives each one the AI that suits its work and drafts the plan." };
+      body: "Every member now exists, with a role, what it may and may not do, and the cofounder it reports to. Cynqra gives each one the AI that suits its work and drafts the plan." };
     if (last.did === "approved" && last.kind === "approve_roadmap") return { chapter: CH.work, view: "work", title: "The team starts work",
-      body: "From here you do nothing unless a decision needs you. Team members work at the same time, hand work to each other, and ask the right colleague when in doubt. Every action is checked against the rules and recorded." };
+      body: "From here you do nothing unless a decision needs you. Cofounders run their areas: they hand out their team's work, answer its doubts and review it before it counts. Everyone works at the same time, and every action is checked against the rules and recorded." };
     if (last.did === "approved") {
       const title = { decision: "You decided the rule", review_merge: "You approved the merge", deploy: "You approved going live" }[last.kind] || "You approved";
       const body = { decision: "It is written into the company's memory, and every later task receives it, so nobody has to guess it again.",
@@ -85,7 +89,7 @@ const CynqraTour = (() => {
     }
     if (last.did === "assigned") return { chapter: CH.work, view: "work",
       title: `${Who(t.handoff_from || "orchestrator")} hands "${t.title}" to ${who(t.owner_worker_id)}`,
-      body: "The handover carries what is needed and how the work will be checked. Team members don't chat: every handover and question is a structured message on record." };
+      body: `${t.handoff_from && t.handoff_from !== "orchestrator" ? `${Who(t.handoff_from)} leads this area and hands out its work. ` : "A cofounder's own work comes straight from the plan you approved. "}The handover carries what is needed and how the work will be checked. Every handover and question is a structured message on record.` };
     if (last.did === "completed" && t.attempts) return { chapter: CH.work, view: "work", title: `${Who(t.owner_worker_id)} fixes the work and sends it again`,
       body: "The failed check and its details went back to them, and they sent a corrected version. It still counts for nothing until every check runs again." };
     if (last.did === "completed") return { chapter: CH.work, view: "work", title: `${Who(t.owner_worker_id)} says "${t.title}" is done`,
@@ -100,12 +104,27 @@ const CynqraTour = (() => {
       return { chapter: CH.work, view: "work", title: "A check caught a mistake",
         body: `${Who(t.owner_worker_id)}'s work failed ${failed.length ? failed.join(", ") : "its checks"}. It goes back with the failure named and does not count as done. You are never asked: catching this is the checks' job.` };
     }
-    if (last.did === "blocked") return { chapter: CH.work, view: "work", title: `${Who(t.owner_worker_id)} asks a colleague instead of guessing`,
-      body: `"${(t.blocker || {}).description || ""}" Guessing here could build the wrong thing. The question goes to ${who((t.blocker || {}).needs_from)}. You are not interrupted.` };
+    if (last.did === "blocked") {
+      const to = (t.blocker || {}).needs_from, lead = to === t.reviewed_by;
+      return { chapter: CH.work, view: "work", title: `${Who(t.owner_worker_id)} asks ${lead ? "its cofounder" : "a colleague"} instead of guessing`,
+        body: `"${(t.blocker || {}).description || ""}" Guessing here could build the wrong thing. The question goes to ${who(to)}${lead ? ", who leads this area" : ", who knows the answer"}. You are not interrupted.` };
+    }
     if (last.did === "blocker_cleared") {
       const a = (t.answers || []).slice(-1)[0] || {};
       return { chapter: CH.work, view: "work", title: `${Who(last.by)} answered, without you`,
         body: `"${a.acceptance_check || ""}" You were not interrupted.` };
+    }
+    if (last.did === "checked") return { chapter: CH.work, view: "work", title: `"${t.title}" passed its checks; now its cofounder reviews it`,
+      body: `The checks prove it does what the tests and rules say. ${Who(t.reviewed_by)}, who leads this area, now reviews it as an owner would, before it counts.` };
+    if (last.did === "to_cofounder") return { chapter: CH.work, view: "work", title: `${Who(t.owner_worker_id)}'s proposal goes to its cofounder first`,
+      body: `A team member's proposal reaches you through the cofounder who leads its area. ${Who(t.reviewed_by)} reviews it before it is brought to you.` };
+    if (last.did === "sent_back") { const r = (t.reviews || []).slice(-1)[0] || {};
+      return { chapter: CH.work, view: "work", title: `${Who(last.by)} sent the work back`,
+        body: `It passed the automatic checks, but its cofounder saw a problem: "${r.note || ""}" It goes back to ${who(t.owner_worker_id)} with what to change. You are never asked.` }; }
+    if (last.did === "verified" && t.reviews && t.reviews.length && (t.reviews.slice(-1)[0] || {}).verdict === "approve" && t.kind !== "deploy") {
+      const r = t.reviews.slice(-1)[0];
+      return { chapter: CH.work, view: "work", title: `${Who(r.by)} approved "${t.title}"`,
+        body: `"${r.note}" It passed its checks and its cofounder's review, and now counts as done.` };
     }
     if (last.did === "verified") {
       if (t.kind === "document") return { chapter: CH.work, view: "work", title: `"${t.title}" passed its check`,

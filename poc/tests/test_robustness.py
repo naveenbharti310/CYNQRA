@@ -49,7 +49,8 @@ class Garbled(ScriptedSource):
         return (mutate(copy.deepcopy(data), self.rng) if self.rng.random() < self.rate else data), usage
 
 
-for _name in ("structure_objective", "decompose", "synthesize", "plan", "assign", "work", "answer_blocker"):
+for _name in ("structure_objective", "decompose", "cofounders", "build_team", "plan", "assign", "work",
+              "answer_blocker", "review"):
     setattr(Garbled, _name, (lambda n: lambda self, *a, **k: self._maybe(getattr(ScriptedSource, n)(self, *a, **k)))(_name))
 
 

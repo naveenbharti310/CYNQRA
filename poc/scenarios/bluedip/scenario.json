@@ -1,7 +1,7 @@
 {
   "id": "bluedip",
   "title": "Bluedip: fill a restaurant's quiet hours",
-  "about": "A founder describes Bluedip, an app that predicts a restaurant's footfall and revenue hour by hour and estimates what an offer will really do before the owner runs it. Cynqra builds the team the idea needs: a Data Scientist for the models, a Restaurant Revenue Management Specialist, a CFO, a Market Analyst, a Legal and Compliance Advisor, a Project Manager, a CTO and an engineer. They work at the same time; the platform backtests the forecast (its first version fails), the engineer asks the Specialist instead of guessing, the CEO decides one rule on discounts, and the app goes live. The owner's own example, 50% off for 15 customers from 1 to 4 pm, turns out to raise revenue and lose money; Bluedip recommends the offer that earns it.",
+  "about": "A founder describes Bluedip, an app that predicts a restaurant's footfall and revenue hour by hour and estimates what an offer will really do before the owner runs it. Cynqra proposes three cofounders: a CTO, a Chief Product Officer and a CFO. Each builds the team for its area: the CTO a Data Scientist, a Backend Engineer, a Frontend Engineer, DevOps and QA; the CPO a Project Manager, a Designer, a Market Analyst and a Restaurant Revenue Management Specialist; the CFO a Legal and Compliance Advisor. Cofounders hand out their team's work, answer its doubts and review it before it counts. The platform backtests the forecast (its first version fails), the CPO sends the screen design back because it hid the margin, a test catches the ignored cap, the CEO decides one rule on discounts, and the app goes live. The owner's own example, 50% off for 15 customers from 1 to 4 pm, turns out to raise revenue and lose money; Bluedip recommends the offer that earns it.",
   "note": "Prepared script for demo mode. Every word a worker says in demo mode comes from this file, and the product shows that. The models and the app in files/ are real: they are tested, backtested and deployed for real.",
   "settings": {
     "self_checks": 0
@@ -105,6 +105,12 @@
         "area": "product",
         "text": "Release 1 is for restaurant owners only: no diner-facing app and no payments.",
         "verification": "Smoke test and acceptance check"
+      },
+      {
+        "id": "r_14",
+        "area": "qa",
+        "text": "Every acceptance check is an automated test, run again on every change.",
+        "verification": "The acceptance tests pass on the release candidate and on main."
       }
     ],
     "workstreams": [
@@ -137,7 +143,8 @@
           "r_09",
           "r_10",
           "r_11",
-          "r_13"
+          "r_13",
+          "r_14"
         ],
         "depends_on": [
           "ws_business",
@@ -157,88 +164,135 @@
     ]
   },
   "workforce": {
-    "summary": "A company built on prediction, not only an app. A Data Scientist owns the footfall and offer models; a Restaurant Revenue Management Specialist, because whether a discount earns money is this company's field; a CFO, a Market Analyst and a Legal and Compliance Advisor for the business foundation; a Business Lead runs the business side for the founder; a Project Manager coordinates; a CTO and one engineer build and release the owner's app. No Security Expert yet: release 1 holds no diner data and takes no payments.",
-    "roles": [
+    "summary": "Bluedip is a business built on prediction and on money. It needs a CTO to build and run the product and its models, a Chief Product Officer so restaurant owners find it useful, and a CFO because its whole value is whether an offer earns or loses money. No Chief Compliance Officer: release 1 takes no payments and holds no diner data. Each cofounder chose the team for its own area.",
+    "cofounders": [
       {
-        "role": "CEO",
-        "quantity": 1,
-        "why": "Runs the business side for the founder and writes the brief everyone works from.",
+        "role": "CTO",
+        "why": "Bluedip is an app built on prediction models: someone must own how it is built, checked and put live.",
+        "requirement_ids": [
+          "r_12"
+        ]
+      },
+      {
+        "role": "CPO",
+        "why": "Restaurant owners must find it useful between services: someone must own who it is for and what it must do for them.",
         "requirement_ids": [
           "r_01",
           "r_13"
         ]
       },
       {
-        "role": "PM",
-        "quantity": 1,
-        "why": "Hands out the work, keeps it moving, and writes the app's spec and acceptance checks.",
-        "requirement_ids": [
-          "r_09"
-        ]
-      },
-      {
-        "role": "DataScientist",
-        "quantity": 1,
-        "why": "Bluedip is its predictions: the footfall forecast, the offer estimate, and how both learn.",
-        "requirement_ids": [
-          "r_06",
-          "r_07"
-        ]
-      },
-      {
-        "role": "Specialist",
-        "field": "revenue management",
-        "title": "Restaurant Revenue Management Specialist",
-        "quantity": 1,
-        "why": "Knows when a discount earns money and when it only gives it away: the core of every recommendation.",
-        "requirement_ids": [
-          "r_05"
-        ]
-      },
-      {
         "role": "CFO",
-        "quantity": 1,
-        "why": "Price, costs, break-even and funding, and the rule on how deep an offer may go.",
+        "why": "The whole value is money: whether an offer earns or loses, the price owners pay and the funding Bluedip needs.",
         "requirement_ids": [
           "r_03",
           "r_08"
         ]
-      },
-      {
-        "role": "MarketAnalyst",
-        "quantity": 1,
-        "why": "Who pays, what they use today, and how to reach the first restaurants.",
-        "requirement_ids": [
-          "r_02"
+      }
+    ],
+    "teams": {
+      "CTO": {
+        "summary": "The product is its predictions and the app built on them. A Data Scientist for the models, a Backend Engineer for the demand and offer engine, a Frontend Engineer for the owner's app, QA for the acceptance tests, and DevOps to put it live and keep it running.",
+        "roles": [
+          {
+            "role": "DataScientist",
+            "quantity": 1,
+            "why": "Bluedip is its predictions: the footfall forecast, the offer estimate, and how both learn.",
+            "requirement_ids": [
+              "r_06",
+              "r_07"
+            ]
+          },
+          {
+            "role": "BackendEngineer",
+            "quantity": 1,
+            "why": "The demand and offer engine behind every number the owner sees, and the cap that must hold.",
+            "requirement_ids": [
+              "r_09",
+              "r_10"
+            ]
+          },
+          {
+            "role": "FrontendEngineer",
+            "quantity": 1,
+            "why": "The one screen the owner uses, and the web server behind it.",
+            "requirement_ids": [
+              "r_11"
+            ]
+          },
+          {
+            "role": "QA",
+            "quantity": 1,
+            "why": "Every acceptance check becomes a test that runs on every change.",
+            "requirement_ids": [
+              "r_14"
+            ]
+          },
+          {
+            "role": "DevOps",
+            "quantity": 1,
+            "why": "Puts Bluedip live on the company's own host with a health check and a way back.",
+            "requirement_ids": [
+              "r_12"
+            ]
+          }
         ]
       },
-      {
-        "role": "LegalAdvisor",
-        "quantity": 1,
-        "why": "Offers must not mislead diners; data and tax rules apply to every offer.",
-        "requirement_ids": [
-          "r_04"
+      "CPO": {
+        "summary": "Owners must trust the numbers and act on them in a minute. A Project Manager to plan the work and write the spec, a Designer for the owner's screen, a Market Analyst for who pays and how to reach them, and a Restaurant Revenue Management Specialist for when a discount earns money.",
+        "roles": [
+          {
+            "role": "PM",
+            "quantity": 1,
+            "why": "Plans the roadmap and writes the app's spec and acceptance checks.",
+            "requirement_ids": [
+              "r_09",
+              "r_10",
+              "r_13"
+            ]
+          },
+          {
+            "role": "Designer",
+            "quantity": 1,
+            "why": "One screen an owner reads standing up: what it shows first decides whether they trust it.",
+            "requirement_ids": [
+              "r_11"
+            ]
+          },
+          {
+            "role": "MarketAnalyst",
+            "quantity": 1,
+            "why": "Who pays, what they use today, and how to reach the first restaurants.",
+            "requirement_ids": [
+              "r_02"
+            ]
+          },
+          {
+            "role": "Specialist",
+            "field": "revenue management",
+            "title": "Restaurant Revenue Management Specialist",
+            "quantity": 1,
+            "why": "Knows when a discount earns money and when it only gives it away: the core of every recommendation.",
+            "requirement_ids": [
+              "r_05"
+            ]
+          }
         ]
       },
-      {
-        "role": "CTO",
-        "quantity": 1,
-        "why": "Owns the release: reviews it, proposes the merge and the deploy.",
-        "requirement_ids": [
-          "r_12"
-        ]
-      },
-      {
-        "role": "Engineer",
-        "quantity": 1,
-        "why": "Builds the owner's app on the Data Scientist's models.",
-        "requirement_ids": [
-          "r_09",
-          "r_10",
-          "r_11"
+      "CFO": {
+        "summary": "Offers touch advertising, data and tax rules. A Legal and Compliance Advisor keeps the register of what applies and what a lawyer must confirm.",
+        "roles": [
+          {
+            "role": "LegalAdvisor",
+            "quantity": 1,
+            "why": "Offers must not mislead diners, and data and tax rules apply to every offer.",
+            "requirement_ids": [
+              "r_04"
+            ]
+          }
         ]
       }
-    ]
+    }
   },
   "plan": {
     "workstreams": [
@@ -281,7 +335,7 @@
         "id": "t_01",
         "workstream_id": "ws_business",
         "kind": "document",
-        "owner_worker_id": "w_ceo",
+        "owner_worker_id": "w_cpo",
         "title": "Business brief",
         "inputs": "Confirmed objective",
         "expected_output": "business_brief.md",
@@ -496,32 +550,148 @@
       {
         "id": "t_10",
         "workstream_id": "ws_app",
+        "kind": "document",
+        "owner_worker_id": "w_design",
+        "title": "The owner's screen",
+        "inputs": "App spec, revenue management report",
+        "expected_output": "design.md",
+        "dependencies": [
+          "t_03",
+          "t_09"
+        ],
+        "deadline_day": 4,
+        "milestone_id": "m_2",
+        "acceptance_criteria": [
+          "Every screen and flow of the spec",
+          "What the owner reads first when deciding an offer"
+        ],
+        "requirement_ids": [
+          "r_11"
+        ],
+        "documents": [
+          "design"
+        ]
+      },
+      {
+        "id": "t_11",
+        "workstream_id": "ws_app",
         "kind": "code",
-        "owner_worker_id": "w_eng",
-        "title": "The owner's app",
-        "inputs": "Spec, acceptance checks, the forecast, the rule on record",
-        "expected_output": "store.py, demand.py, offers.py, app.py, index.html and their tests",
+        "owner_worker_id": "w_be",
+        "title": "Demand and offer engine",
+        "inputs": "Spec, acceptance checks, the method, the forecast, the rule on record",
+        "expected_output": "store.py, demand.py, offers.py and their tests",
         "dependencies": [
           "t_06",
           "t_08",
           "t_09"
         ],
+        "deadline_day": 4,
+        "milestone_id": "m_2",
+        "acceptance_criteria": [
+          "Demand by hour and meal on forecast.py",
+          "An offer's estimate that never passes its cap",
+          "The rule on record enforced"
+        ],
+        "requirement_ids": [
+          "r_07",
+          "r_09",
+          "r_10"
+        ]
+      },
+      {
+        "id": "t_12",
+        "workstream_id": "ws_app",
+        "kind": "code",
+        "owner_worker_id": "w_fe",
+        "title": "The owner's app",
+        "inputs": "The screen design, the demand and offer engine",
+        "expected_output": "app.py, index.html and their tests",
+        "dependencies": [
+          "t_10",
+          "t_11"
+        ],
         "deadline_day": 5,
         "milestone_id": "m_2",
         "acceptance_criteria": [
-          "Every acceptance check passes as a test",
+          "The screen as designed",
           "GET /health and GET / answer 200",
           "No payment or diner route"
         ],
         "requirement_ids": [
-          "r_07",
           "r_09",
           "r_10",
           "r_11"
         ]
       },
       {
-        "id": "t_11",
+        "id": "t_13",
+        "workstream_id": "ws_app",
+        "kind": "document",
+        "owner_worker_id": "w_qa",
+        "title": "Test plan",
+        "inputs": "App spec and acceptance checks",
+        "expected_output": "test_plan.md",
+        "dependencies": [
+          "t_09"
+        ],
+        "deadline_day": 4,
+        "milestone_id": "m_2",
+        "acceptance_criteria": [
+          "How every acceptance check is tested"
+        ],
+        "requirement_ids": [
+          "r_14"
+        ],
+        "documents": [
+          "test_plan"
+        ]
+      },
+      {
+        "id": "t_14",
+        "workstream_id": "ws_app",
+        "kind": "code",
+        "owner_worker_id": "w_qa",
+        "title": "Acceptance tests",
+        "inputs": "Acceptance checks, the owner's app",
+        "expected_output": "test_acceptance.py",
+        "dependencies": [
+          "t_12",
+          "t_13"
+        ],
+        "deadline_day": 5,
+        "milestone_id": "m_2",
+        "acceptance_criteria": [
+          "Each numbered acceptance check is a test that passes"
+        ],
+        "requirement_ids": [
+          "r_14"
+        ]
+      },
+      {
+        "id": "t_15",
+        "workstream_id": "ws_release",
+        "kind": "document",
+        "owner_worker_id": "w_devops",
+        "title": "Runbook",
+        "inputs": "App spec",
+        "expected_output": "runbook.md",
+        "dependencies": [
+          "t_09"
+        ],
+        "deadline_day": 5,
+        "milestone_id": "m_3",
+        "acceptance_criteria": [
+          "How to run, check and roll back Bluedip"
+        ],
+        "requirement_ids": [
+          "r_12"
+        ],
+        "documents": [
+          "runbook"
+        ]
+      },
+      {
+        "id": "t_16",
         "workstream_id": "ws_release",
         "kind": "review_merge",
         "owner_worker_id": "w_cto",
@@ -529,7 +699,10 @@
         "inputs": "Integration branch",
         "expected_output": "Release 1 on main",
         "dependencies": [
-          "t_10"
+          "t_06",
+          "t_11",
+          "t_12",
+          "t_14"
         ],
         "deadline_day": 6,
         "milestone_id": "m_3",
@@ -538,19 +711,21 @@
         ],
         "requirement_ids": [
           "r_09",
-          "r_10"
+          "r_10",
+          "r_14"
         ]
       },
       {
-        "id": "t_12",
+        "id": "t_17",
         "workstream_id": "ws_release",
         "kind": "deploy",
-        "owner_worker_id": "w_cto",
+        "owner_worker_id": "w_devops",
         "title": "Put Bluedip live",
         "inputs": "Main",
         "expected_output": "Bluedip at a live address",
         "dependencies": [
-          "t_11"
+          "t_15",
+          "t_16"
         ],
         "deadline_day": 6,
         "milestone_id": "m_3",
@@ -599,31 +774,67 @@
       "context_ref": "objective v1, the method",
       "acceptance_check": "forecast.py with forecast(history, horizon) and its tests. The platform backtests it on days it has not seen, against last week's numbers."
     },
-    "t_07": {
+    "t_09": {
       "artifacts": [
         "t_01/business_brief.md",
-        "t_02/market_analysis.md",
-        "t_02/launch_plan.md"
+        "t_05/method.md"
       ],
-      "context_ref": "objective v1, the Market Analyst's handoff",
-      "acceptance_check": "Price, costs, break-even and funding, built on the launch plan's numbers. Say which assumptions move the answer most."
-    },
-    "t_08": {
-      "artifacts": [
-        "t_03/revenue_management_report.md",
-        "t_07/financial_model.md"
-      ],
-      "context_ref": "objective v1, the Specialist's report",
-      "acceptance_check": "Owners will set their own discounts. Bring the founder one rule on how far an offer may go, with its cost."
+      "context_ref": "objective v1, business brief",
+      "acceptance_check": "The app's spec and one numbered acceptance check for every rule of the brief, so QA can turn each into a test."
     },
     "t_10": {
+      "artifacts": [
+        "t_09/product_spec.md",
+        "t_03/revenue_management_report.md"
+      ],
+      "context_ref": "objective v1, the spec and the Specialist's report",
+      "acceptance_check": "The owner's one screen: the day, the three meals and the offer builder, and what an owner reads first when deciding an offer."
+    },
+    "t_11": {
       "artifacts": [
         "t_09/product_spec.md",
         "t_09/acceptance.md",
         "t_05/method.md"
       ],
       "context_ref": "objective v1, the decided rule on offers",
-      "acceptance_check": "Build store.py, demand.py (on forecast.py), offers.py, app.py (JSON API and /health, PORT from the environment) and index.html, with test_offers.py and test_app.py covering acceptance checks 1 to 9. Offers follow the decided rule. No payment or diner route."
+      "acceptance_check": "Build store.py, demand.py (on forecast.py) and offers.py, with test_offers.py. The estimate never passes an offer's cap, and the rule on record is enforced."
+    },
+    "t_12": {
+      "artifacts": [
+        "t_10/design.md",
+        "t_09/acceptance.md"
+      ],
+      "context_ref": "objective v1, the screen design",
+      "acceptance_check": "Build app.py (JSON API and /health, PORT and DATA_FILE from the environment) and index.html as designed, on the demand and offer engine, with test_app.py and smoke.json."
+    },
+    "t_13": {
+      "artifacts": [
+        "t_09/acceptance.md"
+      ],
+      "context_ref": "objective v1, the acceptance checks",
+      "acceptance_check": "How each numbered acceptance check is tested, and which checks only the platform can make."
+    },
+    "t_14": {
+      "artifacts": [
+        "t_09/acceptance.md",
+        "t_13/test_plan.md"
+      ],
+      "context_ref": "objective v1, the test plan",
+      "acceptance_check": "test_acceptance.py: one test per numbered acceptance check, against the running app, with a fixed history so every number repeats."
+    },
+    "t_15": {
+      "artifacts": [
+        "t_09/product_spec.md"
+      ],
+      "context_ref": "objective v1, the spec",
+      "acceptance_check": "How to run Bluedip on the company's host, check it is up, and go back to the previous release without losing data."
+    },
+    "t_17": {
+      "artifacts": [
+        "t_15/runbook.md"
+      ],
+      "context_ref": "release 1 on main",
+      "acceptance_check": "Propose putting release 1 live, with the preview's health and smoke results."
     }
   },
   "work": {
@@ -735,6 +946,24 @@
     ],
     "t_10": [
       {
+        "result": "done",
+        "summary": "The owner's screen: the day, the three meals and the offer builder.",
+        "files": {
+          "design.md": "@files/t_10/attempt1/design.md"
+        },
+        "acceptance_check": "Screens and flows."
+      },
+      {
+        "result": "done",
+        "summary": "The estimate now leads with the margin change after food cost and shows the customers who would have come anyway.",
+        "files": {
+          "design.md": "@files/t_10/design.md"
+        },
+        "acceptance_check": "Screens and flows; the margin change is what the owner reads first."
+      }
+    ],
+    "t_11": [
+      {
         "result": "blocked",
         "category": "missing_input",
         "description": "The spec says every offer shows its margin change after food cost, but no restaurant has entered its food cost yet, and the sample restaurant has none. I will not invent a food cost.",
@@ -742,36 +971,77 @@
       },
       {
         "result": "done",
-        "summary": "Demand by hour, the offer estimate and recommendations, the app and 23 tests.",
+        "summary": "Demand by hour and meal, the offer estimate and the recommendations, with 16 tests.",
         "files": {
-          "store.py": "@files/t_10/store.py",
-          "demand.py": "@files/t_10/demand.py",
-          "app.py": "@files/t_10/app.py",
-          "index.html": "@files/t_10/index.html",
-          "test_offers.py": "@files/t_10/test_offers.py",
-          "test_app.py": "@files/t_10/test_app.py",
-          "smoke.json": "@files/t_10/smoke.json",
-          "offers.py": "@files/t_10/attempt1/offers.py"
+          "store.py": "@files/t_11/store.py",
+          "demand.py": "@files/t_11/demand.py",
+          "offers.py": "@files/t_11/attempt1/offers.py",
+          "test_offers.py": "@files/t_11/test_offers.py"
         },
-        "acceptance_check": "python -m unittest"
+        "acceptance_check": "python -m unittest test_offers"
       },
       {
         "result": "done",
         "summary": "Fixed the estimate: it ignored the cap, so a busy window showed more customers than the owner allowed.",
         "files": {
-          "store.py": "@files/t_10/store.py",
-          "demand.py": "@files/t_10/demand.py",
-          "app.py": "@files/t_10/app.py",
-          "index.html": "@files/t_10/index.html",
-          "test_offers.py": "@files/t_10/test_offers.py",
-          "test_app.py": "@files/t_10/test_app.py",
-          "smoke.json": "@files/t_10/smoke.json",
-          "offers.py": "@files/t_10/offers.py"
+          "store.py": "@files/t_11/store.py",
+          "demand.py": "@files/t_11/demand.py",
+          "offers.py": "@files/t_11/offers.py",
+          "test_offers.py": "@files/t_11/test_offers.py"
         },
-        "acceptance_check": "python -m unittest"
+        "acceptance_check": "python -m unittest test_offers"
       }
     ],
-    "t_11": [
+    "t_12": [
+      {
+        "result": "blocked",
+        "category": "missing_input",
+        "description": "A new restaurant has no history of its own yet. The spec does not say what the screen shows until it has, and I will not invent numbers for it.",
+        "needs_from": "w_cto"
+      },
+      {
+        "result": "done",
+        "summary": "The owner's app as designed: the day by hour, the three meals, the offer builder with its estimate, and 8 tests.",
+        "files": {
+          "app.py": "@files/t_12/app.py",
+          "index.html": "@files/t_12/index.html",
+          "test_app.py": "@files/t_12/test_app.py",
+          "smoke.json": "@files/t_12/smoke.json"
+        },
+        "acceptance_check": "python -m unittest test_app"
+      }
+    ],
+    "t_13": [
+      {
+        "result": "done",
+        "summary": "Three layers of tests, and which acceptance check each one covers.",
+        "files": {
+          "test_plan.md": "@files/t_13/test_plan.md"
+        },
+        "acceptance_check": "Strategy and acceptance."
+      }
+    ],
+    "t_14": [
+      {
+        "result": "done",
+        "summary": "Nine acceptance tests, one per numbered check, on a fixed history.",
+        "files": {
+          "test_acceptance.py": "@files/t_14/test_acceptance.py"
+        },
+        "acceptance_check": "python -m unittest test_acceptance"
+      }
+    ],
+    "t_15": [
+      {
+        "result": "done",
+        "summary": "Run, check and roll back, each in one step.",
+        "files": {
+          "runbook.md": "@files/t_15/runbook.md"
+        },
+        "acceptance_check": "Run and rollback."
+      }
+    ],
+    "t_16": [
       {
         "result": "proposal",
         "problem": "Release 1 of Bluedip is checked on the integration branch and not yet on main.",
@@ -781,7 +1051,7 @@
         "what_would_change_this": "Any failing test."
       }
     ],
-    "t_12": [
+    "t_17": [
       {
         "result": "proposal",
         "problem": "Bluedip is merged and checked, but not live, so the pilot restaurants cannot use it yet.",
@@ -798,12 +1068,107 @@
     ]
   },
   "answer_blocker": {
-    "t_10": {
+    "t_11": {
       "artifacts": [
         "t_03/revenue_management_report.md"
       ],
       "context_ref": "revenue management report, recommendation 4",
       "acceptance_check": "Use 35% of the average bill as the food cost until the owner enters their own, and show it on screen as an assumption, next to every margin figure. Ask for the real figure on first use. Never hide it: a margin figure is only as good as its food cost."
+    },
+    "t_12": {
+      "artifacts": [
+        "t_11/store.py"
+      ],
+      "context_ref": "store.py, the sample history",
+      "acceptance_check": "Show the sample restaurant's day and say on the page that it is sample data until the owner's own history arrives. store.py already falls back to the sample history and marks it as sample, and the day view carries that flag."
     }
+  },
+  "review": {
+    "t_02": [
+      {
+        "verdict": "approve",
+        "note": "The competitors are described by what they do and no market size is invented. The pilot numbers are marked as assumptions, which the CFO needs. Approved."
+      }
+    ],
+    "t_03": [
+      {
+        "verdict": "approve",
+        "note": "The report shows that the margin after food cost decides whether an offer is worth running. The whole product rests on it. Approved."
+      }
+    ],
+    "t_04": [
+      {
+        "verdict": "approve",
+        "note": "Every rule has its source and says who must confirm it. Approved."
+      }
+    ],
+    "t_05": [
+      {
+        "verdict": "approve",
+        "note": "Each model says how it will be checked, and the forecast is compared with last week's numbers. Approved."
+      }
+    ],
+    "t_06": [
+      {
+        "verdict": "approve",
+        "note": "It now beats last week's numbers on days it has not seen. Approved."
+      }
+    ],
+    "t_09": [
+      {
+        "verdict": "approve",
+        "note": "Every rule of the brief is in the spec, and each has a numbered acceptance check. Approved."
+      }
+    ],
+    "t_10": [
+      {
+        "verdict": "revise",
+        "note": "The estimate leads with revenue and leaves out the customers who would have come anyway. The Specialist's report shows revenue can rise while the restaurant loses money. Show the margin change after food cost first and highlighted, and the customers who would have come anyway, next to the revenue."
+      },
+      {
+        "verdict": "approve",
+        "note": "The margin change now comes first and the customers who would have come anyway are shown. An owner cannot miss a losing offer. Approved."
+      }
+    ],
+    "t_11": [
+      {
+        "verdict": "approve",
+        "note": "The cap now holds in the estimate and at the counter, and the assumed food cost is shown with every margin. Approved."
+      }
+    ],
+    "t_12": [
+      {
+        "verdict": "approve",
+        "note": "The screen follows the design, and a new restaurant sees the sample day marked as sample. Approved."
+      }
+    ],
+    "t_13": [
+      {
+        "verdict": "approve",
+        "note": "Every acceptance check has a test or a named platform check. Approved."
+      }
+    ],
+    "t_14": [
+      {
+        "verdict": "approve",
+        "note": "Each numbered acceptance check is a test against the running app, on a fixed history. Approved."
+      }
+    ],
+    "t_15": [
+      {
+        "verdict": "approve",
+        "note": "Start, health check and rollback are each one step. Approved."
+      }
+    ],
+    "t_17": [
+      {
+        "verdict": "approve",
+        "note": "The release passed its build, tests, preview, health and smoke checks. I endorse putting it live."
+      }
+    ]
+  },
+  "review_default": {
+    "verdict": "approve",
+    "note": "Checked against the handoff and its acceptance criteria. Approved."
   }
 }

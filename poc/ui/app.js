@@ -200,8 +200,8 @@ function objectiveCard(obj) {
 
 function orgChart(workers) {
   const kids = (id) => workers.filter((w) => (w.reports_to || "founder") === id);
-  const node = (w) => `<li><div class="onode"><b>${esc(w.title)}</b><small>${esc(w.role)}${w.model ? " · " + esc(w.model) : ""}</small></div>${kids(w.id).length ? `<ul>${kids(w.id).map(node).join("")}</ul>` : ""}</li>`;
-  return `<div class="ochart"><ul><li><div class="onode founder"><b>Founder</b><small>approval gates</small></div><ul>${kids("founder").map(node).join("")}</ul></li></ul></div>`;
+  const node = (w) => `<li><div class="onode${w.tier === "cofounder" ? " cofounder" : ""}"><b>${esc(w.title)}</b><small>${w.tier === "cofounder" ? "Cofounder" : "Team"}${w.model ? " · " + esc(w.model) : ""}</small></div>${kids(w.id).length ? `<ul>${kids(w.id).map(node).join("")}</ul>` : ""}</li>`;
+  return `<div class="ochart"><ul><li><div class="onode founder"><b>You, the CEO</b><small>approval gates</small></div><ul>${kids("founder").map(node).join("")}</ul></li></ul></div>`;
 }
 
 function reqList(req) {
@@ -215,31 +215,36 @@ function reqList(req) {
 function workforceStep() {
   const st = S.st, prop = st.proposal || {}, req = st.requirements, d = (st.decisions.pending || []).find((x) => x.kind === "approve_workforce");
   const cost = prop.cost_by_role || {};
-  const roles = (prop.roles || []).map((r) => {
+  const row = (r) => {
     const cat = (st.catalog || []).find((c) => c.role === r.role) || {};
     const name = r.title || cat.title || r.role, key = r.title || r.role, fid = r.field ? "spec_" + r.field.replace(/[^a-z0-9]+/gi, "_") : r.role;
-    return `<tr><td><b>${esc(name)}</b>${r.added_by === "platform" ? ` <span class="pill teal">added by Cynqra</span>` : ""}</td><td class="mono">${esc(r.quantity)}</td><td class="small">${esc(r.why)}</td>
+    const cof = r.tier === "cofounder";
+    return `<tr class="${cof ? "cof-row" : "team-row"}"><td>${cof ? `<span class="pill blue">Cofounder</span> <b>${esc(name)}</b>` : `<span class="indent">${esc(name)}</span>`}${r.added_by === "platform" ? ` <span class="pill teal">added by Cynqra</span>` : ""}</td><td class="mono">${esc(r.quantity)}</td><td class="small">${esc(r.why)}</td>
       <td class="mono small">${esc((r.requirement_ids || []).join(", "))}</td><td class="mono small">${cost[key] === undefined ? "n/a" : usd(cost[key])}</td>
-      ${allowOverride() ? `<td><input type="number" min="0" max="${esc(r.field ? 1 : cat.max || 1)}" id="q_${esc(fid)}" data-role="${esc(r.role)}" data-field="${esc(r.field || "")}" data-title="${esc(r.title || "")}" data-keep="no" value="${esc(r.quantity)}" style="width:60px" aria-label="Quantity"></td>` : ""}</tr>`;
-  }).join("");
+      ${allowOverride() ? `<td><input type="number" min="0" max="${esc(r.field ? 1 : cat.max || 1)}" id="q_${esc(fid)}" data-role="${esc(r.role)}" data-field="${esc(r.field || "")}" data-title="${esc(r.title || "")}" data-lead="${esc(r.lead || "")}" data-keep="no" value="${esc(r.quantity)}" style="width:60px" aria-label="Quantity"></td>` : ""}</tr>`;
+  };
+  const all = prop.roles || [], cofs = all.filter((r) => r.tier === "cofounder");
+  const teamWhy = (c) => (prop.team_summaries || {})[c.role];
+  const roles = cofs.map((c) => row(c) + (teamWhy(c) ? `<tr class="team-why"><td colspan="${allowOverride() ? 6 : 5}" class="small muted"><span class="indent">The ${esc(c.title || c.role)}'s team: ${esc(teamWhy(c))}</span></td></tr>` : "")
+    + all.filter((r) => r.lead === c.role).map(row).join("")).join("") + all.filter((r) => r.tier !== "cofounder" && !cofs.some((c) => c.role === r.lead)).map(row).join("");
   const ws = req ? req.workstreams.map((w) => `<span class="pill grey">${esc(w.id)} ${esc(w.name)}</span>`).join(" ") : "";
   return `<div class="wiz-body">
     <div class="wiz-left">
       ${steps(1)}
-      <h1 class="hero">The team your company needs.</h1>
-      <p class="lede">Cynqra broke your idea into ${req ? req.requirements.length : 0} requirements and chose the team that covers every one. You approve the team; you don't have to build it.</p>
+      <h1 class="hero">Your cofounders, and the teams they chose.</h1>
+      <p class="lede">Cynqra broke your idea into ${req ? req.requirements.length : 0} requirements and proposed the cofounders your company needs. Each cofounder then chose the team for its own area. You approve the whole organization once; you don't have to build it.</p>
       <div class="card stack"><div class="caps">Requirements</div>${reqList(req)}
         <div class="small">Workstreams: ${ws}</div><div class="small">Critical path: <span class="mono">${esc(((req || {}).critical_path || []).join(" > "))}</span></div></div>
       <div class="err" role="alert">${esc(S.err)}</div>
     </div>
     <div class="wiz-right"><div class="card stack">
-      <div class="between"><h2 style="font-size:20px">Proposed organization: ${(prop.workers || []).length} workers</h2><span class="small muted">proposal ${esc(prop.id || "")} · ${esc(prop.intelligence || "")}</span></div>
+      <div class="between"><h2 style="font-size:20px">Proposed organization: ${(prop.cofounders || []).length} cofounders, ${(prop.workers || []).length - (prop.cofounders || []).length} team members</h2><span class="small muted">proposal ${esc(prop.id || "")} · ${esc(prop.intelligence || "")}</span></div>
       <p class="small" style="margin:0">${esc(prop.summary || "")}</p>
-      <div class="tscroll"><table class="tbl"><thead><tr><th>Role</th><th>Qty</th><th>Why required</th><th>Covers</th><th>Expected cost</th>${allowOverride() ? "<th>Edit</th>" : ""}</tr></thead><tbody>${roles}</tbody></table></div>
+      <div class="tscroll"><table class="tbl"><thead><tr><th>Role</th><th>Qty</th><th>Why</th><th>Covers</th><th>Expected cost</th>${allowOverride() ? "<th>Edit</th>" : ""}</tr></thead><tbody>${roles}</tbody></table></div>
       ${orgChart(prop.workers || [])}
-      <p class="small muted" style="margin:0">Reporting lines are generated from the roles present. The Verification Service checks everyone's work and is not a worker. ${allowOverride() ? "Your governance policy allows editing the proposal: an edit is checked like any proposal and recorded as an override." : "Your governance policy does not allow editing it: reject with your feedback and Cynqra revises it."}</p>
+      <p class="small muted" style="margin:0">Each team member reports to the cofounder who chose it. Cofounders hand out their team's work, answer its doubts and review it before it counts. The Verification Service checks everyone's work and is not a worker. ${allowOverride() ? "Your governance policy allows editing the proposal: an edit is checked like any proposal and recorded as an override." : "Your governance policy does not allow editing it: reject with your feedback and Cynqra revises it."}</p>
       <label class="lbl" for="wf_note">Feedback, if you reject</label><textarea class="note" id="wf_note" data-keep="yes"></textarea>
-      <div class="row"><button class="btn primary" id="approve-workforce" data-id="${esc(d ? d.id : "")}" ${S.busy || !d ? "disabled" : ""}>Approve the workforce</button>
+      <div class="row"><button class="btn primary" id="approve-workforce" data-id="${esc(d ? d.id : "")}" ${S.busy || !d ? "disabled" : ""}>Approve the organization</button>
         <button class="btn" id="revise-workforce" data-id="${esc(d ? d.id : "")}" ${S.busy || !d ? "disabled" : ""}>Reject and revise</button></div>
     </div></div></div>`;
 }
@@ -488,6 +493,7 @@ function vCompany() {
 function statusText(t) {
   return {
     PLANNED: "Planned", ASSIGNED: "In progress", IN_PROGRESS: "In progress", BLOCKED: "Blocked", REVIEW: "Done by worker, verifying",
+    LEAD_REVIEW: t.pending_proposal ? "With its cofounder, before it reaches you" : "Checked, with its cofounder for review",
     REWORK: "Rework", AWAITING_FOUNDER: "Waiting on you", APPROVED: "Approved, executing",
     VERIFIED: t.attempts ? "Verified after rework" : "Verified", FAILED: "Escalated",
     WAITING: t.waiting ? `Waiting: ${t.waiting.why}` : "Waiting",
@@ -515,9 +521,9 @@ function vOrg() {
   }).join("");
   const ans = S.graph ? `<div class="small" id="graph-answer">${graphAnswer(S.graph)}</div>` : "";
   const kids = (id) => (st.workers || []).filter((x) => (x.reports_to || "founder") === id);
-  const branch = (id) => kids(id).length ? `<div class="vline"></div><div class="nodes">${kids(id).map((x) => `<div class="branch">${node(x.id, x.role)}${branch(x.id)}</div>`).join("")}</div>` : "";
+  const branch = (id) => kids(id).length ? `<div class="vline"></div><div class="nodes">${kids(id).map((x) => `<div class="branch">${node(x.id, x.tier === "cofounder" ? "Cofounder, reports to you" : `Reports to the ${(ws[x.reports_to] || {}).title || "founder"}`)}${branch(x.id)}</div>`).join("")}</div>` : "";
   return `<div class="org"><div class="card tree">
-      <div class="node founder"><b>Founder</b><small>Outcome, budget, the two approval gates, MEDIUM and HIGH risk</small></div>${branch("founder")}
+      <div class="node founder"><b>You, the CEO</b><small>Outcome, budget, the two approval gates, MEDIUM and HIGH risk</small></div>${branch("founder")}
       <div class="nodes" style="margin-top:18px"><div class="node svc"><b>Verification Service</b><small style="color:var(--accent-ink)">Not a worker. Tests, lint, review</small></div></div>
       <div class="card stack" style="margin-top:28px;width:100%;background:var(--paper);border:0">
         <label class="lbl" for="gq">Ask the organization graph</label>
@@ -725,13 +731,14 @@ function graphAnswer(g) {
 function vWork() {
   const st = S.st, ts = st.tasks || [], active = st.last_step && st.last_step.task;
   const cols = [["Planned", ["PLANNED"]], ["In progress", ["ASSIGNED", "IN_PROGRESS", "BLOCKED", "REWORK"]],
-    ["Review", ["REVIEW", "AWAITING_FOUNDER", "APPROVED", "FAILED"]], ["Verified", ["VERIFIED"]]];
+    ["Review", ["REVIEW", "LEAD_REVIEW", "AWAITING_FOUNDER", "APPROVED", "FAILED"]], ["Verified", ["VERIFIED"]]];
   const note = (t) => {
     if (t.status === "BLOCKED") return `<span class="small" style="color:var(--amber-ink)">Blocked: ${esc((t.blocker || {}).description)}</span>`;
     if (t.status === "REWORK") return `<span class="small" style="color:var(--red)">Rework: ${esc((t.feedback || "").split("\n")[0])}</span>`;
     if (t.status === "AWAITING_FOUNDER") return `<span class="small" style="color:var(--amber-ink)">Needs you: ${esc(t.risk_tier)} risk</span>`;
     if (t.status === "PLANNED") return `<span class="small muted">${t.dependencies.length ? "Depends on " + esc(t.dependencies.join(", ")) : "Ready"}</span>`;
     if (t.status === "REVIEW") return `<span class="small" style="color:var(--blue)">Completed by the worker. Not yet verified.</span>`;
+    if (t.status === "LEAD_REVIEW") return `<span class="small" style="color:var(--blue)">${t.pending_proposal ? "Proposal" : "Passed the checks"}. ${esc(wt(t.reviewed_by))} reviews it.</span>`;
     if (t.status === "VERIFIED") return `<span class="small" style="color:var(--green)">${esc(statusText(t))}</span>`;
     if (t.status === "ASSIGNED") return `<span class="small" style="color:var(--accent-ink)">Handoff received${(t.answers || []).length ? ", Blocker answered" : ""}</span>`;
     return `<span class="small muted">${esc(statusText(t))}</span>`;
@@ -741,7 +748,7 @@ function vWork() {
       <span class="ttl">${esc(t.title)}</span>${note(t)}</div>`).join("")}</div>`).join("");
   const tape = (st.protocols || []).slice().reverse().map((p) => `<div class="pobj ${esc(p.kind)} ${fresh("p:" + p.id)}"><span class="h">${esc(p.kind)} · ${esc(p.sender)} to ${esc(p.to)} · ${esc(p.task_id)}</span>
     <span class="small">${esc(p.summary)}</span>${p.artifacts && p.artifacts.length ? `<span class="small muted mono">${esc(p.artifacts.join(", "))}</span>` : ""}</div>`).join("");
-  return `<p class="small muted" style="margin:0">Completed means a worker says it is done. Verified means the Verification Service agrees.</p>
+  return `<p class="small muted" style="margin:0">Completed means a worker says it is done. Verified means the Verification Service agrees and, for a team member's work, its cofounder approved it.</p>
     <div class="work"><div class="cols">${colHtml}</div>
     <div class="tape card"><h2 style="font-size:17px">Protocol tape</h2><span class="small muted">Every message between workers is a structured object. No free chat.</span>${tape || `<span class="muted small">No messages yet.</span>`}</div></div>`;
 }
@@ -753,7 +760,7 @@ function vDecisions() {
         <textarea class="note" id="edit_${d.id}">${esc(d.recommendation)}</textarea>` : d.kind === "budget_breaker" ?
       `<label class="lbl" for="usd_${d.id}">New budget, US dollars</label><input type="number" id="usd_${d.id}" step="0.5" value="${esc((Math.max(st.budget.settings.budget_usd, st.budget.ledger.spent_total) * 1.5).toFixed(2))}">` : "";
     const side = d.extra && d.extra.side_action ? `<div class="deny"><span class="h">${esc(d.extra.side_action.status.toUpperCase())} · external_message</span><span class="small">${esc(d.extra.side_action.summary)} ${esc(d.extra.side_action.reason)}</span></div>` : "";
-    return `<div class="dcard ${fresh("d:" + d.id)}"><div class="between"><span class="mono small muted">${esc(d.id)} · from ${esc(wt(d.source))}</span>${riskPill(d.risk)}</div>
+    return `<div class="dcard ${fresh("d:" + d.id)}"><div class="between"><span class="mono small muted">${esc(d.id)} · from ${esc(wt(d.source))}${d.extra && d.extra.endorsed_by ? `, endorsed by ${esc(wt(d.extra.endorsed_by))}` : ""}</span>${riskPill(d.risk)}</div>
       <h2>${esc(KIND_TITLE[d.kind] || d.kind)}${d.task_id ? `: ${esc(d.task_id)}` : ""}</h2>
       <div class="dgrid"><div><span class="caps">Problem</span><p>${esc(d.problem)}</p></div><div><span class="caps">Recommendation</span><p>${esc(d.recommendation)}</p></div>
         <div><span class="caps">Evidence</span><p>${esc((d.evidence_refs || []).join("; ") || "none")}</p></div><div><span class="caps">What would change this</span><p>${esc(d.what_would_change_this)}</p></div></div>
@@ -879,7 +886,7 @@ function bind() {
   });
   on("approve-workforce", (ev) => {
     const id = ev.currentTarget.dataset.id, roles = [];
-    $$("[data-role]").forEach((i) => { if (Number(i.value) > 0) roles.push({ role: i.dataset.role, quantity: Number(i.value), why: "founder override", ...(i.dataset.field ? { field: i.dataset.field, title: i.dataset.title } : {}) }); });
+    $$("[data-role]").forEach((i) => { if (Number(i.value) > 0) roles.push({ role: i.dataset.role, quantity: Number(i.value), why: "founder override", ...(i.dataset.lead ? { lead: i.dataset.lead } : {}), ...(i.dataset.field ? { field: i.dataset.field, title: i.dataset.title } : {}) }); });
     const prop = S.st.proposal || {}, same = roles.length === (prop.roles || []).length && roles.every((r) => (prop.roles.find((p) => p.role === r.role && (p.field || "") === (r.field || "")) || {}).quantity === r.quantity);
     act(() => api(`/api/decisions/${id}`, { action: "approve", edited: roles.length && !same ? { roles } : null }));
   });

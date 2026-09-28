@@ -11,11 +11,11 @@ the code. All code paths are inside `poc/cynqra/` unless stated. The example thr
 | --- | --- | --- | --- | --- |
 | 1. The idea | The CEO describes the company in their own words. Cynqra turns it into a brief: product, customers, outcomes, success criteria, limits, priorities. What Cynqra filled in itself is marked for the CEO to check. | Everything after it is judged against this brief | CEO confirms it, sets the budget | `objective.py` |
 | 2. Requirements | The brief is split into requirements, each with an area (business, market, finance, legal, domain, AI and data, product, ...) | Every requirement must end up owned by someone and checked | Cynqra | `objective.py` |
-| 3. The team | Cynqra proposes the smallest team that covers every requirement. Expertise particular to the idea becomes a **Specialist** named from it (Bluedip: a Restaurant Revenue Management Specialist). Anything left uncovered is added by the platform and labelled. | The team fits the idea; there is no fixed template | **CEO approves** (gate 1) | `synthesis.py`, `roles.py` |
+| 3. The team | As a founder would, Cynqra first proposes the **cofounders** the company needs, each with its reason (Bluedip: a CTO, a Chief Product Officer and a CFO). Then **each cofounder chooses the team for its own area**, with the reason for every hire (Bluedip's CTO: a Data Scientist, Backend and Frontend Engineers, DevOps and QA). Expertise particular to the idea becomes a **Specialist** named from it. Anything still uncovered is added by the platform and labelled. The CEO sees it all as one org chart. | A real company starts with its cofounders, and each builds its own team; there is no fixed template | **CEO approves** the whole organization once (gate 1) | `synthesis.py`, `roles.py` |
 | 4. The right AI per member | Each member is bound to the AI that measured best for its kind of work | Different work needs different strengths, and measured results beat opinions | Cynqra | `intelligence_layer/router.py`, `binding.py` |
 | 5. Plan and budget | Milestones, tasks, owners, dependencies, acceptance criteria, how each task will be checked, and a dollar budget per task | Nothing starts until the CEO sees who does what and what it costs | **CEO approves** (gate 2) | `planner.py`, `budget.py` |
-| 6. The work | Everyone works at the same time (below) | A real company works in parallel | The team | `engine.py` (`step`), `execution.py` |
-| 7. Checks | Every piece of work is checked before it counts as done | AI output reads the same whether it is right or wrong | Cynqra | `verifier.py` |
+| 6. The work | Everyone works at the same time, and cofounders run their areas (below) | A real company works in parallel, and each leader runs its own team | The team | `engine.py` (`step`), `execution.py` |
+| 7. Checks | Every piece of work is checked by Cynqra, then a team member's work is reviewed by its cofounder, before it counts as done | AI output reads the same whether it is right or wrong; a check proves the rules are met, a cofounder judges whether it is right for the company | Cynqra, then the cofounder | `verifier.py`, `execution.py` (`lead_review`) |
 | 8. When a member stops | Cynqra first finds out why. Only an AI that cannot do the role's work is replaced, and the CEO is told what the better one costs (below) | A provider's outage is not the AI's fault; a better AI costs more | Cynqra; the CEO only for money or accounts | `replacement.py`, `performance.py` |
 | 9. Delivery | The product is merged and put live; the CEO receives the Company Pack | The founder gets a working result to use | **CEO accepts** | `delivery.py`, `deploy.py` |
 
@@ -25,32 +25,43 @@ the code. All code paths are inside `poc/cynqra/` unless stated. The example thr
 
 - **every team member with work it can do now takes one piece of it**, and they all work at the same time; a member
   does one thing at a time;
-- **when a member finishes**, it hands its work over with a **Handoff**, and whoever needed it starts in the next round;
-- **when a member has a doubt**, it raises a **Blocker** to the colleague whose field it is, who answers in the next
-  round while the others keep working (Bluedip: the engineer asks the Revenue Management Specialist which food cost
-  to use);
+- **cofounders run their areas.** Each one hands out its team's work with a **Handoff**, answers its team's doubts,
+  reviews its team's work after Cynqra's checks and before it counts (approve, or send it back with what to change),
+  and brings the CEO only the decisions a CEO should make. A cofounder's own work comes straight from the approved plan;
+- **when a member has a doubt**, it raises a **Blocker** to its cofounder, or to the colleague whose field it is
+  (Bluedip: the Backend Engineer asks the Revenue Management Specialist which food cost to use; the Frontend Engineer
+  asks the CTO what a new restaurant sees before it has history), who answers in the next round while the others
+  keep working;
+- **a team member's proposal reaches the CEO through its cofounder** (Bluedip: DevOps proposes going live, the CTO
+  endorses it);
 - **only real decisions go to the CEO:** money, risk, merges, going live.
 
 **Why.** Working one at a time made real runs take hours; a real company does not wait for one person to finish
-before the next starts. Doubts go to the colleague who knows, because that is faster and better than asking the CEO.
+before the next starts. Each cofounder knows its area best, so it hands out, answers and reviews there, and the CEO
+is left with CEO questions. A cofounder may send the same work back twice; after that Cynqra's checks decide and the
+cofounder's concern stays on record in the Company Pack, so a disagreement never stalls the company.
 
 **How.** The slow part, the AI thinking, runs in parallel. Saving results, spending money and logging run one at a
 time, so the records always stay consistent. Models on one laptop take turns (a laptop runs one model at a time);
 online models run truly in parallel. Up to `parallel_workers` members (default 6) think at once. Messages between
-members are structured, hashed objects (Handoff, Blocker, Escalation, Approval) with fixed fields: `protocol.py`.
+members are structured, hashed objects (Handoff, Blocker, Review, Escalation, Approval) with fixed fields:
+`protocol.py`.
 
 ## The team
 
-**What.** The team always follows the idea. Nothing is there by default.
+**What.** The team always follows the idea. Nothing is there by default. The founder is the CEO; Cynqra has no AI
+CEO.
 
-| Kind | Roles | Code |
-| --- | --- | --- |
-| Leadership | Business Lead (runs the business side for the CEO), CTO, CPO, Project Manager | `roles.py` |
-| Foundation | CFO, Market Analyst, Legal and Compliance Advisor, Security Expert | `roles.py` |
-| Build | Software Engineer, Backend and Frontend Engineers, Data Scientist, Designer, QA, DevOps | `roles.py` |
-| Field experts | **Specialist**, named from the idea: one per field the idea needs ("Restaurant Revenue Management Specialist") | `roles.py`, `synthesis.py` |
+| Kind | Roles | Who leads them | Code |
+| --- | --- | --- | --- |
+| Cofounders | CTO, Chief Product Officer, CFO, and a Chief Compliance Officer for a regulated business (payments, lending, insurance, health, children's data). A simple tool may need two; Bluedip has three. | They report to the CEO | `roles.py` |
+| Product | Project Manager, Product Designer, Market Analyst | Usually the Chief Product Officer | `roles.py` |
+| Engineering | Software, Backend and Frontend Engineers, Data Scientist, QA, DevOps, Security Expert | The CTO | `roles.py` |
+| Finance and legal | Legal and Compliance Advisor | The Chief Compliance Officer, else the CFO | `roles.py` |
+| Field experts | **Specialist**, named from the idea: one per field the idea needs ("Restaurant Revenue Management Specialist") | The cofounder whose area the field serves | `roles.py`, `synthesis.py` |
 
-**Why.** A fixed team wastes money on roles an idea does not need and misses the expertise it does.
+**Why.** A fixed team wastes money on roles an idea does not need and misses the expertise it does. Starting from
+the cofounders, as a real founder does, gives every part of the company a leader who is accountable for it.
 
 **How.** Each role has the work it may own, the documents it writes, the areas it covers, and its authority: what it
 may do, only propose, or never do. Authority is enforced on every action: `policy.py`, `gateway.py`.

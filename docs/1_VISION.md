@@ -5,9 +5,10 @@ work, and asks you only what a CEO should decide.**
 
 ## What Cynqra is
 
-An expert team on demand, for any idea. The founder is the CEO. Cynqra works out which experts the idea needs,
-gives each one the best AI for its job, and runs them like a real company. The founder decides only what a CEO
-should, and receives the result as the Company Pack.
+An expert team on demand, for any idea, built the way a founder builds a real company. The founder is the CEO.
+Cynqra proposes the cofounders the company needs, each cofounder chooses the team for its own area, and each member
+gets the best AI for its job. The founder decides only what a CEO should, and receives the result as the Company
+Pack.
 
 ## Why it exists
 
@@ -28,16 +29,21 @@ Hiring that expertise takes months and money. Cynqra gives it on demand, and che
 
 1. **You are the CEO.** You describe the company in your own words: the product, a budget, any limits. You do not
    name the team.
-2. **Cynqra works out the team this idea needs, and only that team.** Expertise particular to the idea becomes a
-   Specialist named from it. You approve the team.
+2. **Cynqra proposes your cofounders, and each cofounder builds its team.** As a founder would, Cynqra first
+   proposes the leaders the company needs, each with its reason: a CTO for a product that is software, a Chief
+   Product Officer for who it is for and what it must do, a CFO when the value is money, a Chief Compliance Officer
+   for a regulated business. A simple idea may need two. Then each cofounder chooses the team for its own area, with
+   the reason for every hire. Expertise particular to the idea becomes a Specialist named from it. You see it as one
+   org chart and approve it once.
 3. **Each team member gets the best AI for its job**, chosen from measured results. When a member
    stops, Cynqra first finds out why; only an AI that cannot do the work is replaced, and you are told what the
    better one costs.
-4. **The team works like a real company.** Everyone works at the same time on their own part. When someone
-   finishes, they hand over. When someone has a doubt, they ask the colleague who knows. You are left out of it.
+4. **Cofounders run their areas, like in a real company.** Each cofounder hands out its team's work, answers its
+   team's doubts, reviews its team's work before it counts, and brings you only the decisions a CEO should make.
+   Everyone works at the same time on their own part. You are left out of the rest.
 5. **Every piece of work is checked before it counts.** Code must pass its tests; a prediction model must beat a
    simple baseline on data it has not seen; foundation documents must say what is sourced, what is assumed, and
-   what a professional must confirm.
+   what a professional must confirm. Then the cofounder who leads that area reviews it as an owner would.
 6. **You decide only what a CEO should:** the team, the plan and budget, and the few real choices the team brings
    you, such as a rule on money, merging the product or putting it live.
 7. **You receive the Company Pack.**
@@ -49,15 +55,21 @@ revenue for every hour and meal, recommends offers for breakfast, lunch and dinn
 limited-time offer, such as 50% off for at most 15 customers between 1 pm and 4 pm, and see what it will do before
 it runs.
 
-- **The team follows the idea.** Bluedip is a prediction business, so it gets a Data Scientist. Whether a discount
-  earns money is its field, so it gets a Restaurant Revenue Management Specialist. It also gets a CFO, a Market
-  Analyst, a Legal and Compliance Advisor, a Business Lead, a Project Manager, a CTO and an engineer. It gets no
-  Security Expert yet: release 1 holds no diner data and takes no payments.
-- **The work is checked.** The platform tests the footfall forecast on days it has not seen; the first version
-  loses to last week's numbers and goes back. The engineer's first version shows more customers than the owner's
-  cap allows; the tests catch it.
-- **Doubts go to the right colleague.** No restaurant has entered its food cost yet, so the engineer asks the
-  Specialist what to use, and the founder is not interrupted.
+- **Three cofounders.** A CTO, because Bluedip is an app built on prediction models; a Chief Product Officer,
+  because restaurant owners must find it useful; a CFO, because the whole value is money: does an offer earn or
+  lose. No Chief Compliance Officer: release 1 takes no payments and holds no diner data.
+- **Each cofounder builds its team.** The CTO chooses a Data Scientist, a Backend Engineer, a Frontend Engineer,
+  DevOps and QA. The Chief Product Officer chooses a Project Manager, a Designer, a Market Analyst and a Restaurant
+  Revenue Management Specialist, because whether a discount earns money is Bluedip's field. The CFO chooses a Legal
+  and Compliance Advisor. That is 13 in all.
+- **The work is checked, then reviewed.** The platform tests the footfall forecast on days it has not seen; the
+  first version loses to last week's numbers and goes back. The Backend Engineer's first version shows more
+  customers than the owner's cap allows; the tests catch it. The Designer's first screen passes its checks, but the
+  Chief Product Officer sends it back: it led with revenue and hid the money an offer loses.
+- **Doubts go to the right person.** No restaurant has entered its food cost yet, so the Backend Engineer asks the
+  Specialist what to use; the Frontend Engineer asks the CTO what a new restaurant sees before it has any history.
+  The founder is not interrupted.
+- **Proposals reach you through their cofounder.** DevOps proposes putting Bluedip live; the CTO endorses it first.
 - **The founder decides one real rule**, proposed by the CFO: how far an offer may go.
 - **The result is worth having.** In the live app, the owner's own 50% idea raises revenue and loses money after
   food cost, because customers who would have come anyway pay half too. Bluedip recommends 20% off, which earns

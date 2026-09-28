@@ -68,13 +68,14 @@ class LiveModeTests(unittest.TestCase):  # A15
         e = engine_to_running(self.tmp.path, mode="live")
         os.environ["CYNQRA_S1_MODEL_CMD"] = fake_model_cmd(fail=True)
         steps = [r["did"] for r in e.run_until_idle()]
-        self.assertEqual(steps[:2], ["assigned", "model_error_retry"], "one failed call is retried")
+        self.assertEqual(steps[0], "model_error_retry", "one failed call (the CPO handing out the spec) is retried")
         self.assertIn("waiting", steps, "a model that stopped answering is waited for, not replaced")
         self.assertIn("stopped", e.store.events()[-1]["event_type"] + " ".join(
             x["event_type"] for x in e.store.events()), "the stop is diagnosed and recorded")
         t = e.task("t_01")
         self.assertEqual((t["status"], t["outputs"]), ("WAITING", []))
-        self.assertFalse(any((e.paths["workspaces"] / "w_pm" / "t_01" / "out").iterdir()), "nothing was invented")
+        out = e.paths["workspaces"] / "w_pm" / "t_01" / "out"
+        self.assertFalse(out.exists() and any(out.iterdir()), "nothing was invented")
         self.assertFalse(e.store.all("replacement"))
         os.environ["CYNQRA_S1_MODEL_CMD"] = fake_model_cmd()  # the model is back, and the wait is over
         t["waiting"]["until"] = 0

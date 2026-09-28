@@ -273,7 +273,6 @@ def verify(run, t: dict) -> dict:
                 run.store.put("verification", old["id"], old)
                 run.event("verification.false_rejection", "verification", old["id"], {"task_id": t["id"],
                           "confirmed_by": v["id"]}, actor="verification", correlation_id=t["id"])
-        integrate(run, t)
     return {"passed": r["passed"], "verdict": verdict, "feedback": r["feedback"], "verification": v}
 
 

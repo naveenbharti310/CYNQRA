@@ -119,12 +119,19 @@ SCHEMAS = {
         "workstreams": {"type": "array", "items": {"type": "object", "properties": {
             "id": S, "name": S, "requirement_ids": LIST, "depends_on": LIST},
             "required": ["id", "name", "requirement_ids", "depends_on"]}}}},
-    "workforce": {"type": "object", "required": ["summary", "roles"], "properties": {
+    "cofounders": {"type": "object", "required": ["summary", "cofounders"], "properties": {
+        "summary": S,
+        "cofounders": {"type": "array", "items": {"type": "object", "properties": {
+            "role": {"type": "string", "enum": roles.COFOUNDERS}, "why": S, "requirement_ids": LIST},
+            "required": ["role", "why", "requirement_ids"]}}}},
+    "team": {"type": "object", "required": ["summary", "roles"], "properties": {
         "summary": S,
         "roles": {"type": "array", "items": {"type": "object", "properties": {
-            "role": {"type": "string", "enum": list(roles.ROLES)}, "quantity": {"type": "integer"}, "why": S,
-            "requirement_ids": LIST, "field": S, "title": S},
+            "role": {"type": "string", "enum": [n for n in roles.ROLES if n not in roles.COFOUNDERS]},
+            "quantity": {"type": "integer"}, "why": S, "requirement_ids": LIST, "field": S, "title": S},
             "required": ["role", "quantity", "why", "requirement_ids"]}}}},
+    "review": {"type": "object", "properties": {"verdict": {"type": "string", "enum": ["approve", "revise"]},
+                                                 "note": S}, "required": ["verdict", "note"]},
     "handoff": {"type": "object", "properties": {"artifacts": LIST, "context_ref": S, "acceptance_check": S},
                 "required": ["artifacts", "context_ref", "acceptance_check"]},
     "proposal": {"type": "object", "properties": {
@@ -284,8 +291,13 @@ class ScriptedSource:
     def decompose(self, objective: dict, feedback: str = "") -> tuple[dict, dict]:
         return self._copy("requirements"), self._usage()
 
-    def synthesize(self, objective: dict, requirements: dict, note: str = "", feedback: str = "") -> tuple[dict, dict]:
-        return self._copy("workforce"), self._usage()
+    def cofounders(self, objective: dict, requirements: dict, note: str = "", feedback: str = "") -> tuple[dict, dict]:
+        wf = self._copy("workforce")
+        return {"summary": wf.get("summary", ""), "cofounders": wf.get("cofounders", [])}, self._usage()
+
+    def build_team(self, objective: dict, requirements: dict, cofounder: str = "", **_) -> tuple[dict, dict]:
+        team = (self._copy("workforce").get("teams") or {}).get(cofounder)
+        return (team if isinstance(team, dict) else {"summary": "", "roles": []}), self._usage()
 
     def plan(self, objective: dict, workers: list[dict], requirements: dict, note: str = "", feedback: str = "",
              planner: str = "system", persona: str = "") -> tuple[dict, dict]:
@@ -308,6 +320,14 @@ class ScriptedSource:
         preset = self.data.get("answer_blocker", {}).get(task["id"])
         if preset is None:
             raise IntelligenceError(f"scenario has no Blocker answer for {task['id']}")
+        return json.loads(json.dumps(preset)), self._usage(worker)
+
+    def review(self, task: dict, worker: str = "system", round_index: int = 0, **_) -> tuple[dict, dict]:
+        """A cofounder's review of its team's work: the scenario's words for this task and round, else its default."""
+        items = self.data.get("review", {}).get(task["id"]) or [self.data.get("review_default")]
+        preset = items[min(round_index, len(items) - 1)]
+        if not isinstance(preset, dict):
+            raise IntelligenceError(f"scenario has no review for {task['id']}")
         return json.loads(json.dumps(preset)), self._usage(worker)
 
 
@@ -446,30 +466,58 @@ class ModelSource:
                   + self._refused(feedback))
         return self._call(prompt, max_tokens=3000, schema=SCHEMAS["requirements"])
 
-    def synthesize(self, objective: dict, requirements: dict, note: str = "", feedback: str = "") -> tuple[dict, dict]:
-        """Stage 2: the organization this objective needs, from the role catalog."""
-        cat = "\n".join(f"* {r['role']}: {r['title']}. {r['charter']} Covers: {', '.join(r['areas'])}. "
-                        f"Owns: {', '.join(r['owns'])}. At most {r['max']}." for r in roles.catalog())
+    @staticmethod
+    def _catalog(names) -> str:
+        return "\n".join(f"* {r['role']}: {r['title']}. {r['charter']} Covers: {', '.join(r['areas'])}. "
+                         f"Owns: {', '.join(r['owns'])}. At most {r['max']}." for r in roles.catalog() if r["role"] in names)
+
+    def cofounders(self, objective: dict, requirements: dict, note: str = "", feedback: str = "") -> tuple[dict, dict]:
+        """Stage 2, step one: the cofounders the company needs, as a founder would choose them."""
         reqs = "\n".join(f"* {r['id']} ({r['area']}): {r['text']}" for r in requirements["requirements"])
         prompt = (self._head("You are Cynqra's Workforce Synthesizer.", objective, []) +
-                  "Synthesize the workforce for this objective from the role catalog: which roles, how many of each, "
-                  "and why each is required. Propose the smallest organization that covers every requirement; do not "
-                  "add a role the requirements do not need. Merges into main need a CTO, and someone must assign "
-                  "work and propose the deploy. The team depends entirely on this objective: for expertise particular "
-                  "to its field that no role holds, propose a Specialist with its field and title (one per field, "
-                  'such as {"role": "Specialist", "field": "food safety", "title": "Food Safety Specialist"}).\n'
-                  f"Role catalog:\n{cat}\nRequirements:\n{reqs}\n"
+                  "The founder is the CEO. Like a founder starting a real company, choose the cofounders this company "
+                  "needs to lead it with the founder. Choose only the ones this company needs, each with the reason: "
+                  "a product that is software needs a CTO; a company whose customers and product must be defined "
+                  "needs a Chief Product Officer; a company whose value depends on money (pricing, margins, funding) "
+                  "needs a CFO; a regulated business (payments, lending, insurance, health, children's data) needs "
+                  "a Chief Compliance Officer. A simple internal tool may need only two. Each cofounder proposes its "
+                  "own team next, so name only cofounders here.\n"
+                  f"Cofounder roles:\n{self._catalog(roles.COFOUNDERS)}\nRequirements:\n{reqs}\n"
+                  + (f"The founder rejected the previous proposal: {note}\n" if note else "") +
+                  'Return JSON: {"summary": "...", "cofounders": [{"role", "why", "requirement_ids"}]}'
+                  + self._refused(feedback))
+        return self._call(prompt, max_tokens=1500, schema=SCHEMAS["cofounders"])
+
+    def build_team(self, objective: dict, requirements: dict, cofounder: str, cofounders: list[str],
+                   hired: dict[str, str], note: str = "", feedback: str = "", persona: str = "") -> tuple[dict, dict]:
+        """Stage 2, step two: one cofounder proposes the team for its own area."""
+        from .synthesis import hireable  # the platform's rule on who may hire whom, stated to the model
+        may = hireable(cofounder, cofounders)
+        reqs = "\n".join(f"* {r['id']} ({r['area']}): {r['text']}" for r in requirements["requirements"])
+        others = ", ".join(roles.role(c)["title"] for c in cofounders if c != cofounder) or "none"
+        prompt = (self._head(persona, objective, []) +
+                  f"You are a cofounder of this company; the founder is the CEO. The other cofounders: {others}. "
+                  "Propose the team you need for your own area: which roles, how many of each, why each is needed, "
+                  "and the requirement ids each will cover. Hire only for work in your area, and propose the smallest "
+                  "team that covers it; an empty team is fine if you can do your part yourself. For expertise "
+                  "particular to this company's field that no role holds, propose a Specialist with its field and "
+                  'title (one per field, such as {"role": "Specialist", "field": "food safety", "title": "Food '
+                  'Safety Specialist"}).\n'
+                  f"Roles you may hire:\n{self._catalog(may)}\n"
+                  + (f"Already hired by the other cofounders, do not hire again: {json.dumps(hired)}\n" if hired else "")
+                  + f"Requirements:\n{reqs}\n"
                   + (f"The founder rejected the previous proposal: {note}\n" if note else "") +
                   'Return JSON: {"summary": "...", "roles": [{"role", "quantity", "why", "requirement_ids"}]}'
                   + self._refused(feedback))
-        return self._call(prompt, max_tokens=2000, schema=SCHEMAS["workforce"])
+        return self._call(prompt, max_tokens=1500, schema=SCHEMAS["team"])
 
     def plan(self, objective: dict, workers: list[dict], requirements: dict, note: str = "", feedback: str = "",
              planner: str = "system", persona: str = "") -> tuple[dict, dict]:
         """Stage 5: the roadmap for this organization."""
         def line(w):
             r = roles.role(w["role"])
-            return (f"* {w['id']}: {w['title']} ({w['role']}), may own {', '.join(r['owns'])}"
+            place = "cofounder, reports to the founder" if r["tier"] == "cofounder" else f"reports to {w.get('reports_to')}"
+            return (f"* {w['id']}: {w['title']} ({w['role']}; {place}), may own {', '.join(r['owns'])}"
                     + (f"; writes {', '.join(r['documents'])}" if r["documents"] else ""))
         org = "\n".join(line(w) for w in workers)
         rlist = "\n".join(f"* {r['id']} ({r['area']}): {r['text']}" for r in requirements["requirements"]) or "* none"
@@ -477,7 +525,8 @@ class ModelSource:
         prompt = (self._head(persona, objective, []) +
                   f"Plan the work for this organization:\n{org}\nRequirements:\n{rlist}\n"
                   "Break the objective into milestones and workstreams, and the workstreams into tasks. Give each task "
-                  "to the worker best positioned to do it, with acceptance criteria that can be checked and the "
+                  "to the worker best positioned to do it (each cofounder hands out and reviews its own team's work, "
+                  "so a team's tasks belong in its cofounder's area), with acceptance criteria that can be checked and the "
                   "requirement ids it satisfies; a document task names the document types it writes, from those its "
                   f"owner writes. Task types:\n{types}\n"
                   "A task's owner must be a worker who may own its type. Ids t_01, t_02 and so on; dependencies may "
@@ -538,6 +587,31 @@ class ModelSource:
         return self._call(prompt, max_tokens=8000 if kind in roles.BUILD_TYPES else 3000, files=delivers_files,
                           schema=None if delivers_files else SCHEMAS["proposal"], worker=worker,
                           needs_from=who[0] if who else "")
+
+    def review(self, task: dict, worker: str, objective: dict, rules: list[str], owner: str, work: dict,
+               persona: str = "", **_) -> tuple[dict, dict]:
+        """A cofounder reviews its team member's work before it counts: files that passed the platform's checks, or
+        a proposal before it goes to the founder."""
+        crit = "; ".join(task.get("acceptance_criteria") or [])
+        body, left = "", 14000
+        for name, text in (work.get("files") or {}).items():
+            piece = f"=== FILE: {name} ===\n{text[:left].rstrip()}\n=== END FILE ===\n"
+            body += piece
+            left -= len(piece)
+            if left <= 0:
+                body += "(the rest of the files are not shown)\n"
+                break
+        if work.get("proposal"):
+            body += "Proposal for the founder:\n" + json.dumps(work["proposal"], indent=1) + "\n"
+        prompt = (self._head(persona, objective, rules) +
+                  f"{owner}, on your team, finished task {task['id']} ({task['title']}). Expected output: "
+                  f"{task['expected_output']}.\n" + (f"Acceptance criteria: {crit}\n" if crit else "") +
+                  f"{work.get('checks') or ''}\n{body}"
+                  "Review it as the cofounder accountable for this area, before it counts. Approve it if it does what "
+                  "was asked and is right for this company. Send it back only for a concrete problem, and say exactly "
+                  "what to change; the platform has already run its automatic checks.\n"
+                  'Return JSON: {"verdict": "approve" or "revise", "note": "..."}')
+        return self._call(prompt, max_tokens=800, schema=SCHEMAS["review"], worker=worker)
 
     def answer_blocker(self, task: dict, worker: str, objective: dict, rules: list[str], blocker: dict,
                        artifact_index: list[str], persona: str = "", **_) -> tuple[dict, dict]:

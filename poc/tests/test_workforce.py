@@ -266,6 +266,8 @@ class WorkforceTests(unittest.TestCase):
                             ("HTTP 429 from provider: You have exceeded your rate limit", "rate_limit"),
                             ("HTTP 429 from provider: insufficient_quota, check your plan and billing", "no_credit"),
                             ("HTTP 404 from provider: model claude-2 not found", "withdrawn"),
+                            ("RuntimeError: reply truncated at max_tokens", "reply"),
+                            ("the model did not return a JSON object", "reply"),
                             ("HTTP 504 from provider: gateway timeout", "timeout"),
                             ("HF_TOKEN is not set", "access")]:
             self.assertEqual(diagnose(text), cause, text)
@@ -343,7 +345,8 @@ class WorkforceTests(unittest.TestCase):
         self.assertTrue(any(c.get("model_id") == rep["to"] for c in handover), "the successor did the rest")
         failed = [o for o in self.reg.outcomes("model-a") if not o["verified"]]
         self.assertTrue(failed, "the failure is part of Model A's record")
-        note = next(n for n in e.store.all("ceo_notice") if n["kind"] == "intelligence_replaced")
+        note = next(n for n in e.store.all("ceo_notice") if n["kind"] == "intelligence_replaced"
+                    and n["worker_id"] == rep["worker_id"])
         self.assertIn("could not do this role's work", note["detail"], "the CEO is told why")
         self.assertIsNotNone(note["usd_difference"], "and what the better AI costs against the old one")
         self.assertIn("per million tokens, against", note["detail"], "its price against the old one's")

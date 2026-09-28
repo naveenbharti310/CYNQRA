@@ -6,8 +6,10 @@ against the catalog (validate_plan) and then adds what is never the model's call
 
   risk and verification   from the task type: how the task is proven done
   tools                   from the task type: the gateway actions its owner will use
-  accountability          the owner and the worker it reports to
-  coordination            who hands the task over, who clears its Blockers
+  accountability          the owner and the cofounder it reports to
+  coordination            cofounders run their areas: the owner's cofounder hands the task over, is the first to
+                          answer its Blockers, and reviews the work before it counts (a cofounder's own task comes
+                          straight from the approved roadmap and is not reviewed by a peer)
   escalation              the conditions under which work leaves the organization for the founder
   sequencing              the critical path through the dependencies
 """
@@ -146,21 +148,30 @@ def critical_path(tasks: list[dict]) -> list[str]:
     return max(longest.values(), key=len, default=[])
 
 
+def coordination(owner: dict, workers: list[dict]) -> dict:
+    """Who hands a task over, who answers its Blockers and who reviews it, from its owner's place in the company."""
+    lead = roles.lead_of(owner)
+    answer = [w for w in roles.answerers(workers) if w not in (owner["id"], lead)]
+    cofounders = [w["id"] for w in workers if w.get("tier") == "cofounder" and w["id"] != owner["id"]]
+    return {"accountable": owner["reports_to"], "handoff_from": lead or "orchestrator",
+            "blockers_to": ([lead] if lead else []) + answer or cofounders or ["founder"],
+            "reviewed_by": lead}
+
+
 def enrich(plan: dict, workers: list[dict]) -> dict:
     by_id = {w["id"]: w for w in workers}
-    boss = roles.assigner(workers)
-    answer = roles.answerers(workers)
     for t in plan["tasks"]:
         owner = by_id[t["owner_worker_id"]]
-        manager = t["owner_worker_id"] == boss or roles.role(owner["role"])["assigns"]
         t.update({"risk_tier": roles.risk(t["kind"]), "verification_gate": GATES[t["kind"]], "tools": TOOLS[t["kind"]],
-                  "accountable": owner["reports_to"], "handoff_from": "orchestrator" if manager else boss,
-                  "blockers_to": [w for w in answer if w != t["owner_worker_id"]] or [boss], "escalates_to": "founder",
+                  **coordination(owner, workers), "escalates_to": "founder",
                   "authority_policy_id": f"{policy.POLICY_VERSION}:{owner['role']}"})
+    leads = {w["id"]: [x["id"] for x in workers if x.get("reports_to") == w["id"]] for w in workers
+             if w.get("tier") == "cofounder"}
     plan.update({"critical_path": critical_path(plan["tasks"]), "escalation_conditions": list(ESCALATION_CONDITIONS),
                  "reporting": {w["id"]: w["reports_to"] for w in workers},
-                 "coordination": {"assigns": boss, "answers_blockers": answer,
-                                  "protocols": ["Handoff", "Blocker", "Approval", "Escalation"]}})
+                 "coordination": {"cofounders": leads, "planner": roles.planner(workers),
+                                  "answers_blockers": roles.answerers(workers),
+                                  "protocols": ["Handoff", "Blocker", "Review", "Approval", "Escalation"]}})
     return plan
 
 
@@ -168,7 +179,7 @@ def plan(run, note: str = "") -> dict:
     """Stage 5 for the approved organization. Tasks keep their ids across a revised roadmap; the new plan replaces
     the old one before any work starts."""
     workers = run.workers()
-    boss = roles.assigner(workers)
+    boss = roles.planner(workers)
     rids = [r["id"] for r in run.requirements()["requirements"]]
     p, usage = ask(lambda feedback: run.intel.plan(run.objective_ctx(), workers, run.requirements(), note=note,
                                                    feedback=feedback, planner=boss, persona=run.persona(boss)),

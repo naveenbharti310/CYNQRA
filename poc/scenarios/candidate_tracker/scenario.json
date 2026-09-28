@@ -1,7 +1,7 @@
 {
   "id": "candidate_tracker",
   "title": "Candidate tracker",
-  "about": "A four-worker organization (CTO, PM, two engineers) builds an internal recruiting tracker: a spec, one product rule for the founder, two code tasks (the first fails verification and is reworked, the second raises a Blocker), a merge and a deploy.",
+  "about": "A simple internal tool with two cofounders: a CTO with two engineers, and a Chief Product Officer with a Project Manager. They build an internal recruiting tracker: a spec, one product rule for the founder, two code tasks (the first fails verification and is reworked, the second raises a Blocker), a merge and a deploy.",
   "note": "Prepared script for demo mode. Every word a worker says in demo mode comes from this file, and the product shows that. Code in files/ is real and is tested and deployed for real.",
   "settings": {
     "self_checks": 0
@@ -106,37 +106,56 @@
     ]
   },
   "workforce": {
-    "summary": "A small internal tool: a CTO to own the architecture and the release, a Project Manager to specify and coordinate, and two full-stack engineers, one for the data store and one for the web app.",
-    "roles": [
+    "summary": "A small internal tool for one company needs two cofounders: a CTO to build and release it, and a Chief Product Officer to own what the recruiters need. No CFO: nothing is sold.",
+    "cofounders": [
       {
         "role": "CTO",
-        "quantity": 1,
-        "why": "Owns architecture, reviews the release and proposes the merge and the deploy.",
+        "why": "The tool is software: someone must own how it is built, checked and put live.",
         "requirement_ids": [
           "r_06",
           "r_07"
         ]
       },
       {
-        "role": "PM",
-        "quantity": 1,
-        "why": "Writes the spec and acceptance checks, brings the stuck rule to the founder, assigns and unblocks the engineers.",
+        "role": "CPO",
+        "why": "The recruiters' workflow and the rule on stuck candidates must be defined before it is built.",
         "requirement_ids": [
           "r_01",
           "r_04"
         ]
+      }
+    ],
+    "teams": {
+      "CTO": {
+        "summary": "Two parallel builds: the candidate store, then the web app on it.",
+        "roles": [
+          {
+            "role": "Engineer",
+            "quantity": 2,
+            "why": "Two parallel builds: the candidate store, then the web app on it.",
+            "requirement_ids": [
+              "r_02",
+              "r_03",
+              "r_05"
+            ]
+          }
+        ]
       },
-      {
-        "role": "Engineer",
-        "quantity": 2,
-        "why": "Two parallel builds: the candidate store, then the web app on it.",
-        "requirement_ids": [
-          "r_02",
-          "r_03",
-          "r_05"
+      "CPO": {
+        "summary": "A Project Manager writes the spec and acceptance checks and brings the stuck rule to the founder.",
+        "roles": [
+          {
+            "role": "PM",
+            "quantity": 1,
+            "why": "Writes the spec and acceptance checks and brings the stuck rule to the founder.",
+            "requirement_ids": [
+              "r_01",
+              "r_04"
+            ]
+          }
         ]
       }
-    ]
+    }
   },
   "plan": {
     "workstreams": [
@@ -308,6 +327,18 @@
     ]
   },
   "assign": {
+    "t_01": {
+      "artifacts": [],
+      "context_ref": "objective v1",
+      "acceptance_check": "The spec for the recruiters' tracker and numbered acceptance checks for every rule. Leave the meaning of stuck open: it is the founder's rule."
+    },
+    "t_02": {
+      "artifacts": [
+        "t_01/product_spec.md"
+      ],
+      "context_ref": "objective v1, the spec",
+      "acceptance_check": "Bring the founder one rule: when is a candidate stuck? Give the evidence and what would change the answer."
+    },
     "t_03": {
       "artifacts": [
         "t_01/acceptance.md",
@@ -423,5 +454,9 @@
       "context_ref": "objective v1: internal, one company",
       "acceptance_check": "No sign in for this release. The objective is an internal tool for one company, so it runs on the company's own host only. Build no login and no applicant facing routes. A recruiter login is a later product decision, not yours or mine."
     }
+  },
+  "review_default": {
+    "verdict": "approve",
+    "note": "Checked against the handoff and its acceptance criteria. Approved."
   }
 }

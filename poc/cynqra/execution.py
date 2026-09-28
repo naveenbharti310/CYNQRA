@@ -1,10 +1,15 @@
 """Governed execution (Stage 8): each task's lifecycle, from Handoff to verified.
 
-PLANNED -> ASSIGNED (a Handoff) -> the owner works (files through the gateway, or a proposal for the founder)
-  -> REVIEW -> verified by the task type's verifier, or back for REWORK with the failure named
-  -> AWAITING_FOUNDER -> APPROVED -> carried out and verified (decisions, merges, deploys)
-A worker who would have to guess raises a Blocker instead; a worker allowed to answer it clears it. A task that
-keeps failing goes to the Replacement Engine, and to the founder only when no other intelligence can take it.
+Cofounders run their areas. A team member's task is handed over by its cofounder; the owner works on it (files
+through the gateway, or a proposal for the founder); files are checked by the task type's verifier, then reviewed by
+the cofounder before they count; a proposal is reviewed by the cofounder before it reaches the founder.
+
+PLANNED -> ASSIGNED (a Handoff from the owner's cofounder, or from the roadmap for a cofounder's own task)
+  -> the owner works -> REVIEW (the platform's checks) -> LEAD_REVIEW (the cofounder) -> VERIFIED, or back for
+     REWORK with the failure or the cofounder's note named
+  -> a proposal: LEAD_REVIEW (the cofounder) -> AWAITING_FOUNDER -> APPROVED -> carried out and verified
+A worker who would have to guess raises a Blocker instead: to its cofounder, or to the colleague who knows. A task
+that keeps failing goes to the Replacement Engine, and to the founder only when no other intelligence can take it.
 """
 from __future__ import annotations
 
@@ -19,7 +24,12 @@ from .testrunner import failure_summary
 
 MAX_ATTEMPTS = verifier.MAX_ATTEMPTS
 MAX_CUT_OFFS = 3  # replies in a row cut off at the model's output limit before the task goes to the Replacement Engine
+MAX_SEND_BACKS = 2  # times a cofounder may send the same task back; after that the platform's checks decide
+MAX_REVIEW_ERRORS = 2  # unreadable reviews in a row before the work goes on without one, and it is said
 PROPOSAL_ACTIONS = {"decision": "product_rule_decision", "review_merge": "merge_to_main", "deploy": "deploy_production"}
+
+
+actor = replacement.actor  # whose move it is on a task, in its current state
 
 
 def artifact_index(run) -> list[str]:
@@ -55,7 +65,7 @@ def frozen_during_call(run, t: dict) -> dict:
 
 def assign(run, t: dict) -> dict:
     owner, sender = t["owner_worker_id"], t["handoff_from"]
-    if sender == "orchestrator":  # a manager's own task: the platform hands it over from the plan
+    if sender == "orchestrator":  # a cofounder's own task: the platform hands it over from the approved roadmap
         arts = [a["id"] for a in run.store.all("artifact") if a["task_id"] in t["dependencies"]]
         crit = "; ".join(t["acceptance_criteria"])
         content = {"artifacts": arts, "context_ref": t["context"],
@@ -260,15 +270,34 @@ def propose(run, t: dict, result: dict) -> dict:
     g = run.gateway(owner, t["id"], action_type, target=t["id"])
     if g["status"] == "denied":
         return escalate(run, t, g["policy"]["reason"])
-    d = run.decision(t["kind"], problem=result.get("problem", t["title"]), recommendation=result.get("recommendation", ""),
-                     risk=t["risk_tier"], confidence=result.get("confidence", "medium"), cost=result.get("cost", ""),
-                     evidence=evidence, change=result.get("what_would_change_this", ""), task_id=t["id"],
-                     action_type=action_type, source=owner, extra=extra)
-    approval = run.send("Approval", {"recommendation": d["recommendation"], "evidence_refs": evidence, "cost": d["cost"],
-                                     "confidence": d["confidence"], "what_would_change_this": d["what_would_change_this"]},
+    pending = {"problem": result.get("problem") or t["title"], "recommendation": result.get("recommendation", ""),
+               "confidence": result.get("confidence") or "medium", "cost": result.get("cost", ""),
+               "what_would_change_this": result.get("what_would_change_this", ""), "evidence": evidence,
+               "extra": extra, "action_type": action_type}
+    if t.get("reviewed_by"):  # a team member's proposal reaches the founder through its cofounder
+        t.update({"status": "LEAD_REVIEW", "pending_proposal": pending})
+        run.save_task(t)
+        return {"did": "to_cofounder", "task": t["id"], "reviewer": t["reviewed_by"]}
+    return bring_to_founder(run, t, pending)
+
+
+def bring_to_founder(run, t: dict, pending: dict, endorsed_by: str | None = None) -> dict:
+    """The proposal becomes a decision for the founder, with the cofounder who endorsed it, when there is one."""
+    owner = t["owner_worker_id"]
+    extra = dict(pending.get("extra") or {})
+    if endorsed_by:
+        extra["endorsed_by"] = endorsed_by
+    d = run.decision(t["kind"], problem=pending["problem"], recommendation=pending["recommendation"],
+                     risk=t["risk_tier"], confidence=pending["confidence"], cost=pending["cost"],
+                     evidence=pending["evidence"], change=pending["what_would_change_this"], task_id=t["id"],
+                     action_type=pending["action_type"], source=owner, extra=extra)
+    approval = run.send("Approval", {"recommendation": d["recommendation"], "evidence_refs": pending["evidence"],
+                                     "cost": d["cost"], "confidence": d["confidence"],
+                                     "what_would_change_this": d["what_would_change_this"]},
                         {"decision_id": d["id"], "from_worker": owner, "task_id": t["id"], "risk": t["risk_tier"]},
                         t["id"], owner)
-    t.update({"status": "AWAITING_FOUNDER", "decision_id": d["id"], "approval_hash": approval["object_hash"]})
+    t.update({"status": "AWAITING_FOUNDER", "decision_id": d["id"], "approval_hash": approval["object_hash"],
+              "pending_proposal": None})
     run.save_task(t)
     return {"did": "proposed", "task": t["id"], "decision": d["id"]}
 
@@ -291,6 +320,9 @@ def escalate(run, t: dict, why: str) -> dict:
 def answer(run, t: dict) -> dict:
     blocker = t["blocker"]
     who = blocker["needs_from"]
+    if not who.startswith("w_"):  # nobody in the company can answer it: the founder is asked
+        return escalate(run, t, f"No colleague can answer {t['owner_worker_id']}'s Blocker: "
+                                f"{blocker.get('description', '')[:300]}")
     g = run.gateway(who, t["id"], "answer_blocker", target=t["id"])
     if g["status"] != "executed":
         return escalate(run, t, g["policy"]["reason"])
@@ -317,15 +349,12 @@ def verify(run, t: dict) -> dict:
     owner = t["owner_worker_id"]
     r = verifier.verify(run, t)
     if r["passed"]:
-        perf(run, owner, "verified")
-        if t["attempts"] == 0:
-            perf(run, owner, "first_pass")
-        t["status"] = "VERIFIED"
-        run.save_task(t)
-        run.event("task.verified", "task", t["id"], {"verification": r["verification"]["id"],
-                  "attempt": r["verification"]["attempt"]}, actor="verification", correlation_id=t["id"],
-                  test_ids=r["verification"]["test_ids"])
-        return {"did": "verified", "task": t["id"]}
+        t["verification_id"] = r["verification"]["id"]
+        if t.get("reviewed_by"):  # checked by the platform; now its cofounder reviews it before it counts
+            t["status"] = "LEAD_REVIEW"
+            run.save_task(t)
+            return {"did": "checked", "task": t["id"], "reviewer": t["reviewed_by"]}
+        return accept(run, t)
     t["attempts"] += 1
     perf(run, owner, "reworks")
     if r["verdict"] == "REQUIRES_HUMAN":
@@ -341,6 +370,91 @@ def verify(run, t: dict) -> dict:
     if moved and moved["did"] in ("replaced", "rerouted"):
         return moved
     return {"did": "rework", "task": t["id"]}
+
+
+def accept(run, t: dict, reviewer: str | None = None) -> dict:
+    """The work counts: its files join the repository and the task is verified."""
+    owner = t["owner_worker_id"]
+    verifier.integrate(run, t)
+    perf(run, owner, "verified")
+    if t["attempts"] == 0 and not t.get("review_rounds"):
+        perf(run, owner, "first_pass")
+    t["status"] = "VERIFIED"
+    run.save_task(t)
+    v = run.store.get("verification", t.get("verification_id") or "") or {}
+    run.event("task.verified", "task", t["id"], {"verification": v.get("id"), "attempt": v.get("attempt"),
+              "reviewed_by": reviewer}, actor="verification", correlation_id=t["id"], test_ids=v.get("test_ids"))
+    return {"did": "verified", "task": t["id"]}
+
+
+def _review_material(run, t: dict) -> dict:
+    """What the cofounder reviews: the files that passed the platform's checks, or the proposal for the founder."""
+    if t.get("pending_proposal"):
+        p = t["pending_proposal"]
+        return {"proposal": {k: p[k] for k in ("problem", "recommendation", "evidence", "cost", "confidence",
+                                                "what_would_change_this")}}
+    out = run.workspace(t["owner_worker_id"], t["id"]) / "out"
+    v = run.store.get("verification", t.get("verification_id") or "") or {}
+    return {"files": {p.relative_to(out).as_posix(): p.read_text(encoding="utf-8", errors="replace")
+                      for p in sorted(out.rglob("*")) if p.is_file()},
+            "checks": f"The platform's checks passed: {v.get('method', 'its verifier')}."}
+
+
+def lead_review(run, t: dict) -> dict:
+    """The cofounder reviews its team member's work before it counts, or its proposal before it reaches the founder.
+    It approves, or sends it back with what to change. After MAX_SEND_BACKS the platform's checks decide and the
+    cofounder's last concern is kept on the record for the founder."""
+    lead, owner = t["reviewed_by"], t["owner_worker_id"]
+    g = run.gateway(lead, t["id"], "review_work", target=t["id"])
+    if g["status"] != "executed":
+        return _after_review(run, t, lead, "skipped", f"the review was not allowed: {g['policy']['reason']}")
+    rounds = t.get("review_rounds", 0)
+    content, usage = run.intel.review(t, worker=lead, objective=run.objective_ctx(), rules=run.rules(),
+                                      owner=(run.worker(owner) or {}).get("title", owner), work=_review_material(run, t),
+                                      persona=run.persona(lead), round_index=rounds)
+    run.record_call(t["id"], lead, "review", usage)
+    if run.meta["frozen"]:
+        return frozen_during_call(run, t)
+    content = content if isinstance(content, dict) else {}
+    verdict = str(content.get("verdict") or "").strip().lower()
+    note = content.get("note") if isinstance(content.get("note"), str) else ""
+    if verdict not in ("approve", "revise") or not note.strip():
+        t["review_errors"] = t.get("review_errors", 0) + 1
+        run.save_task(t)
+        if t["review_errors"] < MAX_REVIEW_ERRORS:
+            return {"did": "retry", "task": t["id"], "why": "the review needs a verdict (approve or revise) and a note"}
+        return _after_review(run, t, lead, "skipped", "the cofounder's review could not be read twice in a row")
+    t["review_errors"] = 0
+    rec = run.send("Review", {"verdict": verdict, "note": note.strip()},
+                   {"reviewed_by": lead, "owner": owner, "task_id": t["id"]}, t["id"], lead)
+    t["reviews"] = t.get("reviews", []) + [{"by": lead, "verdict": verdict, "note": rec["note"],
+                                           "hash": rec["object_hash"]}]
+    if verdict == "approve":
+        return _after_review(run, t, lead, "approved", rec["note"])
+    if rounds >= MAX_SEND_BACKS:  # the platform's checks decide; the concern stays on the record
+        return _after_review(run, t, lead, "concern_recorded", rec["note"])
+    t["review_rounds"] = rounds + 1
+    perf(run, owner, "sent_back")
+    title = (run.worker(lead) or {}).get("title", lead)
+    t.update({"status": "REWORK" if t["kind"] in roles.FILE_TYPES else "ASSIGNED",
+              "feedback": f"Your cofounder, the {title}, sent it back: {rec['note']}", "pending_proposal": None})
+    run.save_task(t)
+    run.event("task.sent_back", "task", t["id"], {"by": lead, "round": t["review_rounds"]}, actor=lead,
+              actor_type="worker", correlation_id=t["id"], protocol_hash=rec["object_hash"])
+    return {"did": "sent_back", "task": t["id"], "by": lead}
+
+
+def _after_review(run, t: dict, lead: str, outcome: str, note: str) -> dict:
+    """approved: the work counts, or the proposal goes to the founder, endorsed. skipped or concern_recorded: the
+    same, on the platform's checks alone, and the record says so."""
+    run.event("task.reviewed", "task", t["id"], {"by": lead, "outcome": outcome, "note": note[:300]}, actor=lead,
+              actor_type="worker", correlation_id=t["id"])
+    if outcome != "approved":
+        t["review_concern"] = {"by": lead, "outcome": outcome, "note": note[:600]}
+        run.save_task(t)
+    if t.get("pending_proposal"):
+        return bring_to_founder(run, t, t["pending_proposal"], endorsed_by=lead if outcome == "approved" else None)
+    return accept(run, t, reviewer=lead if outcome == "approved" else None)
 
 
 def execute_approved(run, t: dict) -> dict:
@@ -420,7 +534,7 @@ def after_escalation(run, d: dict, action: str) -> None:
     t = run.task(d["task_id"])
     if action == "approve":
         back = t.get("failed_from")
-        if back not in ("PLANNED", "BLOCKED"):
+        if back not in ("PLANNED", "BLOCKED", "LEAD_REVIEW"):
             back = "REWORK" if t["kind"] in roles.FILE_TYPES else "ASSIGNED"
         t.update({"status": back, "attempts": 0, "cut_offs": 0})
         run.save_task(t)

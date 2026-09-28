@@ -1,4 +1,6 @@
-"""Protocol objects: Handoff, Blocker, Escalation, Approval (Book 2 section 7, MVP subset).
+"""Protocol objects: Handoff, Blocker, Review, Escalation, Approval (Book 2 section 7, MVP subset).
+
+A Review is a cofounder's verdict on its team member's work: approve, or revise with what to change.
 
 Same templates as archive/02_harness/protocols, with the envelope fields break b_006 asked
 for. Routing fields are always set by the platform, never taken from model text.
@@ -14,6 +16,7 @@ TEMPLATES = {
                 "acceptance_check": ""},
     "Blocker": {"raised_by": "", "task_id": "", "category": "", "severity": "SEV-2", "description": "",
                 "needs_from": ""},
+    "Review": {"reviewed_by": "", "owner": "", "task_id": "", "verdict": "", "note": ""},
     "Escalation": {"raised_by": "", "issue": "", "severity": "SEV-2", "owner": "", "required_action": "",
                    "status": "open"},
     "Approval": {"decision_id": "", "from_worker": "", "to_worker": "founder", "task_id": "", "recommendation": "",
@@ -24,11 +27,12 @@ TEMPLATES = {
 REQUIRED = {
     "Handoff": ["from_worker", "to_worker", "task_id", "acceptance_check"],
     "Blocker": ["raised_by", "task_id", "description", "needs_from"],
+    "Review": ["reviewed_by", "owner", "task_id", "verdict", "note"],
     "Escalation": ["raised_by", "issue", "owner", "required_action"],
     "Approval": ["decision_id", "from_worker", "recommendation", "risk", "confidence", "what_would_change_this"],
 }
 
-ROUTING = {"from_worker", "to_worker", "task_id", "raised_by", "decision_id", "risk", "owner"}
+ROUTING = {"from_worker", "to_worker", "task_id", "raised_by", "decision_id", "risk", "owner", "reviewed_by"}
 
 
 class ProtocolError(ValueError):

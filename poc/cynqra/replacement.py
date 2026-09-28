@@ -39,7 +39,7 @@ import re
 import shutil
 import time
 
-from . import binding, budget, performance, roles
+from . import binding, budget, performance, planner, roles
 from . import settings as project_settings
 from .db import now
 from .intelligence import IntelligenceError
@@ -47,6 +47,7 @@ from .intelligence_layer import router
 from .probe import regression_check
 
 MAX_REPLACEMENTS = 2  # intelligence changes per task before the founder decides
+MAX_BAD_REPLIES = 3  # unusable replies in a row from one worker on one task before its AI is changed
 
 # Why a call failed. The provider's HTTP status says it best ("HTTP 402 from provider: ..."); the words of the
 # message are read only when there is no status, and only as whole phrases, so a port number such as :40312 or a
@@ -61,14 +62,17 @@ PHRASES = (
     ("rate_limit", re.compile(r"rate limit|too many requests", re.I)),
     ("timeout", re.compile(r"timed out|\btimeout\b", re.I)),
     ("withdrawn", re.compile(r"\bretired\b|connection was removed|regression check", re.I)),
+    # the provider answered, but the AI's own reply could not be used: its fault, never the provider's
+    ("reply", re.compile(r"reply truncated|did not return a JSON object|did not follow the required format|"
+                         r"returned no answer", re.I)),
 )
 PLAIN = {"outage": "its provider is not answering", "timeout": "its provider took too long to answer",
          "rate_limit": "its provider is limiting how often it may be called",
          "no_credit": "the provider account has no credit left", "access": "the provider refused the key",
-         "withdrawn": "it can no longer be used"}
+         "withdrawn": "it can no longer be used", "reply": "its reply was cut off or could not be read"}
 PROVIDER_SIDE = ("outage", "timeout", "rate_limit")
 ACCOUNT = ("no_credit", "access")
-WORK_STATES = ("PLANNED", "ASSIGNED", "REWORK", "BLOCKED")
+WORK_STATES = ("PLANNED", "ASSIGNED", "REWORK", "BLOCKED", "LEAD_REVIEW")
 
 
 def diagnose(error: str) -> str:
@@ -299,7 +303,7 @@ def _reroute(run, t: dict, peer: dict, why: str) -> dict:
               actor="replacement_engine", correlation_id=t["id"])
     t.update({"owner_worker_id": peer["id"], "status": "REWORK" if t["kind"] in roles.FILE_TYPES else "ASSIGNED",
               "attempts": 0, "cut_offs": 0, "replacements": t.get("replacements", 0) + 1,
-              "accountable": peer["reports_to"],
+              **planner.coordination(peer, run.workers()),
               "feedback": f"Rerouted to you from {frm}: {why[:300]} Its files are in your workspace."})
     run.save_task(t)
     before, after = _per_task(run, rep["from"], t["kind"]), _per_task(run, rep["to"], t["kind"])
@@ -329,7 +333,8 @@ def model_failed(run, t: dict, exc) -> dict | None:
     if not exc.model_id:
         return None
     cause = diagnose(str(exc))
-    involved = [t.get("owner_worker_id"), run.assigner_id(), (t.get("blocker") or {}).get("needs_from")]
+    involved = [actor(t), t.get("owner_worker_id"), t.get("handoff_from"), t.get("reviewed_by"),
+                (t.get("blocker") or {}).get("needs_from")]
     caller = next((w for w in involved if w and run.model_of(w) == exc.model_id), t.get("owner_worker_id"))
     n = run.count("call_error") + 1
     run.store.put("call_error", f"ce_{n:04d}", {"id": f"ce_{n:04d}", "worker_id": caller, "model_id": exc.model_id,
@@ -337,11 +342,13 @@ def model_failed(run, t: dict, exc) -> dict | None:
                                                 "at": now()})
     reg = run.registry
     reg.record_call(exc.model_id, role="", purpose="error", task_kind=t.get("kind", ""), usage=exc.usage, run_id=run.cid,
-                    error=str(exc))
+                    error="" if cause == "reply" else str(exc))  # the provider answered: it is not down
     m = reg.get(exc.model_id)
     run.event("worker.stopped", "worker", caller or "", {"task_id": t.get("id"), "intelligence_id": m["id"],
               "cause": cause, "why": PLAIN[cause], "error": str(exc)[:200]}, actor="replacement_engine",
               correlation_id=t.get("id"))
+    if cause == "reply":
+        return _bad_reply(run, t, caller, m, exc)
     if cause == "withdrawn":
         return _withdrawn(run, t, m, exc)
     if cause in ACCOUNT:
@@ -349,6 +356,50 @@ def model_failed(run, t: dict, exc) -> dict | None:
     if reg.availability(m)[0]:
         return {"did": "model_error_retry", "task": t["id"], "model": exc.model_id, "cause": cause, "why": str(exc)}
     return _outage(run, t, m, cause, exc)
+
+
+def _bad_reply(run, t: dict, caller: str, m: dict, exc) -> dict:
+    """The provider answered, but the AI's reply was cut off or could not be read. It is asked again; after
+    MAX_BAD_REPLIES in a row, the task's owner goes through the usual evaluation, and any other worker (a cofounder
+    handing out or reviewing the task, a colleague answering its Blocker) is given another intelligence, and the CEO
+    is told what it costs."""
+    t = run.task(t["id"])
+    counts = t.setdefault("bad_replies", {})
+    counts[caller] = counts.get(caller, 0) + 1
+    run.save_task(t)
+    if counts[caller] < MAX_BAD_REPLIES:
+        return {"did": "retry", "task": t["id"], "why": f"{caller}'s reply could not be used: {str(exc)[:200]}"}
+    counts[caller] = 0
+    run.save_task(t)
+    why = f"{m['name']}: {MAX_BAD_REPLIES} replies in a row were cut off or could not be read ({str(exc)[:160]})."
+    if caller == t["owner_worker_id"]:
+        return evaluate(run, t, why, forced=True)
+    return _rebind(run, t, caller, m, why)
+
+
+def _rebind(run, t: dict, wid: str, m: dict, why: str) -> dict:
+    """A worker whose own task is not the one failing (a cofounder coordinating it, a colleague answering it) is
+    given the best other intelligence for its role's work that passes a check first."""
+    reg, s = run.registry, project_settings.get(run.store)
+    w = run.worker(wid)
+    _, rows = router.choose(reg, s, roles.staffing_kinds(w["role"]), exclude={m["id"]})
+    kind = "assign" if roles.is_cofounder(w["role"]) else "answer"  # the coordination work it failed at
+    for r in [r for r in rows if r["fits_budget"]]:
+        check = regression_check(run.supply, r["model_id"], kind)
+        if check.get("usd"):
+            run.spend(wid, t["id"], check["usd"], "verification")
+        if not check["passed"]:
+            continue
+        new = reg.get(r["model_id"])
+        binding.bind(run, wid, new, reason=why, by="intelligence_router", candidates=rows)
+        before = router.estimate(reg, m, kind, s["time_value_per_hour"])["usd_per_attempt"] if m else None
+        after = router.estimate(reg, new, kind, s["time_value_per_hour"])["usd_per_attempt"]
+        inform(run, "intelligence_replaced", worker_id=wid, task_id=t["id"], usd_before=before, usd_after=after,
+               headline=f"{w['title']} now works on {new['name']}, in place of {m['name']}",
+               detail=f"Why: {why} {w['title']} keeps its role and its history." +
+                      _cost_line(before, after, m["id"], new["id"], run))
+        return {"did": "replaced", "task": t["id"], "worker": wid, "from": m["id"], "to": new["id"]}
+    return run.escalate(t, why + f" No other model passed its check for {w['title']}'s work.")
 
 
 def _withdrawn(run, t: dict, m: dict, exc) -> dict:
@@ -377,16 +428,19 @@ def _withdrawn(run, t: dict, m: dict, exc) -> dict:
     return out or {"did": "model_replaced", "task": t["id"], "model": m["id"]}
 
 
-def _actor(t: dict) -> str:
+def actor(t: dict) -> str:
+    """Whose move it is on a task: its cofounder hands it over and reviews it, its owner works on it, the colleague
+    a Blocker names answers it."""
     return {"PLANNED": t.get("handoff_from"), "ASSIGNED": t["owner_worker_id"], "REWORK": t["owner_worker_id"],
-            "BLOCKED": (t.get("blocker") or {}).get("needs_from")}.get(t["status"]) or ""
+            "BLOCKED": (t.get("blocker") or {}).get("needs_from"), "LEAD_REVIEW": t.get("reviewed_by")
+            }.get(t["status"]) or ""
 
 
 def _park(run, t: dict, model_ids: set, cause: str, decision_id: str | None, until: float) -> list[str]:
     """The failing task, and every task whose next move is by a worker on these intelligences, wait."""
     parked = []
     for x in run.tasks():
-        if x["id"] != t["id"] and not (x["status"] in WORK_STATES and run.model_of(_actor(x)) in model_ids):
+        if x["id"] != t["id"] and not (x["status"] in WORK_STATES and run.model_of(actor(x)) in model_ids):
             continue
         if x["status"] == "WAITING":
             x["waiting"].update(decision_id=decision_id or x["waiting"].get("decision_id"), until=until)

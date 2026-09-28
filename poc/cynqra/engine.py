@@ -87,6 +87,18 @@ class Engine:
                                            "scenario": None, "frozen": False, "created_at": now(), "notice": ""})
         if self.meta["phase"] != "new":
             self._attach(strict=False)  # a run reopened after a restart opens even if its model is gone for now
+            self._refuse_outdated()
+
+    OUTDATED = ("This project was made by an earlier version of Cynqra, whose team had roles that no longer exist "
+                "(such as the Business Lead: you are the CEO now, with cofounders). It can be read and exported, but "
+                "not continued. Start a new run; this one is kept in the archive.")
+
+    def _refuse_outdated(self) -> None:
+        """A run saved before the catalog changed can hold a worker whose role is gone. It is stopped with a plain
+        reason instead of failing on that worker's first step, again and again."""
+        unknown = sorted({w["role"] for w in self.workers() if w.get("role") not in roles.ROLES})
+        if unknown and self.meta["phase"] not in ("accepted", "delivered"):
+            self.set_meta(phase="stopped_error", failed_stage="outdated", notice=self.OUTDATED)
 
     # --- the run's state ---------------------------------------------------------------------------------------
     @property
@@ -203,9 +215,10 @@ class Engine:
                 kinds = workload.setdefault(t["owner_worker_id"], [])
                 if t["kind"] not in kinds:
                     kinds.append(t["kind"])
-            a = self.assigner_id()
-            if a and any(t["handoff_from"] == a for t in self.tasks()):
-                workload.setdefault(a, []).append("assign")
+            for t in self.tasks():  # cofounders hand out and review their team's work: that is work too
+                for who, kind in ((t.get("handoff_from"), "assign"), (t.get("reviewed_by"), "review")):
+                    if who and who.startswith("w_") and kind not in workload.setdefault(who, []):
+                        workload[who].append(kind)
         try:
             staffing = router.staff(self.registry, project_settings.get(self.store), self.workers(), workload)
         except router.RouterError as exc:
@@ -292,13 +305,11 @@ class Engine:
 
     def persona(self, wid: str) -> str:
         w = self.worker(wid)
-        return roles.prompt_text(w) if w else ""
+        return roles.prompt_text(w, self.workers()) if w else ""
 
-    def assigner_id(self) -> str | None:
-        return roles.assigner(self.workers())
-
-    def answerers(self) -> list[str]:
-        return roles.answerers(self.workers()) or [self.assigner_id()]
+    def planner_id(self) -> str | None:
+        """Who writes the roadmap: the Project Manager, else a cofounder."""
+        return roles.planner(self.workers())
 
     def tasks(self) -> list[dict]:
         return [self.store.get("task", t) for t in (self.store.get("plan", "plan_1") or {}).get("order", [])]
@@ -347,6 +358,8 @@ class Engine:
         if not model_id:
             raise EngineError(f"a call for {purpose} came back without the model that made it")
         kind = self.store.get("task", task_id)["kind"] if task_id.startswith("t_") else task_id  # objective, plan
+        if purpose in ("assign", "review", "answer_blocker"):  # coordination on a task is not the task's own kind
+            kind = {"answer_blocker": "answer"}.get(purpose, purpose)
         role = (self.worker(worker) or {}).get("role", worker)
         c = self.registry.record_call(model_id, role=role, purpose=purpose, task_kind=kind, usage=usage,
                                       run_id=self.cid)
@@ -566,7 +579,7 @@ class Engine:
             self._staff(refine=True)
         except IntelligenceError as exc:
             self._stage_failed("roadmap", exc)
-        f = budget.construct(self.store, self.tasks(), self.workers(), self.registry, self.assigner_id())
+        f = budget.construct(self.store, self.tasks(), self.workers(), self.registry)
         f["at"] = now()
         self.store.put("forecast", "current", f)
         for r in f["tasks"]:  # every task carries its budget: the forecast of its own work, in dollars
@@ -661,11 +674,13 @@ class Engine:
                 "why": errors[0]["why"] if errors else f"{len(results)} pieces of work at the same time"}
 
     ACTIONS = {"PLANNED": execution.assign, "ASSIGNED": execution.work, "REWORK": execution.work,
-               "BLOCKED": execution.answer, "REVIEW": execution.verify, "APPROVED": execution.execute_approved}
+               "BLOCKED": execution.answer, "REVIEW": execution.verify, "LEAD_REVIEW": execution.lead_review,
+               "APPROVED": execution.execute_approved}
 
     def _round(self) -> list[str]:
         """The tasks that move this round: those whose inputs are ready, one per worker who has to act on them (the
-        assigner hands a task over, the owner works on it, the colleague a Blocker names answers it)."""
+        owner's cofounder hands a task over and reviews it, the owner works on it, the colleague a Blocker names
+        answers it)."""
         tasks = self.tasks()
         by_id = {t["id"]: t for t in tasks}
         busy: set[str] = set()
@@ -675,8 +690,7 @@ class Engine:
             if s not in self.ACTIONS or (s == "PLANNED" and not all(
                     by_id[d]["status"] == "VERIFIED" for d in t["dependencies"])):
                 continue
-            actor = {"PLANNED": t.get("handoff_from"), "ASSIGNED": t["owner_worker_id"], "REWORK": t["owner_worker_id"],
-                     "BLOCKED": (t.get("blocker") or {}).get("needs_from")}.get(s) or ""
+            actor = execution.actor(t)
             if actor.startswith("w_"):
                 if actor in busy:
                     continue
@@ -711,8 +725,7 @@ class Engine:
         """A reply that is not a valid protocol object: counted against the worker whose reply it was."""
         t["attempts"] += 1
         self.save_task(t)
-        culprit = (self.assigner_id() if state == "PLANNED" else (t.get("blocker") or {}).get("needs_from")
-                   if state == "BLOCKED" else t["owner_worker_id"])
+        culprit = execution.actor(t) or t["owner_worker_id"]
         n = self.count("violation") + 1
         self.store.put("violation", f"pv_{n:04d}", {"id": f"pv_{n:04d}", "worker_id": culprit,
                        "model_id": self.model_of(culprit) if culprit else None, "task_id": t["id"],
@@ -752,6 +765,8 @@ class Engine:
         with self.lock:
             self._require("stopped_error")
             stage = self.meta.get("failed_stage")
+            if stage == "outdated":
+                raise EngineError(self.OUTDATED)
             self.intervention("resume", f"retry the {stage or 'run'} after an intelligence error")
             self.event("state.changed", "company", self.cid, {"control": "resume", "stage": stage}, actor="founder",
                        actor_type="human", authority="founder")
