@@ -509,7 +509,7 @@ missing_fields
 
 Founder objective:
 We need a CRUD app for grant applications. Applicant submits, reviewer scores, I decide. Keep files in our drive, do not store passports.
-</pre><div class='body'><label for='x_T10'>Retry reply for T10</label><textarea id='x_T10' data-k='T10_retry'></textarea></div></details></div><div class='bar'><button class='primary' onclick='download()'>Save answers file</button><span class='state' id='count'></span></div><div class='foot'>Saving downloads <code>s1_answers.json</code>. Put it in <code>02_harness/spikes/s1/answers/</code>, then double click <code>RUN_M1.bat</code> and choose the hand pasted S1 option, or send the file to Claude. Replies also stay in this browser until you clear it. The expected answers were written on 24 August and are not in this page.</div><script>
+</pre><div class='body'><label for='x_T10'>Retry reply for T10</label><textarea id='x_T10' data-k='T10_retry'></textarea></div></details></div><div class='bar'><button class='primary' onclick='download()'>Save answers file</button><span class='state' id='count'></span></div><div class='foot'>Saving downloads <code>s1_answers.json</code>. Put it in <code>02_harness/spikes/s1/answers/</code>, then double click <code>RUN_M1.bat</code> and choose the hand pasted S1 option, or send the file back. Replies also stay in this browser until you clear it. The expected answers were written on 24 August and are not in this page.</div><script>
 var KEY='cynqra_s1_v2_26sep2026';
 function load(){try{return JSON.parse(localStorage.getItem(KEY)||'{}')}catch(e){return {}}}
 function save(){var d={};document.querySelectorAll('[data-k]').forEach(function(el){d[el.dataset.k]=el.value});try{localStorage.setItem(KEY,JSON.stringify(d))}catch(e){}refresh()}

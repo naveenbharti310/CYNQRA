@@ -109,7 +109,7 @@ def main() -> int:
         "<span class='state' id='count'></span></div>"
         "<div class='foot'>Saving downloads <code>s1_answers.json</code>. Put it in "
         "<code>02_harness/spikes/s1/answers/</code>, then double click <code>RUN_M1.bat</code> and choose the "
-        "hand pasted S1 option, or send the file to Claude. Replies also stay in this browser until you clear it. "
+        "hand pasted S1 option, or send the file back. Replies also stay in this browser until you clear it. "
         "The expected answers were written on 24 August and are not in this page.</div>"
     )
     parts.append("<script>" + SCRIPT % {"ver": PROMPT_VERSION, "n": len(corpus)} + "</script></div></body></html>")

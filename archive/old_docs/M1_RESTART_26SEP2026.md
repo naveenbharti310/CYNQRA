@@ -1,7 +1,6 @@
 # M1 restart
 
-26 September 2026. Written by Claude acting as CEO, CTO, CPO and COO at the founder's
-instruction. Naveen Bharti remains the founder and the only person who ratifies Book 4.
+26 September 2026. Written at the founder's instruction. Naveen Bharti remains the founder and the only person who ratifies Book 4.
 This file supersedes STATE_OF_PLAY.md, which stays as the 25 August record.
 
 ## Where Cynqra stands
@@ -115,7 +114,7 @@ original kit tests still pass. Nothing calls a real model.
 | --- | --- | --- | --- |
 | Sat 26 Sep | Acting officers | Harness fixed, S2 built, tests, git, this memo | Done |
 | By Tue 29 Sep | Founder | Ratify D-31 to D-34, confirm the D-22 line | Rows marked in Book 4 |
-| By Tue 29 Sep | Founder | Get an Anthropic key on ten dollars of prepaid credit. Run S1 and S2, either by double clicking RUN_M1.bat or by giving the key to Claude for one session | s1_report.json and s2_report.json exist |
+| By Tue 29 Sep | Founder | Get an Anthropic key on ten dollars of prepaid credit. Run S1 and S2, either by double clicking RUN_M1.bat or by giving the key to the acting CTO for one session | s1_report.json and s2_report.json exist |
 | Within a day of results | Acting CTO | S1 memo, S2 memo, cost model v0, go or no go recommendation for M2 | Three files, one recommendation |
 | Same day | Founder | Write the go or no go in Book 4 | One dated row |
 | By Sat 3 Oct | Founder or hired CTO | Write and seal ten S3 v2 seeds and three clean controls, per s3v2/SEED_GUIDE.md | SEAL.json exists |
@@ -162,11 +161,11 @@ is fixed in this build.
    (00_canon/BOOK_4_PROPOSED_26SEP.md). Ten minutes.
 2. Create one Anthropic API key on ten dollars of prepaid credit. Then either double click
    RUN_M1.bat (it needs Python, and opens the Python download page if Python is
-   missing), or give the key to Claude and revoke it afterwards. Thirty minutes.
+   missing), or give the key to the acting CTO and revoke it afterwards. Thirty minutes.
 3. Drop the v1.2 zip and the G0 packet into the Cynqra latest_10 folder, or connect Notion.
    Five minutes.
 4. Decide who writes the S3 v2 seeds: yourself this week, or the CTO hire later. It cannot
-   be Claude, who wrote the checks.
+   be whoever wrote the checks.
 
 ## Where things are
 

@@ -11,7 +11,7 @@
 > Cynqra_POC_demo.mp4. Start with poc/README.md. It is a demonstration, not gate evidence.
 
 Prepared 25 August 2026 for the incoming CTO or founding engineer.
-Prepared by the founder, Naveen Bharti, with an AI assistant doing the writing and the harness code.
+Prepared by the founder, Naveen Bharti.
 
 Read this file, then RUNBOOK.md, then STATE_OF_PLAY.md. That is about thirty minutes
 and it is enough to start work. The canon itself is longer and you read it in order.
