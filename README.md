@@ -3,25 +3,50 @@
 **Describe the company you want to build. Cynqra assembles the expert team it needs, checks every piece of their
 work, and asks you only what a CEO should decide.**
 
-| | |
-| --- | --- |
-| **What** | An expert team on demand, for any idea, built the way a founder builds a real company. You are the CEO. Cynqra proposes the cofounders your company needs, each cofounder chooses the team for its area, and each member gets the best AI for its job. You receive the Company Pack: the foundation documents, the product, your decisions and what it cost. |
-| **Why** | Building a product has become cheap. Knowing what a real company needs, and trusting AI work you cannot judge yourself, has not. With a single AI chat you must know what to ask and check every answer; with Cynqra, the team does, and the work is checked before it counts. |
-| **How** | You describe the company. Cynqra proposes your cofounders, each cofounder chooses its team, and you approve the whole organization once, then the plan and budget. Cofounders run their areas: they hand out their team's work, answer its doubts and review it after an independent check. You decide only the real choices: money, risk, going live. |
+## The story
+
+Say you want to start a company. In real life you would first find cofounders: someone to lead the technology,
+someone to lead the product, maybe someone to look after the money. Each cofounder would then hire their own
+people. As CEO you would not write the code or check every spreadsheet. You would make the big calls.
+
+Cynqra works the same way, with AI experts in place of people.
+
+1. **You describe your idea** in your own words.
+2. **Cynqra suggests your cofounders** and tells you why each one is needed.
+3. **Each cofounder picks a team** for their area. A CTO might pick engineers and a tester; a CFO might pick a legal
+   advisor.
+4. **You see the whole organization chart and approve it once.** Then you approve the plan and the budget.
+5. **The team gets to work.** Cofounders hand out the tasks, answer their team's questions and review every piece of
+   work. Cynqra also checks each piece on its own, for example by running the code's tests.
+6. **You are asked only what a CEO should decide:** spending money, taking a risk, going live.
+7. **At the end you get the Company Pack:** the founding documents, the working product, every decision you made and
+   what it all cost.
+
+## Why it matters
+
+Building software with AI has become cheap. The hard part is knowing which experts a real company needs, and trusting
+work you cannot check yourself. With a single AI chat you have to know what to ask and check every answer yourself.
+With Cynqra the team asks the right questions, and every piece of work is checked before it counts.
 
 ## See it: the Bluedip demo
 
-A founder describes **Bluedip**, an app that predicts a restaurant's footfall and revenue hour by hour and estimates
-what an offer will do before the owner runs it. Cynqra proposes three cofounders: a CTO, a Chief Product Officer and
-a CFO. The CTO builds a team of a Data Scientist, Backend and Frontend Engineers, DevOps and QA; the Chief Product
-Officer a Project Manager, a Designer, a Market Analyst and a Restaurant Revenue Management Specialist; the CFO a
-Legal and Compliance Advisor. They lay the company's foundation, build and check the models and the app, and put it
-live.
+Here is the story above with a real example. A founder describes **Bluedip**: an app that tells a restaurant owner
+how many customers and how much money to expect each hour, and what a discount would really do before trying it.
 
-In the live app, the owner's own idea, 50% off for at most 15 customers from 1 pm to 4 pm, turns out to raise revenue
-and **lose money after food cost**, because customers who would have come anyway pay half too. Bluedip recommends 20%
-off, which **earns money**. That is the depth a single AI chat does not give a founder: the right experts, and
-numbers you can check.
+Cynqra suggests three cofounders, and each picks a team:
+
+| Cofounder | Their team |
+| --- | --- |
+| CTO | a Data Scientist, a Backend Engineer, a Frontend Engineer, a DevOps Engineer and a QA Engineer |
+| Chief Product Officer | a Project Manager, a Designer, a Market Analyst and a Restaurant Revenue Management Specialist |
+| CFO | a Legal and Compliance Advisor |
+
+Together they write the company's founding documents, build and check the app, and put it live.
+
+Then the owner tries their own idea in the live app: 50% off for up to 15 customers between 1 pm and 4 pm. Bluedip
+shows that this brings in more sales but **loses money once food cost is counted**, because customers who would have
+come anyway also pay half. It suggests 20% off instead, which **makes money**. A single AI chat would not have told
+the founder this. It took the right experts and numbers anyone can check.
 
 ## Read these, in order
 
