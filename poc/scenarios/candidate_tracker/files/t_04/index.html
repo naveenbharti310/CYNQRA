@@ -8,9 +8,9 @@
 :root{--ink:#1d2327;--muted:#5a6570;--line:#dde3e8;--ground:#f5f7f9;--accent:#2457a6;--warn:#8a4b00;--warnbg:#fdf0dc;--bad:#a02a22;--badbg:#fbe4e1}
 *{box-sizing:border-box}
 body{margin:0;font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);background:var(--ground)}
-header{padding:20px 28px;background:#fff;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
+header{padding:20px max(28px,calc(50% - 522px));background:#fff;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
 h1{margin:0;font-size:20px}
-main{padding:24px 28px;display:grid;gap:18px;max-width:1100px}
+main{padding:24px 28px;display:grid;gap:18px;max-width:1100px;margin:0 auto}
 form{display:flex;gap:10px;flex-wrap:wrap;align-items:end;background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px}
 label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
 input,select{font:inherit;padding:8px 10px;border:1px solid #c5ced6;border-radius:7px;background:#fff;color:var(--ink);min-height:40px}

@@ -36,6 +36,11 @@ RISK = {
     "change_authority": "PROHIBITED",
 }
 
+# what a prohibited action is, in the founder's words
+NEVER = {"external_message": "send a message outside the company", "move_money": "move money",
+         "legal_commitment": "make a legal commitment", "change_objective": "change the goal",
+         "change_budget": "change the budget", "change_authority": "change who may do what"}
+
 E, P, N = "execute", "propose", "none"
 
 # role -> action_type -> E / P / N (D-28 working text), one row per role in the catalog (roles.py). The rows of the
@@ -64,7 +69,8 @@ def evaluate(*, role: str, action_type: str, autonomy_level: str = "L1", budget_
     if risk is None:
         return out("DENY", f"Unknown action type {action_type!r}. Default deny.")
     if risk == "PROHIBITED":
-        return out("DENY", f"{action_type} is prohibited for every worker at every autonomy level (D-27, Book 1 addendum).")
+        return out("DENY", f"No team member may {NEVER.get(action_type, action_type)}, at any level of trust; only "
+                           "people do this.")
     grant = MATRIX.get(role, {}).get(action_type, N)
     if grant == N:
         return out("DENY", f"{role} has no authority for {action_type} (D-28).")

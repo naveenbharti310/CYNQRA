@@ -17,6 +17,7 @@ Replacement Engine must look at the alternatives.
 from __future__ import annotations
 
 from .binding import all_bindings
+from .budget import dollars
 from .roles import BUILD_TYPES
 
 THRESHOLDS = {
@@ -98,8 +99,8 @@ def below(card: dict, forecast_per_task: float | None = None, t: dict | None = N
     if r["calls"] + r["failed_calls"] >= t["min_calls"] and (r["failure_rate"] or 0) >= t["failure_rate"]:
         out.append(f"{r['failed_calls']} of {r['calls'] + r['failed_calls']} calls failed")
     if forecast_per_task and e["usd_per_verified"] and e["usd_per_verified"] > t["cost_vs_forecast"] * forecast_per_task:
-        out.append(f"${e['usd_per_verified']} per verified task, over {t['cost_vs_forecast']}x the forecast "
-                   f"${forecast_per_task:.4f}")
+        out.append(f"{dollars(e['usd_per_verified'])} per verified task, over {t['cost_vs_forecast']}x the forecast "
+                   f"{dollars(forecast_per_task)}")
     return out
 
 

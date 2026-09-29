@@ -73,7 +73,8 @@ def deliver(run) -> dict:
           "proposed_change": "Synthesize the organization the objective needs, staff it with intelligence and run the "
                              "approved roadmap to a live release.",
           "expected_result": run.objective()["structured"]["success_criteria"],
-          "cost": f"${ec['total_actual']:.4f} of the ${ec['cap_usd']:.2f} budget", "risk": "HIGH (production deploy)",
+          "cost": f"{budget.dollars(ec['total_actual'])} of the {budget.dollars(ec['cap_usd'])} budget",
+          "risk": "HIGH (production deploy)",
           "reversibility": "Stop the live process; the export holds everything.",
           "authority_check": "every MEDIUM and HIGH step approved by the founder", "approval": None,
           "actual_result": f"Live at {live_url(run)}", "confidence": "high", "metrics": metrics(run),
@@ -175,6 +176,7 @@ def company_pack(run) -> dict:
                      "files": [o.get("file") for o in t.get("outputs") or [] if isinstance(o, dict)],
                      "verified": t["status"] == "VERIFIED"})
     decided = [d for d in run.store.all("decision") if d["status"] != "pending"]
+    title = lambda tid: (run.store.get("task", tid) or {}).get("title", "") if tid else ""  # noqa: E731
     workers = run.workers()
     org = [{"cofounder": c["title"], "why": c.get("why", ""),
             "team": [{"title": w["title"], "why": w.get("why", "")} for w in workers if w.get("reports_to") == c["id"]]}
@@ -197,9 +199,11 @@ def company_pack(run) -> dict:
             "your_next_steps": [{"guess": a["id"], "step": a["founder_step"]} for a in guesses if a.get("founder_step")],
             "numbers": checked[-1]["checks"]["numbers"] if checked else None,
             "organization": org, "documents": docs,
-            "ceo_decisions": [{"kind": d["kind"], "problem": d["problem"][:200], "outcome": d.get("outcome_label")}
+            "ceo_decisions": [{"kind": d["kind"], "problem": d["problem"][:200], "outcome": d.get("outcome_label"),
+                               "status": d["status"], "task": title(d.get("task_id"))}
                               for d in decided if d.get("resolved_by") == "founder"],
-            "settled_for_you": [{"kind": d["kind"], "problem": d["problem"][:200],
+            "settled_for_you": [{"kind": d["kind"], "problem": d["problem"][:200], "status": d["status"],
+                                 "task": title(d.get("task_id")),
                                  "by": (run.worker(d["resolved_by"]) or {}).get("title", d["resolved_by"])}
                                 for d in decided if d.get("resolved_by") not in (None, "founder")],
             "ceo_informed": [{k: n[k] for k in ("kind", "headline", "detail", "usd_difference")}

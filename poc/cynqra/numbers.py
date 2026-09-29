@@ -32,6 +32,17 @@ INPUTS = {
     "months_before_revenue": "months of running costs before the first customer pays (a pilot, a build)",
 }
 REQUIRED = ("price_per_month", "cost_to_serve_per_month", "fixed_costs_per_month", "cost_to_win", "monthly_churn")
+FIGURES = {
+    "margin_per_customer": "margin per customer, a month",
+    "margin_share": "margin as a share of the price",
+    "payback_months": "months to earn back what a customer cost to win",
+    "lifetime_value": "what a customer is worth over its life",
+    "customers_to_cover_fixed_costs": "customers needed to cover the running costs",
+    "value_to_cost_of_winning": "what a customer is worth against what winning one costs",
+    "break_even_month": "the month the company stops losing money",
+    "funding_needed": "money needed to get there",
+    "reaches_profit_before_money_runs_out": "whether profit comes before the money runs out",
+}
 TOLERANCE = 0.02
 BLOCK = re.compile(r"```json\s*(\{.*?\})\s*```", re.S)
 
@@ -77,6 +88,18 @@ def _out_of_range(name: str, v: float) -> str:
     if high is not None and v > high:
         return f"{name} must be at most {high:g}"
     return ""
+
+
+def plain(why: str) -> str:
+    """A finding in the founder's words: the figure's name instead of its key, large numbers with separators. The
+    team gets the finding with the keys, which it needs to fix the block."""
+    head, sep, rest = (why or "").partition(": ")
+    name = FIGURES.get(head) or INPUTS.get(head)
+    if not (sep and name):
+        return why or ""
+    rest = re.sub(r"(?<![\d.])\d{4,}(?:\.\d+)?(?![\d.])",
+                  lambda m: f"{float(m.group()):,.{len(m.group().partition('.')[2])}f}", rest)
+    return f"for {name}, {rest}"
 
 
 def compute(inputs: dict) -> dict:

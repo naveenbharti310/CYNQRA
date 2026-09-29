@@ -23,6 +23,7 @@ Every approval, rejection and override is a labelled decision in the audit trail
 from __future__ import annotations
 
 from . import lessons, policy, roles, seats
+from .budget import dollars
 from .intelligence_layer import router
 from . import settings as project_settings
 from .db import now
@@ -344,7 +345,7 @@ def evidence(prop: dict, requirements: dict) -> list[str]:
                 + (f"; watches {', '.join(c['controls'])}" if c.get("controls") else "") + ". Without it: "
                 + ("; ".join(c.get("without") or []) or "nothing would be left undone") + "."
                 + (f" As {r['mode']}: {r.get('mode_why', '')}" if r.get("mode") else "")
-                + (f" Expected ${cost:.4f} on the best available model." if cost is not None else ""))
+                + (f" Expected {dollars(cost)} on the best available model." if cost is not None else ""))
     for c in [r for r in prop["roles"] if r.get("tier") == "cofounder"]:
         lines.append("Cofounder " + line(c))
         team = [r for r in prop["roles"] if r.get("lead") == c["role"]]
@@ -456,7 +457,7 @@ def propose(run, note: str = "") -> dict:
                                 "the AI best suited to its work and builds the roadmap and the budget for your second "
                                 "approval.",
                  risk="LOW", confidence=w["confidence"],
-                 cost=f"about ${sum(costs.values()):.4f} of model work per unit of each role's work" if costs else
+                 cost=f"about {dollars(sum(costs.values()))} of model work per unit of each role's work" if costs else
                       "priced in the roadmap and budget, next",
                  evidence=w["lines"] + evidence(prop, req),
                  change="A cofounder the company does not need or is missing, a hire a team does not need, or a "

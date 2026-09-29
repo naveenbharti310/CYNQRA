@@ -34,6 +34,15 @@ const SERVICE_TITLE = { orchestrator: "Orchestrator", verification: "Verificatio
   objective_intelligence: "Objective Intelligence", intelligence_router: "Intelligence Router" };
 const VIEWS = [["company", "Company"], ["organization", "Organization"], ["workforce", "Workforce"], ["work", "Work"],
   ["decisions", "Decisions"], ["intelligence", "Intelligence"], ["performance", "Performance"], ["audit", "Audit"], ["delivery", "Delivery"]];
+// what an action is, in the founder's words (cynqra/policy.py RISK)
+const ACTION_TITLE = { write_file: "writing a file", read_artifact: "reading a document", run_tests: "running tests",
+  send_protocol: "a message to a colleague", assign_task: "handing out work", answer_blocker: "answering a question",
+  review_work: "reviewing work", product_rule_decision: "a product rule", merge_to_main: "merging code", install_package: "installing a package",
+  deploy_production: "going live", delete_data: "deleting data", external_message: "a message outside the company", move_money: "moving money",
+  legal_commitment: "a legal commitment", change_objective: "changing the goal", change_budget: "changing the budget",
+  change_authority: "changing who may do what" };
+const actionTitle = (a) => ACTION_TITLE[a] || a;
+const taskTitle = (id) => (((S.st && S.st.tasks) || []).find((t) => t.id === id) || {}).title || id;
 const wt = (id) => { const w = ((S.st && S.st.workers) || []).find((x) => x.id === id); return w ? w.title : SERVICE_TITLE[id] || id; };
 
 async function api(path, body) {
@@ -79,6 +88,9 @@ function paint(force) {
   const keep = {};
   $$("#app input, #app textarea, #app select").forEach((el) => { if (el.id) keep[el.id] = el.value; });
   const focus = document.activeElement && document.activeElement.id;
+  // a section the founder opened or closed stays that way through a repaint, known by its summary line
+  const said = (el) => { const x = el.querySelector("summary"); return x ? x.textContent : ""; };
+  const opened = new Map($$("#app details").map((el) => [said(el), el.open]));
   const phase = S.st.meta.phase;
   const model = showModelScreen();
   const g = model ? "" : guideBar();
@@ -87,6 +99,7 @@ function paint(force) {
   const bar = $(".guide-bar");
   if (bar) document.documentElement.style.setProperty("--guide-h", bar.offsetHeight + "px");
   Object.entries(keep).forEach(([id, v]) => { const el = document.getElementById(id); if (el && el.dataset.keep !== "no") el.value = v; });
+  $$("#app details").forEach((el) => { if (opened.has(said(el))) el.open = opened.get(said(el)); });
   if (focus) { const el = document.getElementById(focus); if (el) el.focus(); }
   bind();
 }
@@ -116,8 +129,9 @@ function toasts(events) {
     if (e.event_type === "task.verified") { msg = `${e.aggregate_id} verified`; kind = "good"; }
     else if (e.event_type === "verification.completed" && p.verdict === "REQUIRES_REWORK") { msg = `${p.task_id} sent back for rework: verification caught a defect`; kind = "warn"; }
     else if (e.event_type === "task.blocked") { msg = `${e.aggregate_id}: ${wt(e.actor_id)} raised a Blocker instead of guessing`; kind = "warn"; }
-    else if (e.event_type === "action.denied") { msg = `Policy stopped ${p.action_type} by ${wt(e.actor_id)}`; kind = "bad"; }
-    else if (e.event_type === "decision.created" && !["approve_workforce", "approve_roadmap"].includes(p.kind)) { msg = `Needs you: ${KIND_TITLE[p.kind] || p.kind}`; kind = "warn"; }
+    else if (e.event_type === "action.denied") { msg = `The rules stopped ${actionTitle(p.action_type)} by the ${wt(e.actor_id)}`; kind = "bad"; }
+    else if (e.event_type === "decision.created" && !p.settled_by && !["approve_workforce", "approve_roadmap"].includes(p.kind)) { msg = `Needs you: ${KIND_TITLE[p.kind] || p.kind}`; kind = "warn"; }
+    else if (e.event_type === "decision.approved" && p.outcome_label === "settled_by_cofounder") { msg = `Settled by the ${wt(p.by)}: ${KIND_TITLE[p.kind] || p.kind}. You are told, not asked.`; kind = "info"; }
     else if (e.event_type === "worker.model_replaced") { msg = `${wt(e.aggregate_id)} moved to another model: ${p.reason || ""}`.slice(0, 160); kind = "warn"; }
     else if (e.event_type === "task.rerouted") { msg = `${e.aggregate_id} rerouted from ${wt(p.from_worker)} to ${wt(p.to_worker)}`; kind = "warn"; }
     else if (e.event_type === "deployment.verified") { msg = "Live and verified"; kind = "good"; }
@@ -153,9 +167,10 @@ function wizard() {
         <label class="mode ${S.mode === "live" ? "on" : ""}" id="m-live"><input type="radio" name="mode" value="live" ${S.mode === "live" ? "checked" : ""}>Live: real models</label>
       </div>
       ${S.mode === "demo" ? `<label class="lbl" for="scenario">Demo scenario</label>
-        <select id="scenario" data-keep="no">${(st.scenarios || []).map((x) => `<option value="${esc(x.id)}" ${x.id === S.scenario ? "selected" : ""}>${esc(x.title)}</option>`).join("")}</select>
-        <p class="small muted" style="margin:0">${esc(scen ? scen.about : "")}</p>` : intelSources()}`}` : "";
-  const right = obj ? objectiveCard(obj) : `<div class="card" style="flex:1;display:flex;align-items:center;justify-content:center"><p class="muted">Your brief appears here.</p></div>`;
+        <select id="scenario" data-keep="no">${(st.scenarios || []).map((x) => `<option value="${esc(x.id)}" ${x.id === S.scenario ? "selected" : ""}>${esc(x.title)}</option>`).join("")}</select>` : intelSources()}`}` : "";
+  // before the brief exists, the right side says what this demo will show, so the page reads left to right
+  const about = phase === "new" && S.mode === "demo" && scen ? `<div class="stack" style="max-width:640px"><span class="caps">In this demo</span><p style="margin:0;color:var(--ink2)">${esc(scen.about)}</p></div>` : "";
+  const right = obj ? objectiveCard(obj) : `<div class="card" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;padding:40px">${about}<p class="muted" style="margin:0">Your brief appears here.</p></div>`;
   return `<div class="wiz">${top}<div class="wiz-body">
     <div class="wiz-left">
       ${steps(0)}
@@ -215,7 +230,7 @@ function founderFields() {
 function orgChart(workers) {
   const kids = (id) => workers.filter((w) => (w.reports_to || "founder") === id);
   const node = (w) => `<li><div class="onode${w.tier === "cofounder" ? " cofounder" : ""}"><b>${esc(w.title)}</b><small>${w.tier === "cofounder" ? "Cofounder" : "Team"}${w.model ? " · " + esc(w.model) : ""}</small></div>${kids(w.id).length ? `<ul>${kids(w.id).map(node).join("")}</ul>` : ""}</li>`;
-  return `<div class="ochart"><ul><li><div class="onode founder"><b>You, the CEO</b><small>approval gates</small></div><ul>${kids("founder").map(node).join("")}</ul></li></ul></div>`;
+  return `<div class="ochart"><div class="onode founder"><b>You, the CEO</b><small>approval gates</small></div><ul class="otop">${kids("founder").map(node).join("")}</ul></div>`;
 }
 
 function reqList(req) {
@@ -274,7 +289,7 @@ function workforceStep() {
     <div class="wiz-left">
       ${steps(1)}
       <h1 class="hero">What you'll get, and the team that delivers it.</h1>
-      <p class="lede">Cynqra turned your idea into what must be true when it's done, then built the smallest team that gets you there. Every seat was checked before you see it. You approve once; you don't coordinate anyone.</p>
+      <p class="lede">Cynqra turned your idea into what must be true when it's done, then built the team that gets you there. Every seat says what it owns and what would be left undone without it, and each was checked before you see it. A lean team, with fewer specialists, sits beside it. You approve once; you don't coordinate anyone.</p>
       <div class="card stack"><div class="caps">What you'll get</div><ul style="margin:0;padding-left:18px">${outcomes}</ul>
         ${risks ? `<div class="caps" style="margin-top:8px">What must not go wrong</div>${risks}` : ""}
         ${((req || {}).assumptions || []).length ? `<div class="caps" style="margin-top:8px">The guesses it rests on, riskiest first</div>${req.assumptions.map((a) => `<div class="small"><span class="mono">${esc(a.id)}</span> ${esc(a.text)} <span class="muted">${esc(a.risk)} risk; ${a.tested_by.length ? "tested by the work on " + esc(a.tested_by.join(", ")) : "no requirement tests it"}${a.founder_step ? "; only you can test the rest" : ""}</span></div>`).join("")}` : ""}
@@ -289,7 +304,7 @@ function workforceStep() {
         <button class="btn sm ${lean ? "primary" : ""}" data-team-option="lean">Lean, ${esc(ln.seats || 0)} seats</button></div>
       ${lean ? leanNote : `<p class="small" style="margin:0">${esc(prop.summary || "")}</p>`}
       <div class="tscroll"><table class="tbl"><thead><tr><th>Seat and why</th><th>Asked for by</th><th>Owns</th><th>Without it</th><th>Expected cost</th>${allowOverride() && !lean ? "<th>Edit</th>" : ""}</tr></thead><tbody>${table}</tbody></table></div>
-      ${cut || kept ? `<details ${fresh("challenge") ? "open" : ""}><summary class="small">The independent challenge: ${(ch.removed || []).length} cut, ${(ch.overruled || []).length} kept after a challenge</summary><ul class="small" style="padding-left:18px">${cut}${kept}</ul></details>` : ""}
+      ${cut || kept ? `<details open><summary class="small">The independent challenge: ${(ch.removed || []).length} cut, ${(ch.overruled || []).length} kept after a challenge</summary><ul class="small" style="padding-left:18px">${cut}${kept}</ul></details>` : ""}
       ${orgChart((lean ? ln.workers : prop.workers) || [])}
       <p class="small muted" style="margin:0">Each team member reports to the cofounder who asked for it. Cofounders hand out their team's work, answer its doubts and review it before it counts. ${lean && demo ? "The demo's script plans the recommended team only; in live mode Cynqra plans for whichever team you choose." : ""}</p>
       <label class="lbl" for="wf_note">Feedback, if you want a different team</label><textarea class="note" id="wf_note" data-keep="yes"></textarea>
@@ -305,7 +320,8 @@ function budgetTable(f) {
   const byw = Object.entries(f.by_worker || {}).map(([w, v]) => `<span class="pill grey">${esc(wt(w))} ${usd(v.usd)}</span>`).join(" ");
   return `<div class="tscroll"><table class="tbl"><thead><tr><th>Layer</th><th>USD</th><th>Basis</th></tr></thead><tbody>${rows}
     <tr><td><b>Project total</b></td><td class="mono"><b>${usd(f.total_usd)}</b></td><td class="small">against the hard cap of ${usd(f.cap_usd)}${f.spent_before_usd ? `, ${usd(f.spent_before_usd)} of it already spent` : ""}</td></tr></tbody></table></div>
-    <div class="small">By worker: ${byw}</div>${(f.warnings || []).map((w) => `<div class="notice small">${esc(w)}</div>`).join("")}`;
+    <div class="small">By worker: ${byw}</div>${(f.warnings || []).map((w) => `<div class="notice small">${esc(w)}</div>`).join("")}
+    ${S.st && S.st.meta.mode === "demo" ? `<div class="small muted">In a demo the team's words come from a script, so its AI costs nothing. With real AI, every task is priced here in dollars before it starts.</div>` : ""}`;
 }
 
 function teamStart(plan) {
@@ -497,7 +513,7 @@ function shell() {
         <div class="row small" style="gap:20px">
           <div class="row" style="gap:8px"><span>Budget</span><div class="meter ${pct >= 95 ? "bad" : pct >= 80 ? "warn" : ""}" role="img" aria-label="Budget ${pct} percent used"><i style="width:${pct}%"></i></div>
             <span class="mono">${usd(spent)} / ${usd(cap)}</span></div>
-          <span>Founder interventions <b class="mono">${st.metrics.founder_interventions ?? 0}</b></span>
+          <span>Times you were needed <b class="mono">${st.metrics.founder_interventions ?? 0}</b></span>
           ${modelActivity()}${statusPill()}
           <button class="btn sm" id="step" ${!running || st.auto.on || S.busy ? "disabled" : ""}>Step</button>
           <button class="btn sm ${st.auto.on ? "" : "primary"}" id="auto" ${!running ? "disabled" : ""}>${st.auto.on ? "Pause" : "Run"}</button>
@@ -540,12 +556,12 @@ function vCompany() {
         <span style="color:var(--ink2)">Success: ${esc(o.structured.success_criteria)}. ${esc(o.structured.constraints)}.</span></div>
         <span class="pill teal">Stage: ${esc(st.company.stage)}</span></div>
       <div class="ribbon">${ribbon}</div></div>
-    <div class="tiles">${tile(m.founder_interventions, "Founder interventions")}${tile(`${m.tasks_verified} of ${m.tasks_total}`, "Tasks verified")}
-      ${tile(m.defects_caught_before_verified, "Defects caught before verified")}${tile(m.blockers_cleared_without_founder, "Blockers cleared without you")}
-      ${tile(m.actions_stopped_by_policy, "Actions stopped by policy")}${tile(m.protocol_objects_per_verified_task ?? "n/a", "Protocol objects per verified task")}</div>
+    <div class="tiles">${tile(m.founder_interventions, "Times you were needed")}${tile(`${m.tasks_verified} of ${m.tasks_total}`, "Pieces of work checked")}
+      ${tile(m.defects_caught_before_verified, "Mistakes caught before they counted")}${tile(m.blockers_cleared_without_founder, "Questions settled without you")}
+      ${tile(m.actions_stopped_by_policy, "Actions stopped by the rules")}${tile(m.protocol_objects_per_verified_task ?? "n/a", "Messages between members per piece of work")}</div>
     ${updateCard()}${afterLaunch()}
     <div class="two"><div class="card stack"><h2 style="font-size:17px">Needs you today</h2>${needs}
-        <span class="small muted" style="margin-top:auto">At most three decisions a day should reach you at any organization size (D-11). Escalations today: ${m.escalations_today} of ${m.escalation_budget} (D-29).</span></div>
+        <span class="small muted" style="margin-top:auto">Brought to you today: ${m.escalations_today} of at most ${m.escalation_budget}; anything past that waits in a daily digest.</span></div>
       <div class="card"><h2 style="font-size:17px;margin-bottom:6px">Work</h2>${rows}</div></div>`;
 }
 
@@ -558,7 +574,7 @@ function updateCard() {
     <div class="small"><b>Numbers.</b> ${n.tasks_done} of ${n.tasks} tasks done; $${Number(n.spent_usd).toFixed(2)} spent of $${Number(n.budget_usd).toFixed(2)}; ${n.live ? `live${n.live_checks ? `, ${n.live_checks_ok} of ${n.live_checks} checks answered` : ""}` : "not live yet"}.</div>
     ${(u.waiting_for_you || []).length ? `<div class="small"><b>Waiting for you.</b><ul style="margin:2px 0 0;padding-left:18px">${list(u.waiting_for_you.map((w) => w.what))}</ul></div>` : `<div class="small"><b>Waiting for you:</b> nothing.</div>`}
     ${(u.at_risk || []).length ? `<div class="small"><b>At risk.</b><ul style="margin:2px 0 0;padding-left:18px">${list(u.at_risk)}</ul></div>` : ""}
-    ${settled.length ? `<div class="small"><b>Settled for you</b> (easy to undo, so the cofounder accountable decided):<ul style="margin:2px 0 0;padding-left:18px">${list(settled.map((d) => `${d.by}: ${d.what}`))}</ul></div>` : ""}
+    ${settled.length ? `<div class="small"><b>Settled for you</b> (easy to undo, so the cofounder accountable decided):<ul style="margin:2px 0 0;padding-left:18px">${list(settled.map((d) => `The ${d.by} ${d.status === "rejected" ? "turned down" : "approved"}: ${d.task || KIND_TITLE[d.kind] || d.kind}.`))}</ul></div>` : ""}
     ${(u.learned || []).length ? `<div class="small"><b>What the checks caught.</b><ul style="margin:2px 0 0;padding-left:18px">${list(u.learned)}</ul></div>` : ""}</div>`;
 }
 
@@ -632,7 +648,8 @@ const wfv = () => (S.st && S.st.workforce) || {};
 const regModels = () => (S.sup && S.sup.intelligence) || wfv().registry || [];
 const supConns = () => (S.sup && S.sup.connections) || [];
 const connName = (id) => (supConns().find((c) => c.id === id) || {}).name || "a removed connection";
-const usd = (v) => (v === null || v === undefined ? "n/a" : `$${Number(v).toFixed(Number(v) < 1 ? 4 : 2)}`);
+// cents as usual; a fraction of a cent (one AI call can cost that) keeps four places, and nothing is $0.00
+const usd = (v) => { if (v === null || v === undefined) return "n/a"; const n = Number(v), a = Math.abs(n); return `$${n.toFixed(a > 0 && a < 0.01 ? 4 : 2)}`; };
 const pctx = (v) => (v === null || v === undefined ? "n/a" : `${Math.round(v * 100)}%`);
 const PTYPE = { openai_compatible: "OpenAI-compatible API", anthropic: "Anthropic API", local: "Local / self-hosted",
   demo_script: "Demo script (not a provider)", bedrock: "AWS Bedrock" };
@@ -653,7 +670,7 @@ function vWorkforce() {
   const alloc = Object.values(L.allocated || {}).reduce((a, b) => a + b, 0);
   const tile = (v, l) => `<div class="tile"><b>${v}</b><span>${l}</span></div>`;
   const workers = (wf.workers || []).map((w) => `<div class="card stack">
-      <div class="between"><div><span class="caps">${esc(w.role)} · ${esc(w.id)}</span><h2 style="font-size:19px">${esc(w.title)}</h2></div>
+      <div class="between"><div style="min-width:0;overflow-wrap:anywhere"><span class="caps">${esc(w.role)} · ${esc(w.id)}</span><h2 style="font-size:19px">${esc(w.title)}</h2></div>
         <span class="pill teal">${esc(w.model)}</span></div>
       <div class="kv"><span>Budget allocated, spent</span><span class="mono">${usd(w.budget.allocated)}, ${usd(w.budget.spent)}</span></div>
       <div class="kv"><span>Verified, first pass, reworks</span><span class="mono">${w.performance.verified || 0}, ${w.performance.first_pass || 0}, ${w.performance.reworks || 0}</span></div>
@@ -700,25 +717,27 @@ function companyPack(f) {
   const p = f.company_pack;
   if (!p) return "";
   const docs = (p.documents || []).map((d) => `<div class="kv"><span>${esc(d.title)}<br><span class="small muted">${esc(d.author)}${d.types.length ? " · " + esc(d.types.join(", ")) : ""}</span></span><span style="color:${d.verified ? "var(--green)" : "var(--muted)"};font-weight:600">${d.verified ? "verified" : "not verified"}</span></div>`).join("") || `<p class="small muted">No documents in this project.</p>`;
-  const dec = (p.ceo_decisions || []).map((d) => `<div class="small">${esc(d.kind.replace(/_/g, " "))}: ${esc(d.problem)}${d.outcome ? ` <b>${esc(d.outcome === "settled_by_cofounder" ? "settled by its cofounder" : d.outcome.replace(/_/g, " "))}</b>` : ""}</div>`).join("") || `<p class="small muted">None.</p>`;
+  const said = (d) => (d.status === "approved" ? "approved" : "turned down");
+  const dec = (p.ceo_decisions || []).map((d) => `<div class="kv"><span>${esc(KIND_TITLE[d.kind] || d.kind)}${d.task ? `: ${esc(d.task)}` : ""}</span><span style="color:${d.status === "approved" ? "var(--green)" : "var(--red)"};font-weight:600">${said(d)}</span></div>`).join("") || `<p class="small muted">None.</p>`;
   const oc = p.outcome || {};
   const measures = (oc.measures || []).map((m) => `<tr><td>${esc(m.measure)}</td><td>${esc(m.target)}</td><td>${esc(m.rethink_below)}</td></tr>`).join("");
   const guesses = (p.guesses || []).map((a) => `<div class="small"><span class="pill ${a.tested === "passed its checks" ? "green" : "amber"}">${esc(a.tested)}</span> ${esc(a.text)} <span class="muted">(${esc(a.risk)} risk${(a.tasks || []).length ? ", checked by " + esc(a.tasks.join(", ")) : ""})</span></div>`).join("");
   const steps = (p.your_next_steps || []).map((x) => `<li>${esc(x.step)}</li>`).join("");
   const n = p.numbers, c = (n || {}).computed || {}, cur = (n || {}).currency || "";
-  const NUM = [["margin_per_customer", "Margin per customer, a month", (v) => `${cur} ${Math.round(Number(v)).toLocaleString()}`], ["payback_months", "Months to earn back what a customer cost to win", (v) => v],
-    ["lifetime_value", "What a customer is worth over its life", (v) => `${cur} ${Math.round(Number(v)).toLocaleString()}`], ["break_even_month", "Month the company stops losing money", (v) => v ?? "not within ten years"],
-    ["funding_needed", "Money needed to get there", (v) => `${cur} ${Math.round(Number(v)).toLocaleString()}`], ["reaches_profit_before_money_runs_out", "Reaches profit before the money runs out", (v) => (v ? "yes" : "no")]];
+  const money = (v) => { try { return new Intl.NumberFormat("en-IN", { style: "currency", currency: cur, maximumFractionDigits: 0 }).format(Number(v)); } catch (e) { return `${cur} ${Math.round(Number(v)).toLocaleString("en-IN")}`; } };
+  const NUM = [["margin_per_customer", "Margin per customer, a month", money], ["payback_months", "Months to earn back what a customer cost to win", (v) => v],
+    ["lifetime_value", "What a customer is worth over its life", money], ["break_even_month", "Month the company stops losing money", (v) => v ?? "not within ten years"],
+    ["funding_needed", "Money needed to get there", money], ["reaches_profit_before_money_runs_out", "Reaches profit before the money runs out", (v) => (v ? "yes" : "no")]];
   const nums = n ? NUM.filter(([k]) => k in c).map(([k, l, f]) => `<div class="kv"><span>${l}</span><span class="mono">${esc(f(c[k]))}</span></div>`).join("") : "";
   return `<div class="card stack"><div class="between"><h2 style="font-size:17px">Company Pack</h2><span class="pill teal">${p.ceo_interventions} CEO decision${p.ceo_interventions === 1 ? "" : "s"}</span></div>
     <p class="small muted" style="margin:0">What your founding team hands you: what you set out to get and how you'll know it worked, the guesses it rests on, the numbers the platform recomputed, every document and whether it passed its check, and your decisions. The team settled ${p.settled_by_the_team} questions among itself.</p>
-    ${(oc.outcomes || []).length ? `<h3 style="font-size:14px;margin:6px 0 0">What you set out to get</h3><ul class="small" style="margin:0;padding-left:18px">${oc.outcomes.map((o) => `<li>${esc(o)}</li>`).join("")}</ul>` : ""}
-    ${measures ? `<h3 style="font-size:14px;margin:6px 0 0">How you'll know it worked</h3><div class="tscroll"><table class="tbl"><thead><tr><th>Measure</th><th>Target</th><th>Rethink below</th></tr></thead><tbody>${measures}</tbody></table></div>` : ""}
-    ${guesses ? `<h3 style="font-size:14px;margin:6px 0 0">The guesses it rests on, riskiest first</h3>${guesses}` : ""}
-    ${nums ? `<h3 style="font-size:14px;margin:6px 0 0">The numbers, recomputed by the platform</h3>${nums}<p class="small muted" style="margin:0">Every input is marked as an assumption, measured, or sourced in the financial model.</p>` : ""}
-    ${steps ? `<h3 style="font-size:14px;margin:6px 0 0">Next steps only you can take</h3><ul class="small" style="margin:0;padding-left:18px">${steps}</ul>` : ""}
-    <h3 style="font-size:14px;margin:6px 0 0">Documents</h3>${docs}
-    ${(p.settled_for_you || []).length ? `<h3 style="font-size:14px;margin:6px 0 0">Settled for you by a cofounder</h3>${p.settled_for_you.map((d) => `<div class="small">${esc(d.by)}: ${esc(d.problem)}</div>`).join("")}` : ""}<h3 style="font-size:14px;margin:6px 0 0">Your decisions</h3>${dec}
+    ${(oc.outcomes || []).length ? `<div class="pack-sec" data-pack="outcomes"><h3>What you set out to get</h3><ul class="small" style="margin:0;padding-left:18px">${oc.outcomes.map((o) => `<li>${esc(o)}</li>`).join("")}</ul></div>` : ""}
+    ${measures ? `<div class="pack-sec" data-pack="measures"><h3>How you'll know it worked</h3><div class="tscroll"><table class="tbl"><thead><tr><th>Measure</th><th>Target</th><th>Rethink below</th></tr></thead><tbody>${measures}</tbody></table></div></div>` : ""}
+    ${guesses ? `<div class="pack-sec" data-pack="guesses"><h3>The guesses it rests on, riskiest first</h3>${guesses}</div>` : ""}
+    ${nums ? `<div class="pack-sec" data-pack="numbers"><h3>The numbers, recomputed by the platform</h3>${nums}<p class="small muted" style="margin:0">Every input is marked as an assumption, measured, or sourced in the financial model.</p></div>` : ""}
+    ${steps ? `<div class="pack-sec" data-pack="steps"><h3>Next steps only you can take</h3><ul class="small" style="margin:0;padding-left:18px">${steps}</ul></div>` : ""}
+    <div class="pack-sec" data-pack="documents"><h3>Documents</h3>${docs}</div>
+    ${(p.settled_for_you || []).length ? `<h3 style="font-size:14px;margin:6px 0 0">Settled for you by a cofounder</h3>${p.settled_for_you.map((d) => `<div class="kv"><span>${esc(KIND_TITLE[d.kind] || d.kind)}${d.task ? `: ${esc(d.task)}` : ""}</span><span style="color:var(--green);font-weight:600">${said(d)} by the ${esc(d.by)}</span></div>`).join("")}` : ""}<h3 style="font-size:14px;margin:6px 0 0">Your decisions</h3>${dec}
     ${(p.ceo_informed || []).length ? `<h3 style="font-size:14px;margin:6px 0 0">What Cynqra changed and told you</h3>${p.ceo_informed.map((n) => `<div class="small">${esc(n.headline)}</div>`).join("")}` : ""}</div>`;
 }
 
@@ -847,9 +866,9 @@ function vWork() {
     return `<span class="small muted">${esc(statusText(t))}</span>`;
   };
   const colHtml = cols.map(([name, sts]) => `<div class="col"><span class="caps" style="font-weight:600">${name}</span>
-    ${ts.filter((t) => sts.includes(t.status)).map((t) => `<div class="tcard ${active === t.id ? "active" : ""} ${fresh("t:" + t.id + ":" + t.status)}"><span class="meta">${esc(t.id)} · ${esc(t.owner_worker_id)} · ${esc(t.risk_tier)}</span>
+    ${ts.filter((t) => sts.includes(t.status)).map((t) => `<div class="tcard ${active === t.id ? "active" : ""} ${fresh("t:" + t.id + ":" + t.status)}" data-task="${esc(t.id)}"><span class="meta" title="${esc(wt(t.owner_worker_id))}">${esc(t.id)} · ${esc(t.owner_worker_id)} · ${esc(t.risk_tier)}</span>
       <span class="ttl">${esc(t.title)}</span>${note(t)}</div>`).join("")}</div>`).join("");
-  const tape = (st.protocols || []).slice().reverse().map((p) => `<div class="pobj ${esc(p.kind)} ${fresh("p:" + p.id)}"><span class="h">${esc(p.kind)} · ${esc(p.sender)} to ${esc(p.to)} · ${esc(p.task_id)}</span>
+  const tape = (st.protocols || []).slice().reverse().map((p) => `<div class="pobj ${esc(p.kind)} ${fresh("p:" + p.id)}" data-task="${esc(p.task_id)}"><span class="h">${esc(p.kind)} · ${esc(wt(p.sender))} to ${esc(wt(p.to))} · ${esc(p.task_id)}</span>
     <span class="small">${esc(p.summary)}</span>${p.artifacts && p.artifacts.length ? `<span class="small muted mono">${esc(p.artifacts.join(", "))}</span>` : ""}</div>`).join("");
   return `<p class="small muted" style="margin:0">Completed means a worker says it is done. Verified means the Verification Service agrees and, for a team member's work, its cofounder approved it.</p>
     <div class="work"><div class="cols">${colHtml}</div>
@@ -862,9 +881,9 @@ function vDecisions() {
     const extra = d.kind === "decision" ? `<label class="lbl" for="edit_${d.id}">Edit the rule before approving (optional)</label>
         <textarea class="note" id="edit_${d.id}">${esc(d.recommendation)}</textarea>` : d.kind === "budget_breaker" ?
       `<label class="lbl" for="usd_${d.id}">New budget, US dollars</label><input type="number" id="usd_${d.id}" step="0.5" value="${esc((Math.max(st.budget.settings.budget_usd, st.budget.ledger.spent_total) * 1.5).toFixed(2))}">` : "";
-    const side = d.extra && d.extra.side_action ? `<div class="deny"><span class="h">${esc(d.extra.side_action.status.toUpperCase())} · external_message</span><span class="small">${esc(d.extra.side_action.summary)} ${esc(d.extra.side_action.reason)}</span></div>` : "";
+    const side = d.extra && d.extra.side_action ? `<div class="deny"><span class="h">${d.extra.side_action.status === "denied" ? "Stopped" : esc(d.extra.side_action.status)}: ${actionTitle("external_message")}</span><span class="small">${esc(d.extra.side_action.summary)} ${esc(d.extra.side_action.reason)}</span></div>` : "";
     return `<div class="dcard ${fresh("d:" + d.id)}"><div class="between"><span class="mono small muted">${esc(d.id)} · from ${esc(wt(d.source))}${d.extra && d.extra.endorsed_by ? `, endorsed by ${esc(wt(d.extra.endorsed_by))}` : ""}</span>${riskPill(d.risk)}</div>
-      <h2>${esc(KIND_TITLE[d.kind] || d.kind)}${d.task_id ? `: ${esc(d.task_id)}` : ""}</h2>
+      <h2>${esc(KIND_TITLE[d.kind] || d.kind)}${d.task_id ? `: ${esc(taskTitle(d.task_id))}` : ""}</h2>
       <div class="dgrid"><div><span class="caps">Problem</span><p>${esc(d.problem)}</p></div><div><span class="caps">Recommendation</span><p>${esc(d.recommendation)}</p></div>
         <div><span class="caps">Evidence</span><p>${esc((d.evidence_refs || []).join("; ") || "none")}</p></div><div><span class="caps">What would change this</span><p>${esc(d.what_would_change_this)}</p></div></div>
       <div class="dline"><span><b>Cost</b>${esc(d.cost)}</span><span><b>Risk</b>${esc(d.risk)}</span><span><b>Confidence</b>${esc(d.confidence)}</span>${["escalation", "budget_breaker"].includes(d.kind) ? `<span><b>Severity</b>${esc(d.severity)}</span>` : ""}</div>
@@ -874,10 +893,11 @@ function vDecisions() {
         <button class="btn" data-decide="reject" data-id="${d.id}" ${S.busy ? "disabled" : ""}>Reject</button>
         ${EVIDENCE_KINDS.includes(d.kind) ? `<button class="btn" data-decide="request_evidence" data-id="${d.id}" ${S.busy ? "disabled" : ""}>Request more evidence</button>` : ""}</div></div>`;
   };
-  const answered = (st.decisions.answered || []).map((d) => `<div class="kv"><span>${esc(KIND_TITLE[d.kind] || d.kind)}${d.task_id ? " · " + esc(d.task_id) : ""}</span>
-    <span style="color:${d.status === "approved" ? "var(--green)" : "var(--red)"}">${esc(d.outcome_label)}</span></div>`).join("") || `<span class="muted small">Nothing yet.</span>`;
-  const denied = (st.denied || []).map((a) => `<div class="deny"><span class="h">DENY · ${esc(a.action_type)} · ${esc(a.worker_id)} · ${esc(a.task_id)}</span><span class="small">${esc(a.policy_reason)}</span></div>`).join("") || `<span class="muted small">Nothing stopped yet.</span>`;
-  return `<p class="small muted" style="margin:0">Every answer is kept as a label (D-10). Escalations today: ${st.metrics.escalations_today} of ${st.metrics.escalation_budget} (D-29).</p>
+  const label = (d) => (d.outcome_label === "settled_by_cofounder" ? `settled by the ${wt(d.resolved_by)}` : String(d.outcome_label || d.status).replace(/_/g, " "));
+  const answered = (st.decisions.answered || []).map((d) => `<div class="kv"><span>${esc(KIND_TITLE[d.kind] || d.kind)}${d.task_id ? ": " + esc(taskTitle(d.task_id)) : ""}</span>
+    <span style="color:${d.status === "approved" ? "var(--green)" : "var(--red)"}">${esc(label(d))}</span></div>`).join("") || `<span class="muted small">Nothing yet.</span>`;
+  const denied = (st.denied || []).map((a) => `<div class="deny"><span class="h">Stopped: ${esc(actionTitle(a.action_type))} by the ${esc(wt(a.worker_id))}, on ${esc(taskTitle(a.task_id))}</span><span class="small">${esc(a.policy_reason)}</span></div>`).join("") || `<span class="muted small">Nothing stopped yet.</span>`;
+  return `<p class="small muted" style="margin:0">Every answer you give is kept on the record. Brought to you today: ${st.metrics.escalations_today} of at most ${st.metrics.escalation_budget}; anything past that waits in a daily digest.</p>
     <div class="dec"><div class="dec-main">${main.map((d, i) => card(d, i === 0)).join("") || `<div class="card"><p class="muted" style="margin:0">Nothing waits on you. The organization is working.</p></div>`}
       ${dig.length ? `<div class="card"><h3 style="font-size:15px">Daily digest, over the escalation budget</h3>${dig.map((d) => card(d, false)).join("")}</div>` : ""}</div>
       <div class="dec-side"><div class="card stack"><h3 style="font-size:15px">Answered</h3>${answered}</div>

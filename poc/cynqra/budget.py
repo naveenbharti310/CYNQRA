@@ -31,6 +31,13 @@ VERIFY_S_DEFAULT = {"document": 1.0, "decision": 0.0, "code": 20.0, "forecast": 
                     "deploy": 30.0}
 
 
+def dollars(v: float) -> str:
+    """Dollars as the founder reads them: cents as usual; a fraction of a cent (one AI call can cost that) keeps four
+    places."""
+    a = abs(float(v))
+    return f"${float(v):.{4 if 0 < a < 0.01 else 2}f}"
+
+
 def ledger(store) -> dict:
     return store.get("budget", "ledger") or {
         "allocated": {}, "spent": {}, "by_worker": {}, "by_layer": {k: 0.0 for k in LAYERS}, "reserve": 0.0,

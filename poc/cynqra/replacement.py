@@ -137,11 +137,11 @@ def _cost_line(before: float | None, after: float | None, old: str | None = None
     if after is None:
         return out
     if before is None:
-        return out + f" Expected cost of a verified task: ${after:.4f}."
+        return out + f" Expected cost of a verified task: {budget.dollars(after)}."
     d = after - before
     how = "more" if d > 1e-9 else "less" if d < -1e-9 else "the same"
-    return (out + f" Expected cost of a verified task: ${after:.4f} against ${before:.4f} before"
-            + (f" (${abs(d):.4f} {how})." if how != "the same" else ", the same."))
+    return (out + f" Expected cost of a verified task: {budget.dollars(after)} against {budget.dollars(before)} before"
+            + (f" ({budget.dollars(abs(d))} {how})." if how != "the same" else ", the same."))
 
 
 def inform(run, kind: str, *, worker_id: str, task_id: str | None, headline: str, detail: str,
@@ -512,7 +512,8 @@ def _outage(run, t: dict, m: dict, cause: str, exc) -> dict:
         recommendation=f"Let {alt['model']} stand in until {m['name']} answers again; each worker then returns to "
                        f"its own AI. Reject to wait instead." + _cost_line(before, after, m["id"], alt["model_id"], run),
         risk="low", confidence="medium",
-        cost=f"${after:.4f} a task on {alt['model']}" + (f" against ${before:.4f}" if before is not None else ""),
+        cost=f"{budget.dollars(after)} a task on {alt['model']}"
+             + (f" against {budget.dollars(before)}" if before is not None else ""),
         evidence=[f"{m['name']}: {str(exc)[:200]}"], change=f"{m['name']} answering again.", task_id=t["id"],
         source="replacement_engine", extra={"model_id": m["id"], "stand_in": alt["model_id"], "cause": cause})
     _park(run, t, {m["id"]}, cause, d["id"], _down_until(run, m))

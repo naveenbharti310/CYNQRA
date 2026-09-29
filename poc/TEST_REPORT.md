@@ -90,5 +90,8 @@ run on the build machines of `.github/workflows/cynqra-desktop.yml`.
   drawn from); no run crashes after the fixes. Before them, five kinds of answer crashed the run.
 - After the cofounder change, 75 more runs (25 per demo) with the cofounders', teams' and reviews' answers garbled too: no run crashes. A hostile team whose every answer carries markup that would run code, walked through every screen including the org chart: shown as text, run nowhere.
 - pyflakes reports nothing on `cynqra/`, the tests, the entry points and the demos' code.
-- The demo video's recording script (`demo/record_demo.js`) was not rerun: it still records the earlier
-  candidate-tracker demo, and re-recording it on Bluedip is on the roadmap.
+- The demo video was recorded again on Bluedip with `demo/record_demo.js`. The recording checks that every highlight
+  sits fully above the captions (none was cut) and logs each caption, screen change and caught moment; the frame at
+  every caption and around every screen change was reviewed. A walk of every screen at the video's size
+  (1600 x 900) with a layout check (anything past the screen's edge, wider than its box, or out of its card) found
+  nothing after the fixes.

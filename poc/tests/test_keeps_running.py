@@ -193,6 +193,19 @@ class UpdateAndMemoryTests(unittest.TestCase):
         self.assertIn("Risk and compliance register", f["Register the company"]["prepared_in"])
         self.assertIn("a professional should review it", f["Register the company"]["status"])
         self.assertIn("Financial model", f["Tax registration and invoicing"]["prepared_in"])
+        u = e.update()
+        self.assertEqual(u["learned"], [
+            "Footfall forecast: on days it had not seen, the forecast was off by 34.34 covers a day; repeating the same "
+            "weekday of the week before was off by 8.86",
+            "Financial model: for what a customer is worth over its life, the model says 49,975, the inputs give 43,725",
+            "Demand and offer engine: the test \"the cap is never exceeded\" failed"], "the founder reads names, not keys")
+        settled = [d for d in u["decided"] if d["by"] != "you"]
+        self.assertEqual([(d["by"], d["status"], d["task"]) for d in settled],
+                         [("CTO", "approved", "Review and merge release 1")])
+        created = {ev["aggregate_id"]: ev["payload"] for ev in e.store.events() if ev["event_type"] == "decision.created"}
+        self.assertEqual(created["dec_t_16"]["settled_by"], "w_cto",
+                         "the screen tells the founder, and does not say it needs them")
+        self.assertIsNone(created["dec_t_17"]["settled_by"])
         e.close()
 
     def test_the_next_project_like_this_one_gets_a_track_record(self):

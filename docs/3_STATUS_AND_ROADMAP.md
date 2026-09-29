@@ -87,8 +87,8 @@ Hugging Face PRO. Nothing in it is scripted: it is the test of whether real AI m
   each cofounder gets its own AI once the organization is approved.
 - The evidence for choosing models is thin (1 to 3 trial tasks per model) until more projects run.
 - The desktop app keeps everything on one computer; there is no multi-user version.
-- The demo video (`poc/demo/`, recorded 29 September 2026) shows the Bluedip demo in demo mode; a video of a run on
-  real AI models comes after that run.
+- The demo video (`poc/demo/`, recorded 29 September 2026, about 7 minutes 25 seconds) shows the Bluedip demo in demo
+  mode; a video of a run on real AI models comes after that run.
 - The independent challenge of a team runs on the same AI Cynqra uses for planning, with its own brief to make the
   team smaller; what is cut is decided by the platform's removal test. Running it on a different AI
   when more than one is connected is a next step.

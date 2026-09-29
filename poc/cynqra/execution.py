@@ -357,7 +357,7 @@ def settle(run, t: dict, pending: dict, extra: dict, settler: str, why: str) -> 
     run.event("decision.approved", "decision", d["id"], {"kind": d["kind"], "outcome_label": d["outcome_label"],
               "task_id": t["id"], "by": settler}, actor=settler, actor_type="worker", correlation_id=t["id"])
     replacement.inform(run, "settled_by_cofounder", worker_id=settler, task_id=t["id"],
-                       headline=f"The {title} decided: {pending['problem'][:120]}",
+                       headline=f"The {title} approved: {t['title']}",
                        detail=f"{pending['recommendation'][:300]} Settled by the {title} because {why}. You can change "
                               "it later.")
     t.update({"status": "APPROVED", "decision_id": d["id"], "pending_proposal": None})

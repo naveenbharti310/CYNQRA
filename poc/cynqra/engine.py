@@ -33,7 +33,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from . import binding, budget, delivery, deploy, execution, gateway, objective, performance, planner, policy
+from . import binding, budget, delivery, deploy, execution, gateway, numbers, objective, performance, planner, policy
 from . import replacement, roles, seats, synthesis
 from . import settings as project_settings
 from .db import IST, Store, now
@@ -274,7 +274,8 @@ class Engine:
              "in_digest": digest_it, "extra": extra or {}}
         self.store.put("decision", did, d)
         self.event("decision.created", "decision", did, {"kind": kind, "risk": risk, "task_id": task_id,
-                   "in_digest": digest_it, "severity": severity}, actor=source,
+                   "in_digest": digest_it, "severity": severity,
+                   "settled_by": (extra or {}).get("settled_by")}, actor=source,
                    actor_type="worker" if worker_raised else "service", correlation_id=task_id or did,
                    policy_decision="REQUIRE_APPROVAL")
         return d
@@ -404,7 +405,7 @@ class Engine:
                           recommendation=f"Raise the budget from ${cap:.2f} to ${max(cap, L['spent_total']) * 1.5:.2f}, "
                                          "or stop the run.",
                           risk="HIGH", confidence="high", cost="none until work resumes",
-                          evidence=[f"spent ${L['spent_total']:.4f} of ${cap:.2f}"],
+                          evidence=[f"spent {budget.dollars(L['spent_total'])} of {budget.dollars(cap)}"],
                           change="Nothing: the cap is yours to set.", severity="SEV-2", source="budget_engine")
 
     # --- Stage 0: the founder's inputs ---------------------------------------------------------------------------
@@ -600,7 +601,7 @@ class Engine:
             except (TypeError, ValueError) as exc:
                 raise EngineError("budget_usd must be a number") from exc
             if new <= spent:
-                raise EngineError(f"the new budget must be above the ${spent:.4f} already spent")
+                raise EngineError(f"the new budget must be above the {budget.dollars(spent)} already spent")
 
     def _after_workforce(self, d: dict, action: str) -> None:
         if action != "approve":
@@ -651,7 +652,7 @@ class Engine:
               f"Critical path: {' > '.join(p['critical_path'])}"]
         ev += [f"{t['id']}: {t['title']} ({t['kind']}), {t['owner_worker_id']} on {self.model_of(t['owner_worker_id'])}"
                for t in new]
-        ev += [f"{k}: ${v['usd']:.4f} ({v['basis']})" for k, v in f["layers"].items()]
+        ev += [f"{k}: {budget.dollars(v['usd'])} ({v['basis']})" for k, v in f["layers"].items()]
         ev += f["warnings"]
         if p["uncovered_requirements"]:
             ev.append("Requirements no task names: " + ", ".join(p["uncovered_requirements"]))
@@ -672,8 +673,8 @@ class Engine:
                       recommendation="Approve the roadmap and the budget. Work starts; MEDIUM and HIGH steps still "
                                      "come back to you.",
                       risk="LOW" if f["fits"] else "MEDIUM", confidence="high" if f["fits"] else "medium",
-                      cost=f"${f['subtotal_usd']:.4f} forecast of the ${f['cap_usd']:.2f} cap, reserve "
-                           f"${f['reserve_usd']:.4f}",
+                      cost=f"{budget.dollars(f['subtotal_usd'])} forecast of the {budget.dollars(f['cap_usd'])} cap, "
+                           f"reserve {budget.dollars(f['reserve_usd'])}",
                       evidence=ev, change="A task that does not serve the objective, a missing one, or a budget line "
                                           "that looks wrong.", source="execution_planner",
                       extra={"released": [x["worker"] for x in wc["idle"]] if n == 1 else [], "cycle": n})
@@ -996,19 +997,25 @@ class Engine:
         """What one failed check found, in a line."""
         c = v.get("checks") or {}
         if c.get("documents"):
-            return c["documents"][0].get("why", "")
-        if (c.get("backtest") or {}).get("why"):
-            return c["backtest"]["why"]
+            return numbers.plain(c["documents"][0].get("why", ""))
+        bt = c.get("backtest") or {}
+        if bt.get("model_mae") is not None and bt.get("baseline_mae") is not None and not bt.get("passed"):
+            return (f"on days it had not seen, the forecast was off by {bt['model_mae']} covers a day; repeating the "
+                    f"same weekday of the week before was off by {bt['baseline_mae']}")
+        if bt.get("why"):
+            return bt["why"]
         failed = c.get("failed") or []
         if failed:
             name = failed[0].get("id") if isinstance(failed[0], dict) else str(failed[0])
-            return f"the test {name.rsplit('.', 1)[-1]} failed" + (f", and {len(failed) - 1} more" if len(failed) > 1 else "")
+            name = name.rsplit(".", 1)[-1].removeprefix("test_").replace("_", " ")
+            return f"the test \"{name}\" failed" + (f", and {len(failed) - 1} more" if len(failed) > 1 else "")
         return "a check failed and the work was fixed"
 
     def update(self) -> dict:
         """The founder's update, in plain words: the numbers, what was learned, what was decided, what is at risk, and
         what is waiting for them. Built from the record; no model writes it."""
         tasks = self.tasks()
+        title = lambda tid: (self.store.get("task", tid) or {}).get("title") or tid  # noqa: E731
         L = budget.ledger(self.store)
         cap = project_settings.get(self.store)["budget_usd"]
         caught = [v for v in self.store.all("verification") if v["verdict"] != "VERIFIED"]
@@ -1030,10 +1037,11 @@ class Engine:
                             "spent_usd": round(L["spent_total"], 4), "budget_usd": cap,
                             "live": bool(self.live_url()), "live_checks_ok": sum(1 for x in live if x["ok"]),
                             "live_checks": len(live)},
-                "learned": [f"{v['task_id']}: {self._caught(v)}" for v in caught][-5:],
+                "learned": [f"{title(v['task_id'])}: {self._caught(v)}" for v in caught][-5:],
                 "decided": [{"what": d["problem"][:140], "by": "you" if d.get("resolved_by") == "founder" else
                              (self.worker(d["resolved_by"]) or {}).get("title", d.get("resolved_by")),
-                             "outcome": d["outcome_label"]} for d in decided][-8:],
+                             "outcome": d["outcome_label"], "status": d["status"], "kind": d["kind"],
+                             "task": title(d["task_id"]) if d.get("task_id") else ""} for d in decided][-8:],
                 "at_risk": risk,
                 "waiting_for_you": [{"id": d["id"], "what": d["problem"][:160]} for d in pend if not d.get("in_digest")],
                 "feedback": [f["text"] for f in self.store.all("feedback") if not f.get("used_in")]}
