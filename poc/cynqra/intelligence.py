@@ -111,8 +111,17 @@ SCHEMAS = {
     "objective": {"type": "object", "properties": {**{k: S for k in OBJECTIVE_KEYS}, "inferred_fields": LIST,
                                                    "missing_fields": LIST},
                   "required": OBJECTIVE_KEYS + ["inferred_fields", "missing_fields"]},
-    "requirements": {"type": "object", "required": ["outcomes", "requirements", "workstreams"], "properties": {
+    "requirements": {"type": "object", "required": ["outcomes", "requirements", "risks", "assumptions", "measures",
+                                                     "workstreams"], "properties": {
         "outcomes": LIST,
+        "assumptions": {"type": "array", "items": {"type": "object", "properties": {
+            "text": S, "kind": {"type": "string", "enum": ["desirability", "viability", "feasibility"]},
+            "risk": {"type": "string", "enum": ["high", "medium", "low"]}, "tested_by": LIST, "founder_step": S},
+            "required": ["text", "kind", "risk", "tested_by", "founder_step"]}},
+        "measures": {"type": "array", "items": {"type": "object", "properties": {
+            "measure": S, "target": S, "rethink_below": S}, "required": ["measure", "target", "rethink_below"]}},
+        "risks": {"type": "array", "items": {"type": "object", "properties": {
+            "area": {"type": "string", "enum": roles.AREAS}, "text": S}, "required": ["area", "text"]}},
         "requirements": {"type": "array", "items": {"type": "object", "properties": {
             "id": S, "area": {"type": "string", "enum": roles.AREAS}, "text": S, "verification": S},
             "required": ["id", "area", "text", "verification"]}},
@@ -122,14 +131,20 @@ SCHEMAS = {
     "cofounders": {"type": "object", "required": ["summary", "cofounders"], "properties": {
         "summary": S,
         "cofounders": {"type": "array", "items": {"type": "object", "properties": {
-            "role": {"type": "string", "enum": roles.COFOUNDERS}, "why": S, "requirement_ids": LIST},
-            "required": ["role", "why", "requirement_ids"]}}}},
+            "role": {"type": "string", "enum": roles.COFOUNDERS}, "why": S, "requirement_ids": LIST, "risk_ids": LIST},
+            "required": ["role", "why", "requirement_ids", "risk_ids"]}}}},
     "team": {"type": "object", "required": ["summary", "roles"], "properties": {
         "summary": S,
         "roles": {"type": "array", "items": {"type": "object", "properties": {
             "role": {"type": "string", "enum": [n for n in roles.ROLES if n not in roles.COFOUNDERS]},
-            "quantity": {"type": "integer"}, "why": S, "requirement_ids": LIST, "field": S, "title": S},
-            "required": ["role", "quantity", "why", "requirement_ids"]}}}},
+            "quantity": {"type": "integer"}, "why": S, "requirement_ids": LIST, "supports": LIST, "risk_ids": LIST,
+            "field": S, "title": S},
+            "required": ["role", "quantity", "why", "requirement_ids", "supports", "risk_ids"]}}}},
+    "challenge": {"type": "object", "required": ["seats", "failure_stories"], "properties": {
+        "seats": {"type": "array", "items": {"type": "object", "properties": {
+            "seat": S, "verdict": {"type": "string", "enum": ["keep", "cut", "merge", "advisor", "later"]},
+            "into": S, "why": S}, "required": ["seat", "verdict", "why"]}},
+        "failure_stories": LIST}},
     "review": {"type": "object", "properties": {"verdict": {"type": "string", "enum": ["approve", "revise"]},
                                                  "note": S}, "required": ["verdict", "note"]},
     "handoff": {"type": "object", "properties": {"artifacts": LIST, "context_ref": S, "acceptance_check": S},
@@ -288,10 +303,10 @@ class ScriptedSource:
                              "Switch to live mode to build your own.")
         return out, self._usage()
 
-    def decompose(self, objective: dict, feedback: str = "") -> tuple[dict, dict]:
+    def decompose(self, objective: dict, feedback: str = "", note: str = "") -> tuple[dict, dict]:
         return self._copy("requirements"), self._usage()
 
-    def cofounders(self, objective: dict, requirements: dict, note: str = "", feedback: str = "") -> tuple[dict, dict]:
+    def cofounders(self, objective: dict, requirements: dict, note: str = "", feedback: str = "", **_) -> tuple[dict, dict]:
         wf = self._copy("workforce")
         return {"summary": wf.get("summary", ""), "cofounders": wf.get("cofounders", [])}, self._usage()
 
@@ -299,8 +314,18 @@ class ScriptedSource:
         team = (self._copy("workforce").get("teams") or {}).get(cofounder)
         return (team if isinstance(team, dict) else {"summary": "", "roles": []}), self._usage()
 
+    def challenge(self, objective: dict, requirements: dict, seats: list[dict], **_) -> tuple[dict, dict]:
+        """The independent challenge of the proposed team: the scenario's words, else no objection."""
+        return (self._copy("challenge") if "challenge" in self.data else {"seats": [], "failure_stories": []}), \
+            self._usage()
+
     def plan(self, objective: dict, workers: list[dict], requirements: dict, note: str = "", feedback: str = "",
-             planner: str = "system", persona: str = "") -> tuple[dict, dict]:
+             planner: str = "system", persona: str = "", cycle: int = 1, **_) -> tuple[dict, dict]:
+        if cycle > 1:
+            later = (self.data.get("cycles") or {}).get(str(cycle))
+            if not later:
+                raise IntelligenceError(f"the demo's script has no plan for cycle {cycle}; in live mode the team plans it")
+            return json.loads(json.dumps(later["plan"])), self._usage(planner)
         return self._copy("plan"), self._usage(planner)
 
     def assign(self, task: dict, worker: str = "system", **_) -> tuple[dict, dict]:
@@ -447,8 +472,8 @@ class ModelSource:
         data["inferred_fields"] = list(dict.fromkeys(list(data.get("inferred_fields") or []) + filled))
         return data, _add(usage, usage2)
 
-    def decompose(self, objective: dict, feedback: str = "") -> tuple[dict, dict]:
-        """Stage 1: the objective as requirements, workstreams and their dependencies."""
+    def decompose(self, objective: dict, feedback: str = "", note: str = "") -> tuple[dict, dict]:
+        """Stage 1: the objective as outcomes, requirements, risks, workstreams and their dependencies."""
         prompt = (self._head("You are Cynqra's Objective Intelligence.", objective, []) +
                   "Decompose the objective into requirements. Cover, where the objective calls for them: product "
                   "outcomes and success criteria, functional and non-functional requirements, AI/ML and data "
@@ -459,11 +484,20 @@ class ModelSource:
                   "this company's field that no general role holds is its own requirement (domain). Each "
                   "requirement has an area, one of "
                   f"{', '.join(roles.AREAS)}, a sentence, and how it will be verified. Group the requirements into "
-                  "workstreams and say which workstreams depend on which. Add nothing the founder did not state or "
-                  "clearly imply.\n"
+                  "workstreams and say which workstreams depend on which. List the outcomes: what must be true when "
+                  "the work is done, a few short sentences. List the risks: what must not go wrong for this company "
+                  "(customer data leaking, an offer losing money, a forecast owners stop trusting), each with its "
+                  "area; only the ones this company really faces. List the assumptions: the guesses the idea depends "
+                  "on (people want it, it makes money, it can be built), how bad it is if each is wrong (high, "
+                  "medium, low), the requirement ids whose work tests it, and, when only a person can test it (for "
+                  "example by showing it to five customers), the founder's step in one sentence. List two or three "
+                  "measures: how the founder will know it worked, each with a target and the line below which to "
+                  "rethink. Add nothing the founder did not state or clearly imply. The team is built from this list.\n"
+                  + (f"The founder asked for changes to the previous list: {note}\n" if note else "") +
                   'Return JSON: {"outcomes": ["..."], "requirements": [{"id": "r_01", "area", "text", '
-                  '"verification"}], "workstreams": [{"id", "name", "requirement_ids", "depends_on"}]}'
-                  + self._refused(feedback))
+                  '"verification"}], "risks": [{"area", "text"}], "assumptions": [{"text", "kind", "risk", '
+                  '"tested_by", "founder_step"}], "measures": [{"measure", "target", "rethink_below"}], '
+                  '"workstreams": [{"id", "name", "requirement_ids", "depends_on"}]}' + self._refused(feedback))
         return self._call(prompt, max_tokens=3000, schema=SCHEMAS["requirements"])
 
     @staticmethod
@@ -471,56 +505,99 @@ class ModelSource:
         return "\n".join(f"* {r['role']}: {r['title']}. {r['charter']} Covers: {', '.join(r['areas'])}. "
                          f"Owns: {', '.join(r['owns'])}. At most {r['max']}." for r in roles.catalog() if r["role"] in names)
 
-    def cofounders(self, objective: dict, requirements: dict, note: str = "", feedback: str = "") -> tuple[dict, dict]:
+    @staticmethod
+    def _lists(requirements: dict) -> str:
+        """The confirmed requirements and risks, as every team prompt shows them. The founder's own are marked."""
+        reqs = "\n".join(f"* {r['id']} ({r['area']}): {r['text']}" + (" [the founder's own]" if r.get("owner") ==
+                         "founder" else "") for r in requirements["requirements"])
+        risks = "\n".join(f"* {k['id']} ({k['area']}): {k['text']}" for k in requirements.get("risks") or []) or "* none"
+        return f"Requirements:\n{reqs}\nRisks the company must control:\n{risks}\n"
+
+    @staticmethod
+    def _founder(founder: dict | None) -> str:
+        f = founder or {}
+        from .objective import STAGES
+        leads = ", ".join(roles.role(c)["title"] for c in f.get("leads") or []) or "none"
+        return (f"The founder: stage {STAGES.get(f.get('stage'), f.get('stage') or 'not stated')}; "
+                f"{f.get('hours_per_week', 'unknown')} hours a week; leads themselves: {leads}"
+                + (f"; background: {f['background']}" if f.get("background") else "") + ".\n")
+
+    def cofounders(self, objective: dict, requirements: dict, note: str = "", feedback: str = "",
+                   founder: dict | None = None) -> tuple[dict, dict]:
         """Stage 2, step one: the cofounders the company needs, as a founder would choose them."""
-        reqs = "\n".join(f"* {r['id']} ({r['area']}): {r['text']}" for r in requirements["requirements"])
         prompt = (self._head("You are Cynqra's Workforce Synthesizer.", objective, []) +
                   "The founder is the CEO. Like a founder starting a real company, choose the cofounders this company "
                   "needs to lead it with the founder. Choose only the ones this company needs, each with the reason: "
                   "a product that is software needs a CTO; a company whose customers and product must be defined "
                   "needs a Chief Product Officer; a company whose value depends on money (pricing, margins, funding) "
                   "needs a CFO; a regulated business (payments, lending, insurance, health, children's data) needs "
-                  "a Chief Compliance Officer. A simple internal tool may need only two. Each cofounder proposes its "
-                  "own team next, so name only cofounders here.\n"
-                  f"Cofounder roles:\n{self._catalog(roles.COFOUNDERS)}\nRequirements:\n{reqs}\n"
+                  "a Chief Compliance Officer. A simple internal tool may need only two. A cofounder fills a gap the "
+                  "founder cannot fill: never propose one for an area the founder leads themselves. Each cofounder "
+                  "proposes its own team next, so name only cofounders here, each with the requirement ids it is "
+                  "accountable for and the risk ids it watches.\n" + self._founder(founder) +
+                  f"Cofounder roles:\n{self._catalog(roles.COFOUNDERS)}\n{self._lists(requirements)}"
                   + (f"The founder rejected the previous proposal: {note}\n" if note else "") +
-                  'Return JSON: {"summary": "...", "cofounders": [{"role", "why", "requirement_ids"}]}'
+                  'Return JSON: {"summary": "...", "cofounders": [{"role", "why", "requirement_ids", "risk_ids"}]}'
                   + self._refused(feedback))
         return self._call(prompt, max_tokens=1500, schema=SCHEMAS["cofounders"])
 
     def build_team(self, objective: dict, requirements: dict, cofounder: str, cofounders: list[str],
-                   hired: dict[str, str], note: str = "", feedback: str = "", persona: str = "") -> tuple[dict, dict]:
+                   hired: dict[str, str], note: str = "", feedback: str = "", persona: str = "",
+                   founder: dict | None = None, limit: int = 0) -> tuple[dict, dict]:
         """Stage 2, step two: one cofounder proposes the team for its own area."""
         from .synthesis import hireable  # the platform's rule on who may hire whom, stated to the model
         may = hireable(cofounder, cofounders)
-        reqs = "\n".join(f"* {r['id']} ({r['area']}): {r['text']}" for r in requirements["requirements"])
         others = ", ".join(roles.role(c)["title"] for c in cofounders if c != cofounder) or "none"
         prompt = (self._head(persona, objective, []) +
                   f"You are a cofounder of this company; the founder is the CEO. The other cofounders: {others}. "
                   "Propose the team you need for your own area: which roles, how many of each, why each is needed, "
-                  "and the requirement ids each will cover. Hire only for work in your area, and propose the smallest "
-                  "team that covers it; an empty team is fine if you can do your part yourself. For expertise "
+                  "the requirement ids each one owns (requirement_ids: the work it is answerable for), the ones it "
+                  "only helps with (supports), and the risk ids it watches (risk_ids). Every hire must own something "
+                  "no one else on the team owns, or watch a risk no one else watches: an independent check will try "
+                  "to cut every seat that does not. Hire only for work in your area, and propose the smallest team "
+                  f"that covers it, at most {limit or 'a few'} seats; an empty team is fine if you can do your part "
+                  "yourself. For expertise "
                   "particular to this company's field that no role holds, propose a Specialist with its field and "
                   'title (one per field, such as {"role": "Specialist", "field": "food safety", "title": "Food '
                   'Safety Specialist"}).\n'
                   f"Roles you may hire:\n{self._catalog(may)}\n"
                   + (f"Already hired by the other cofounders, do not hire again: {json.dumps(hired)}\n" if hired else "")
-                  + f"Requirements:\n{reqs}\n"
+                  + self._founder(founder) + self._lists(requirements)
                   + (f"The founder rejected the previous proposal: {note}\n" if note else "") +
-                  'Return JSON: {"summary": "...", "roles": [{"role", "quantity", "why", "requirement_ids"}]}'
-                  + self._refused(feedback))
+                  'Return JSON: {"summary": "...", "roles": [{"role", "quantity", "why", "requirement_ids", '
+                  '"supports", "risk_ids"}]}' + self._refused(feedback))
         return self._call(prompt, max_tokens=1500, schema=SCHEMAS["team"])
 
+    def challenge(self, objective: dict, requirements: dict, seats: list[dict], founder: dict | None = None,
+                  feedback: str = "", **_) -> tuple[dict, dict]:
+        """The independent challenge: a reviewer outside the team whose only job is to make it smaller."""
+        lines = "\n".join(f"* {s['seat']}: {s['title']} x{s['quantity']}, hired by {s['requested_by']}. Why: {s['why']} "
+                          f"Owns: {', '.join(s['owns']) or 'nothing'}. Helps with: {', '.join(s['supports']) or 'nothing'}. "
+                          f"Watches: {', '.join(s['controls']) or 'nothing'}." for s in seats)
+        prompt = (self._head("You are the independent challenger of a proposed team. You are not part of it and gain "
+                             "nothing from its size.", objective, []) + self._founder(founder)
+                  + self._lists(requirements) + f"The proposed team:\n{lines}\n"
+                  "Try to make this team smaller without leaving any requirement or risk without an owner. For each "
+                  "seat that should change, give a verdict: cut (it is not needed), merge (another seat, named in "
+                  "into, can do its work), advisor (needed only for a few questions, not as a full member) or later "
+                  "(not needed until a later stage). Seats you would keep need no entry. Then imagine this company "
+                  "has failed a year from now and write, in one sentence each, the one or two most likely reasons: "
+                  "they show what the team is missing. Be concrete; give the reason for every verdict.\n"
+                  'Return JSON: {"seats": [{"seat", "verdict", "into", "why"}], "failure_stories": ["..."]}'
+                  + self._refused(feedback))
+        return self._call(prompt, max_tokens=1500, schema=SCHEMAS["challenge"])
+
     def plan(self, objective: dict, workers: list[dict], requirements: dict, note: str = "", feedback: str = "",
-             planner: str = "system", persona: str = "") -> tuple[dict, dict]:
-        """Stage 5: the roadmap for this organization."""
+             planner: str = "system", persona: str = "", cycle: int = 1, done: list[str] | None = None) -> tuple[dict, dict]:
+        """Stage 5: the roadmap for this organization, or a later cycle's work on the live product."""
         def line(w):
             r = roles.role(w["role"])
             place = "cofounder, reports to the founder" if r["tier"] == "cofounder" else f"reports to {w.get('reports_to')}"
             return (f"* {w['id']}: {w['title']} ({w['role']}; {place}), may own {', '.join(r['owns'])}"
                     + (f"; writes {', '.join(r['documents'])}" if r["documents"] else ""))
         org = "\n".join(line(w) for w in workers)
-        rlist = "\n".join(f"* {r['id']} ({r['area']}): {r['text']}" for r in requirements["requirements"]) or "* none"
+        rlist = "\n".join(f"* {r['id']} ({r['area']}): {r['text']}" for r in requirements["requirements"]
+                          if r.get("owner") != "founder") or "* none"
         types = "\n".join(f"{k}: {v['about']}." for k, v in roles.TASK_TYPES.items())
         prompt = (self._head(persona, objective, []) +
                   f"Plan the work for this organization:\n{org}\nRequirements:\n{rlist}\n"
@@ -531,7 +608,11 @@ class ModelSource:
                   f"owner writes. Task types:\n{types}\n"
                   "A task's owner must be a worker who may own its type. Ids t_01, t_02 and so on; dependencies may "
                   "only name earlier tasks.\n"
-                  + (f"The founder rejected the previous roadmap: {note}\n" if note else "") +
+                  + (f"This is cycle {cycle}: the product is live. Done in earlier cycles, not to plan again:\n"
+                     + "\n".join(f"* {x}" for x in done or []) + "\nPlan only the new work the founder asks for, "
+                     "ending with one review_merge and one deploy, with at least one code task.\nThe founder asks: "
+                     f"{note}\n" if cycle > 1 else
+                     (f"The founder rejected the previous roadmap: {note}\n" if note else "")) +
                   'Return JSON: {"workstreams": [{"id", "name"}], "milestones": [{"id", "name", "due_day"}], '
                   '"tasks": [{"id", "workstream_id", "milestone_id", "kind", "owner_worker_id", "title", "inputs", '
                   '"expected_output", "acceptance_criteria", "requirement_ids", "documents", "dependencies", '

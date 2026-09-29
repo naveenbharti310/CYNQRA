@@ -3,6 +3,12 @@
   "title": "Restaurant covers forecast",
   "about": "A nine-worker organization with two cofounders: a CTO leading a Data Scientist, Backend, Frontend, DevOps and QA, and a Chief Product Officer leading a Project Manager and a Designer. builds a 14-day covers forecast and prep plan for a restaurant kitchen: seven documents, one product rule for the founder, a forecast the platform backtests (the first method fails and is reworked), the store, the app, acceptance tests, a merge and a deploy by DevOps.",
   "note": "Prepared script for demo mode. Every word a worker says in demo mode comes from this file, and the product shows that. Code in files/ is real and is tested, backtested and deployed for real.",
+  "founder": {
+    "leads": [],
+    "stage": "launch",
+    "hours_per_week": 5,
+    "background": "Owns one restaurant."
+  },
   "settings": {
     "self_checks": 0
   },
@@ -80,6 +86,12 @@
         "area": "deployment",
         "text": "Runs as one process with a health check and a rollback path.",
         "verification": "Health check and smoke test on the live URL"
+      },
+      {
+        "id": "r_10",
+        "area": "functional",
+        "text": "The head chef opens the forecast page in a browser on the office computer, with nothing to install.",
+        "verification": "App test serves the page and its data"
       }
     ],
     "workstreams": [
@@ -109,7 +121,8 @@
           "r_02",
           "r_04",
           "r_05",
-          "r_07"
+          "r_07",
+          "r_10"
         ],
         "depends_on": [
           "ws_brief"
@@ -136,6 +149,48 @@
           "ws_quality"
         ]
       }
+    ],
+    "risks": [
+      {
+        "area": "ai_ml",
+        "text": "The forecast does worse than simply repeating last week, and the kitchen over-preps."
+      },
+      {
+        "area": "qa",
+        "text": "A change breaks the forecast the kitchen already relies on."
+      }
+    ],
+    "assumptions": [
+      {
+        "text": "A forecast from the restaurant's own history beats repeating last week's numbers.",
+        "kind": "feasibility",
+        "risk": "high",
+        "tested_by": [
+          "r_03"
+        ],
+        "founder_step": ""
+      },
+      {
+        "text": "The head chef will prep from the forecast instead of from habit.",
+        "kind": "desirability",
+        "risk": "high",
+        "tested_by": [
+          "r_01"
+        ],
+        "founder_step": "Ask the head chef to prep from the forecast for two weeks and note the leftovers."
+      }
+    ],
+    "measures": [
+      {
+        "measure": "Food left over at the end of the day",
+        "target": "a third less within a month",
+        "rethink_below": "no change"
+      },
+      {
+        "measure": "Busy days staffed in advance",
+        "target": "every one",
+        "rethink_below": "half of them"
+      }
     ]
   },
   "workforce": {
@@ -146,7 +201,8 @@
         "why": "Owns the architecture, the engineering team, and reviews and merges the release.",
         "requirement_ids": [
           "r_07"
-        ]
+        ],
+        "risk_ids": []
       },
       {
         "role": "CPO",
@@ -154,7 +210,8 @@
         "requirement_ids": [
           "r_01",
           "r_06"
-        ]
+        ],
+        "risk_ids": []
       }
     ],
     "teams": {
@@ -168,6 +225,10 @@
             "requirement_ids": [
               "r_03",
               "r_04"
+            ],
+            "supports": [],
+            "risk_ids": [
+              "k_01"
             ]
           },
           {
@@ -175,17 +236,20 @@
             "quantity": 1,
             "why": "Builds the covers history store.",
             "requirement_ids": [
-              "r_02",
-              "r_04"
-            ]
+              "r_02"
+            ],
+            "supports": [],
+            "risk_ids": []
           },
           {
             "role": "FrontendEngineer",
             "quantity": 1,
-            "why": "Builds the app and the kitchen's page.",
+            "why": "Builds the one page from the design and the single-process web server that serves it.",
             "requirement_ids": [
-              "r_05"
-            ]
+              "r_10"
+            ],
+            "supports": [],
+            "risk_ids": []
           },
           {
             "role": "QA",
@@ -193,6 +257,10 @@
             "why": "Writes the test plan and the automated acceptance tests.",
             "requirement_ids": [
               "r_08"
+            ],
+            "supports": [],
+            "risk_ids": [
+              "k_02"
             ]
           },
           {
@@ -201,7 +269,9 @@
             "why": "Writes the runbook and proposes and runs the deploy on the office computer.",
             "requirement_ids": [
               "r_09"
-            ]
+            ],
+            "supports": [],
+            "risk_ids": []
           }
         ]
       },
@@ -213,10 +283,12 @@
             "quantity": 1,
             "why": "Writes the spec and the acceptance checks, assigns the work and clears Blockers.",
             "requirement_ids": [
-              "r_01",
-              "r_02",
+              "r_01"
+            ],
+            "supports": [
               "r_08"
-            ]
+            ],
+            "risk_ids": []
           },
           {
             "role": "Designer",
@@ -224,7 +296,9 @@
             "why": "Designs the one screen the kitchen reads every morning.",
             "requirement_ids": [
               "r_05"
-            ]
+            ],
+            "supports": [],
+            "risk_ids": []
           }
         ]
       }
@@ -477,7 +551,8 @@
         ],
         "requirement_ids": [
           "r_05",
-          "r_07"
+          "r_07",
+          "r_10"
         ]
       },
       {

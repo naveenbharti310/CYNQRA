@@ -18,7 +18,7 @@ from pathlib import Path
 
 from . import budget, deploy, replacement, roles, verifier
 from . import settings as project_settings
-from .db import digest
+from .db import digest, now
 from .protocol import ProtocolError
 from .testrunner import failure_summary
 
@@ -281,12 +281,42 @@ def propose(run, t: dict, result: dict) -> dict:
     return bring_to_founder(run, t, pending)
 
 
+def door(run, t: dict) -> tuple[str, str]:
+    """How hard a decision is to undo. A one-way door (going live, a rule on money or law) is the founder's; a
+    two-way door (a merge, which every test reruns and nothing is live until the founder approves going live; a
+    product rule outside money and law) can be settled by the cofounder accountable for it."""
+    if t["kind"] == "deploy":
+        return "one_way", "customers see it the moment it is live"
+    if t["kind"] == "review_merge":
+        return "two_way", "a merge can be undone; every test reruns on main, and nothing is live until you approve going live"
+    areas = {r["area"] for r in (run.requirements() or {}).get("requirements", []) if r["id"] in (t.get("requirement_ids") or [])}
+    if areas & {"finance", "legal"}:
+        return "one_way", "a rule on money or law binds the company"
+    return "two_way", "a product rule can be changed later without cost"
+
+
+def _settler(run, t: dict, endorsed_by: str | None) -> str | None:
+    """The cofounder accountable for a decision: the one that endorsed it, the owner's cofounder, or the owner."""
+    for who in (endorsed_by, t.get("accountable"), t["owner_worker_id"]):
+        w = run.worker(who) if who and str(who).startswith("w_") else None
+        if w and w.get("tier") == "cofounder":
+            return w["id"]
+    return None
+
+
 def bring_to_founder(run, t: dict, pending: dict, endorsed_by: str | None = None) -> dict:
-    """The proposal becomes a decision for the founder, with the cofounder who endorsed it, when there is one."""
+    """The proposal becomes a decision for the founder, with the cofounder who endorsed it, when there is one. A
+    decision that is easy to undo is settled by the cofounder accountable for it instead, when governance allows, and
+    the founder is told: the founder's time goes to what cannot be undone."""
     owner = t["owner_worker_id"]
     extra = dict(pending.get("extra") or {})
     if endorsed_by:
         extra["endorsed_by"] = endorsed_by
+    kind, why = door(run, t)
+    extra["door"] = kind
+    settler = _settler(run, t, endorsed_by)
+    if kind == "two_way" and settler and project_settings.get(run.store)["cofounders_settle_reversible"]:
+        return settle(run, t, pending, extra, settler, why)
     d = run.decision(t["kind"], problem=pending["problem"], recommendation=pending["recommendation"],
                      risk=t["risk_tier"], confidence=pending["confidence"], cost=pending["cost"],
                      evidence=pending["evidence"], change=pending["what_would_change_this"], task_id=t["id"],
@@ -300,6 +330,32 @@ def bring_to_founder(run, t: dict, pending: dict, endorsed_by: str | None = None
               "pending_proposal": None})
     run.save_task(t)
     return {"did": "proposed", "task": t["id"], "decision": d["id"]}
+
+
+def settle(run, t: dict, pending: dict, extra: dict, settler: str, why: str) -> dict:
+    """A cofounder settles a decision that is easy to undo. It is on the record like the founder's, labelled as the
+    cofounder's, and the founder is told instead of asked."""
+    owner = t["owner_worker_id"]
+    text = lambda v: v if isinstance(v, str) else "" if v is None else str(v)  # noqa: E731  a model's field may be anything
+    pending = {**pending, "problem": text(pending.get("problem")) or t["title"],
+               "recommendation": text(pending.get("recommendation"))}
+    d = run.decision(t["kind"], problem=pending["problem"], recommendation=pending["recommendation"],
+                     risk=t["risk_tier"], confidence=pending["confidence"], cost=pending["cost"],
+                     evidence=pending["evidence"], change=pending["what_would_change_this"], task_id=t["id"],
+                     action_type=pending["action_type"], source=owner, extra=dict(extra, settled_by=settler))
+    title = run.worker(settler)["title"]
+    d.update({"status": "approved", "outcome_label": "settled_by_cofounder", "labeled_by": settler, "in_digest": False,
+              "labeled_at": now(), "resolved_by": settler, "resolved_at": now()})
+    run.store.put("decision", d["id"], d)
+    run.event("decision.approved", "decision", d["id"], {"kind": d["kind"], "outcome_label": d["outcome_label"],
+              "task_id": t["id"], "by": settler}, actor=settler, actor_type="worker", correlation_id=t["id"])
+    replacement.inform(run, "settled_by_cofounder", worker_id=settler, task_id=t["id"],
+                       headline=f"The {title} decided: {pending['problem'][:120]}",
+                       detail=f"{pending['recommendation'][:300]} Settled by the {title} because {why}. You can change "
+                              "it later.")
+    t.update({"status": "APPROVED", "decision_id": d["id"], "pending_proposal": None})
+    run.save_task(t)
+    return {"did": "settled", "task": t["id"], "decision": d["id"], "by": settler}
 
 
 def escalate(run, t: dict, why: str) -> dict:
@@ -470,11 +526,14 @@ def execute_approved(run, t: dict) -> dict:
         doc = run.paths["integration"] / "docs" / "DECISIONS.md"
         doc.parent.mkdir(parents=True, exist_ok=True)
         with doc.open("a", encoding="utf-8") as fh:
-            fh.write(f"## {t['title']} ({d['id']}, {d['outcome_label']} by the founder)\n\n{rule}\n\n")
+            by = "the founder" if d.get("resolved_by") == "founder" else f"the {run.worker(d['resolved_by'])['title']}"
+            fh.write(f"## {t['title']} ({d['id']}, {d['outcome_label']} by {by})\n\n{rule}\n\n")
         aid = f"{t['id']}/DECISIONS.md"
         run.store.put("artifact", aid, {"id": aid, "task_id": t["id"], "path": "docs/DECISIONS.md",
                                         "hash": digest(doc.read_bytes()), "by": owner})
-        method, checks, reviewer = "founder review (MEDIUM)", {"decision": d["id"], "label": d["outcome_label"]}, "founder"
+        who = "founder" if d.get("resolved_by") == "founder" else d.get("resolved_by")
+        method = "founder review (MEDIUM)" if who == "founder" else "settled by the accountable cofounder (two-way door)"
+        checks, reviewer = {"decision": d["id"], "label": d["outcome_label"]}, who
     elif t["kind"] == "review_merge":
         g = run.gateway(owner, t["id"], "merge_to_main", target="main", approval=d["id"])
         if g["status"] != "executed":

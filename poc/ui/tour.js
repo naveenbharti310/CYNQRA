@@ -7,7 +7,7 @@ const CynqraTour = (() => {
   let WORKERS = [];
   const who = (id) => { if (id === "orchestrator") return "Cynqra"; const w = WORKERS.find((x) => x.id === id); return w ? `the ${w.title}` : id || "a team member"; };
   const Who = (id) => { const w = who(id); return w.charAt(0).toUpperCase() + w.slice(1); };
-  const CH = { objective: "Your idea", workforce: "Your cofounders and their teams", plan: "The plan and budget", work: "The team at work",
+  const CH = { objective: "Your idea", workforce: "What you'll get, and who delivers it", plan: "The plan and budget", work: "The team at work",
     decide: "A CEO decision", live: "Delivered" };
 
   function task(st, id) { return (st.tasks || []).find((t) => t.id === id) || {}; }
@@ -56,8 +56,8 @@ const CynqraTour = (() => {
     const obj = st.objective, pend = pending(st).filter((d) => !d.in_digest);
     if (m.frozen) return { chapter: CH.work, view: "work", title: "Emergency stop: all work is frozen",
       body: "Nothing happens until you release the stop. An answer that arrives from an AI while it is on is thrown away." };
-    if (m.phase === "new") return { chapter: CH.objective, title: "You describe the company",
-      body: "Cynqra starts from your idea in your own words, a budget and any limits. You are the CEO. You do not name a team: Cynqra proposes the cofounders your company needs, each cofounder chooses the team for its area, and Cynqra works out which AI suits each one, the plan and the cost." };
+    if (m.phase === "new") return { chapter: CH.objective, title: "You describe what you want to build",
+      body: "Cynqra starts from your idea in your own words, a budget and any limits, and its job is to hand you the working result. You are the CEO. You do not name a team or coordinate anyone: Cynqra works out the people, skills, AI, plan and cost, and checks every piece of work." };
     if (m.phase === "objective") return { chapter: CH.objective, title: "Your words become a clear brief",
       body: `Cynqra turns your description into a brief: the product, the customers, the outcomes, what success looks like, the limits and the priorities. ${obj && obj.inferred_fields.length ? `${obj.inferred_fields.length} of them were filled in by Cynqra and are marked, so you can check exactly those.` : ""} Set the budget in dollars and any limits, then submit.` };
     if (m.phase === "workforce") {
@@ -65,19 +65,22 @@ const CynqraTour = (() => {
       const cofs = ws.filter((w) => w.tier === "cofounder");
       const teams = cofs.map((c) => { const team = ws.filter((w) => w.reports_to === c.id).map((w) => w.title);
         return `the ${c.title} chose ${team.length ? team.join(", ") : "no one: it does its part itself"}`; });
-      return { chapter: CH.workforce, title: "Your cofounders, and the teams they chose",
-        body: `Your idea became ${req.requirements.length} requirements. As a founder would, Cynqra proposes ${cofs.length} cofounders to lead the company with you: ${cofs.map((c) => c.title).join(", ")}, each with the reason it is needed. Then each cofounder chose the team for its own area: ${teams.join("; ")}. Approve the whole organization, or reject it with a note and Cynqra revises it. This is your first approval.` };
+      const ch = p.challenge || {}, ln = p.lean || {};
+      return { chapter: CH.workforce, title: "What you'll get, and the team that delivers it",
+        body: `Your idea became ${(req.outcomes || []).length} outcomes and ${req.requirements.length} requirements. Cynqra proposes ${cofs.length} cofounders (${cofs.map((c) => c.title).join(", ")}), and each chose a team: ${teams.join("; ")}. Then an independent check tried to make the team smaller${(ch.removed || []).length ? ` and cut ${ch.removed.map((r) => r.title).join(", ")}` : ""}. Every seat left owns something no other seat covers. You can take the lean team of ${ln.seats || 0} instead. Approve once; this is your first approval.` };
     }
+    if (m.phase === "planning" && (m.cycle || 1) > 1) return { chapter: CH.plan, title: `Cycle ${m.cycle}: the next piece of work`,
+      body: `The product is live, and the same team planned only what you asked for next, with what users said. ${(st.tasks || []).filter((t) => t.cycle === m.cycle).length} tasks, priced against your budget. Approve once; the team builds, checks and releases it, and the release before it stays as the way back.` };
     if (m.phase === "planning") return { chapter: CH.plan, title: "The plan and the budget",
       body: `Each team member now has the AI best suited to its work. The work is broken into ${((st.plan || {}).milestones || []).length} milestones and ${(st.tasks || []).length} tasks, each with an owner and a check it must pass, and priced against your budget. Nothing starts until you approve. This is your second approval.` };
     if (m.phase === "stopped_error") return { chapter: CH.work, view: "work", title: "The AI failed, and nothing was invented",
       body: "An AI or network error stopped this step. Cynqra never fills a gap with made-up work. Press Try the same step again once the AI is reachable." };
     if (m.phase === "stopped") return { chapter: CH.work, view: "work", title: "The project was stopped", body: m.notice || "" };
     if (m.phase === "accepted") return { chapter: CH.live, view: "company", title: "Delivered and accepted",
-      body: `You were needed ${decisionsSoFar(st)} times. Everything else, including ${plural(st.metrics.defects_caught_before_verified, "mistake")} caught by the checks, ${plural(st.metrics.sent_back_by_cofounders || 0, "piece")} of work sent back by a cofounder, ${plural(st.metrics.blockers_cleared_without_founder, "question")} settled within the team and ${plural(st.metrics.actions_stopped_by_policy, "action")} stopped by the rules, the team handled itself, and every step is on record.` };
+      body: `Your product is live. When users tell you what they want next, record it on this screen and plan the next cycle. You were needed ${decisionsSoFar(st)} times. Everything else, including ${plural(st.metrics.defects_caught_before_verified, "mistake")} caught by the checks, ${plural(st.metrics.sent_back_by_cofounders || 0, "piece")} of work sent back by a cofounder, ${plural(st.metrics.blockers_cleared_without_founder, "question")} settled within the team and ${plural(st.metrics.actions_stopped_by_policy, "action")} stopped by the rules, the team handled itself, and every step is on record.` };
     if (pend.length) { const n = forDecision(st, pend[0]); if (n) return n; }
     if (last.did === "approved" && last.kind === "approve_workforce") return { chapter: CH.plan, title: "The team is approved",
-      body: "Every member now exists, with a role, what it may and may not do, and the cofounder it reports to. Cynqra gives each one the AI that suits its work and drafts the plan." };
+      body: "Every member now exists, with a role, what it may and may not do, and the cofounder it reports to. Cynqra gives each one the AI that suits its work and drafts the plan. Each member joins with its first task; anyone the plan gives no work leaves before anything starts." };
     if (last.did === "approved" && last.kind === "approve_roadmap") return { chapter: CH.work, view: "work", title: "The team starts work",
       body: "From here you do nothing unless a decision needs you. Cofounders run their areas: they hand out their team's work, answer its doubts and review it before it counts. Everyone works at the same time, and every action is checked against the rules and recorded." };
     if (last.did === "approved") {

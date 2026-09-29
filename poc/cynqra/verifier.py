@@ -26,7 +26,7 @@ import time
 from datetime import date, timedelta
 from pathlib import Path
 
-from . import budget, deploy, roles
+from . import budget, deploy, numbers, roles
 from .db import digest, now
 from .testrunner import NO_WINDOW, clean_env, failure_summary, python_exe, run_unittests
 
@@ -89,12 +89,28 @@ def check_documents(files: dict[str, str], task: dict, objective: dict) -> dict:
             findings.append({"rule": f"{doc_type}_sections",
                              "why": f"{rules['title']}: missing {', '.join(best[1])}"})
     text = "\n".join(md.values())
+    computed = None
+    for doc_type in task.get("documents") or []:
+        rules = roles.DOC_TYPES[doc_type]
+        if rules.get("trust") and "assumption" not in text.lower():
+            findings.append({"rule": f"{doc_type}_assumptions",
+                             "why": f"{rules['title']}: no estimate is marked as an assumption; mark every figure "
+                                    "that is not sourced"})
+        if "Sources" in rules.get("sections", []):
+            m = re.search(r"^#+\s*Sources\b[^\n]*\n(.*?)(?=^#|\Z)", text, re.M | re.S | re.I)
+            if m and not re.search(r"^\s*(?:[*-]|\d+[.)])\s+\S", m.group(1), re.M):
+                findings.append({"rule": f"{doc_type}_sources",
+                                 "why": f"{rules['title']}: the Sources section lists no source"})
+        if rules.get("numbers"):
+            r = numbers.check(text)
+            findings += r["findings"]
+            computed = {k: r.get(k) for k in ("computed", "inputs", "currency")}
     missing_ids = [r for r in task.get("requirement_ids") or [] if r not in text]
     if missing_ids:
         findings.append({"rule": "requirements_cited", "why": f"requirements not cited: {', '.join(missing_ids)}"})
     if any(roles.DOC_TYPES[d].get("objective") for d in task.get("documents") or []):
         findings += lint_documents(md, objective)["findings"]
-    return {"passed": not findings, "findings": findings}
+    return {"passed": not findings, "findings": findings, "numbers": computed}
 
 
 def series(days: int = 16 * 7, start: date = date(2026, 1, 5)) -> list[dict]:
@@ -168,7 +184,8 @@ def run_checks(kind: str, candidate: Path, out: Path, task: dict, objective: dic
         docs = {p.name: p.read_text(encoding="utf-8", errors="replace") for p in out.rglob("*") if p.is_file()}
         r = check_documents(docs, task, objective)
         return {"passed": r["passed"], "test_ids": [], "checks": {"documents": r["findings"],
-                "acceptance_criteria": task.get("acceptance_criteria") or []},
+                "acceptance_criteria": task.get("acceptance_criteria") or [],
+                **({"numbers": r["numbers"]} if r.get("numbers") else {})},
                 "feedback": "; ".join(f["why"] for f in r["findings"]), "method": "document verifier"}
     report = run_unittests(candidate)
     checks = {"ran": report["ran"], "failed": report["failed"], "prior_tests_rerun": True}

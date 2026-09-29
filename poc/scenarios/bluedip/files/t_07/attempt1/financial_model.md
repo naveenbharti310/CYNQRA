@@ -31,8 +31,8 @@ Margin per restaurant after servers and support: **₹1,749 a month (87%).**
 | 19 | 486 | **+₹0.3 lakh (break-even)** | −₹68.9 lakh |
 | 24 | 581 | +₹2.0 lakh | −₹62.3 lakh |
 
-A restaurant pays back what it cost to win in 3.4 months; at 4% monthly churn it is worth about ₹43,700 over its
-life, seven times what it cost.
+A restaurant pays back what it cost to win in 3.4 months; at 4% monthly churn it is worth about ₹50,000 over its
+life, eight times what it cost.
 
 ## Funding
 
@@ -66,6 +66,6 @@ Every figure above that follows from these inputs is recomputed by the platform;
   "customers_per_month": {"value": 40, "basis": "assumption"},
   "months_before_revenue": {"value": 3, "basis": "assumption"},
   "funding": {"value": 8500000, "basis": "assumption"}},
- "claims": {"margin_per_customer": 1749, "payback_months": 3.4, "lifetime_value": 43700,
+ "claims": {"margin_per_customer": 1749, "payback_months": 3.4, "lifetime_value": 49975,
             "break_even_month": 19, "funding_needed": 6920000, "reaches_profit_before_money_runs_out": true}}
 ```

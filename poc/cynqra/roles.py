@@ -65,7 +65,8 @@ DOC_TYPES: dict[str, dict] = {
                         "sections": ["Customers", "Competitors", "Positioning", "Sources"], "trust": True},
     "gtm_plan": {"title": "Go-to-market plan", "sections": ["Channels", "Launch", "Metrics"], "trust": True},
     "financial_model": {"title": "Financial model",
-                        "sections": ["Costs", "Pricing", "Revenue", "Funding", "Assumptions"], "trust": True},
+                        "sections": ["Costs", "Pricing", "Revenue", "Funding", "Assumptions"], "trust": True,
+                        "numbers": True},
     "risk_compliance": {"title": "Risk and compliance register",
                         "sections": ["Regulations", "Risks", "Confirm with a professional"], "trust": True},
     "threat_model": {"title": "Threat model", "sections": ["Assets", "Threats", "Controls"], "trust": True},
@@ -183,6 +184,15 @@ ROLES: dict[str, dict] = {
         "capabilities": ["market research", "competitive analysis", "positioning", "go-to-market"],
         "areas": ["market"], "owns": ["document"], "documents": ["market_analysis", "gtm_plan"], "answers": True,
         "authority": {**BASE, "answer_blocker": E, "review_work": E},
+        "reports_to": ["CPO", "CFO"], "max": 1},
+    "GrowthMarketer": {
+        "title": "Growth Marketer", "slug": "growth", "tier": "team",
+        "charter": "Owns reaching the first customers: the channels, the launch, what winning one customer costs and "
+                   "the numbers that show whether it works, in a go-to-market plan whose every figure is sourced or "
+                   "marked as an assumption.",
+        "capabilities": ["go-to-market", "customer acquisition", "launch", "sales"],
+        "areas": ["market"], "owns": ["document"], "documents": ["gtm_plan"], "answers": True,
+        "authority": {**BASE, "answer_blocker": E},
         "reports_to": ["CPO", "CFO"], "max": 1},
     "LegalAdvisor": {
         "title": "Legal and Compliance Advisor", "slug": "legal", "tier": "team",
@@ -361,6 +371,13 @@ def doc_rules(doc_type: str) -> str:
     if d.get("trust"):
         parts.append("every fact with its source, every estimate marked as an assumption, and what a qualified "
                      "professional must confirm said plainly")
+    if d.get("numbers"):
+        from .numbers import INPUTS
+        parts.append("a ```json block the platform recomputes: {\"currency\", \"inputs\": {name: {\"value\", "
+                     "\"basis\": \"assumption\", \"measured\" or \"source: where\"}}, \"claims\": {figure: value}}, "
+                     "with the inputs " + ", ".join(INPUTS) + " and any of the claims margin_per_customer, "
+                     "payback_months, lifetime_value, break_even_month, funding_needed, "
+                     "reaches_profit_before_money_runs_out")
     return f"{d['title']} ({doc_type}): " + "; ".join(parts)
 
 

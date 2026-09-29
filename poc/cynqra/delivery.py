@@ -13,7 +13,7 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-from . import budget, performance, policy, roles
+from . import budget, lessons, performance, policy, roles
 from .db import IST, digest, now
 
 ESCALATIONS_PER_DAY = 5  # D-29
@@ -66,7 +66,9 @@ def metrics(run) -> dict:
 def deliver(run) -> dict:
     export_path = export(run)
     ec = budget.actual(run.store, run.store.get("forecast", "current"))
-    tr = {"id": "tr_1", "company_id": run.cid, "problem": run.objective()["statement"],
+    n = int(run.meta.get("cycle") or 1)
+    tid = f"tr_{n}"
+    tr = {"id": tid, "cycle": n, "company_id": run.cid, "problem": run.objective()["statement"],
           "evidence_refs": [v["id"] for v in run.store.all("verification")],
           "proposed_change": "Synthesize the organization the objective needs, staff it with intelligence and run the "
                              "approved roadmap to a live release.",
@@ -76,9 +78,11 @@ def deliver(run) -> dict:
           "authority_check": "every MEDIUM and HIGH step approved by the founder", "approval": None,
           "actual_result": f"Live at {live_url(run)}", "confidence": "high", "metrics": metrics(run),
           "export": Path(export_path).name}
-    run.store.put("transition", "tr_1", tr)
-    run.event("transition.proposed", "transition", "tr_1", {"tasks": len(run.tasks()), "cost_usd": ec["total_actual"]})
-    run.decision("accept_delivery", problem="Every task is verified and the product is live.",
+    run.store.put("transition", tid, tr)
+    run.event("transition.proposed", "transition", tid, {"tasks": len(run.tasks()), "cost_usd": ec["total_actual"],
+              "cycle": n})
+    run.decision("accept_delivery", problem="Every task is verified and the product is live."
+                 + (f" This is cycle {n}; the release before it stays as the way back." if n > 1 else ""),
                  recommendation="Accept delivery. The export bundle is ready to download.", risk="LOW",
                  confidence="high", cost="none", evidence=[live_url(run) or "", Path(export_path).name],
                  change="Anything in the live product that does not meet the objective.", source="orchestrator")
@@ -87,22 +91,24 @@ def deliver(run) -> dict:
 
 
 def after_accept(run, d: dict, action: str) -> None:
-    tr = run.store.get("transition", "tr_1")
+    tid = f"tr_{int(run.meta.get('cycle') or 1)}"
+    tr = run.store.get("transition", tid)
     if action == "approve":
         tr["approval"] = {"by": "founder", "at": now(), "decision": d["id"]}
-        run.store.put("transition", "tr_1", tr)
-        run.event("transition.approved", "transition", "tr_1", {}, actor="founder", actor_type="human", authority="founder")
-        run.event("transition.executed", "transition", "tr_1", {})
-        run.event("outcome.recorded", "outcome", "out_1", {"transition": "tr_1", "live": bool(live_url(run))})
+        run.store.put("transition", tid, tr)
+        run.event("transition.approved", "transition", tid, {}, actor="founder", actor_type="human", authority="founder")
+        run.event("transition.executed", "transition", tid, {})
+        run.event("outcome.recorded", "outcome", "out_" + tid[3:], {"transition": tid, "live": bool(live_url(run))})
+        lessons.record(run)
         company = run.store.get("company", run.cid)
         company["stage"] = "PILOT"
         run.store.put("company", run.cid, company)
         run.set_meta(phase="accepted")
     else:
-        run.event("transition.rejected", "transition", "tr_1", {"label": d["outcome_label"]}, actor="founder",
+        run.event("transition.rejected", "transition", tid, {"label": d["outcome_label"]}, actor="founder",
                   actor_type="human", authority="founder")
         run.set_meta(phase="delivered", notice="Delivery not accepted. The product stays live and your note is on "
-                                               "record. Iterating on a delivered product is outside this proof of concept.")
+                                               "record. Start a new cycle with what to change.")
 
 
 def final_report(run) -> dict:
@@ -119,9 +125,46 @@ def final_report(run) -> dict:
             "company_pack": company_pack(run), "metrics": metrics(run)}
 
 
+FOUNDATIONS = [
+    # (what, why, the verified document types that prepare it, when it applies)
+    ("Register the company", "Contracts, a bank account and investment need a legal company.", ["risk_compliance"],
+     "company"),
+    ("Make sure the company owns the code and the brand", "Investors and buyers check it first; the export holds all "
+     "the code, and whoever builds on it should sign that the company owns what they make.", [], "always"),
+    ("A privacy policy, and what data you keep", "The product holds people's data.", ["risk_compliance", "threat_model"],
+     "data"),
+    ("Terms for your customers", "What customers pay for and what you promise them.", ["risk_compliance"], "company"),
+    ("Security basics", "Who can reach the product and its data, and what happens if a key leaks.",
+     ["threat_model", "architecture", "runbook"], "always"),
+    ("Tax registration and invoicing", "Selling means charging and reporting tax.", ["financial_model"], "company"),
+]
+
+
+def foundations(run) -> list[dict]:
+    """The company's foundations: what a real company must have in place, whether the team's verified work prepared
+    it, and that a qualified professional should review it before it is relied on. Cynqra prepares; the founder
+    acts."""
+    req = (run.requirements() or {}).get("requirements", [])
+    areas = {r["area"] for r in req}
+    company = bool(areas & {"business", "finance", "market"})
+    data = bool(areas & {"data", "security", "legal"}) or any("data" in r["text"].lower() for r in req)
+    done = {d for t in run.tasks() if t["kind"] == "document" and t["status"] == "VERIFIED" for d in t.get("documents") or []}
+    out = []
+    for what, why, docs, when in FOUNDATIONS:
+        if (when == "company" and not company) or (when == "data" and not data):
+            continue
+        prepared = [roles.DOC_TYPES[d]["title"] for d in docs if d in done]
+        out.append({"what": what, "why": why, "prepared_in": prepared,
+                    "status": ("prepared: " + ", ".join(prepared) + "; a professional should review it") if prepared
+                    else "to do: only you can do this; a professional should advise"})
+    return out
+
+
 def company_pack(run) -> dict:
-    """What the founding team hands the CEO: every document, who wrote it and how it was verified; the decisions the
-    CEO made and the ones the team settled; and how few times the CEO was needed."""
+    """What the founding team hands the CEO: the outcome and how the founder will know it worked; the guesses the idea
+    depends on and which were tested; the business numbers the platform recomputed; the next steps only the founder
+    can take; every document, who wrote it and how it was verified; the decisions the CEO made and the ones the team
+    settled; and how few times the CEO was needed."""
     docs = []
     for t in run.tasks():
         if t["kind"] != "document":
@@ -136,7 +179,24 @@ def company_pack(run) -> dict:
     org = [{"cofounder": c["title"], "why": c.get("why", ""),
             "team": [{"title": w["title"], "why": w.get("why", "")} for w in workers if w.get("reports_to") == c["id"]]}
            for c in workers if c.get("tier") == "cofounder"]
-    return {"organization": org, "documents": docs,
+    req = run.requirements() or {}
+    plan = run.store.get("plan", "plan_1") or {}
+    status = {t["id"]: t["status"] for t in run.tasks()}
+    def tested(a):  # a guess only a person can test is never called proven by desk work
+        done = a.get("tasks") and all(status.get(x) == "VERIFIED" for x in a["tasks"])
+        if not a.get("tasks"):
+            return "no task tests it"
+        if not done:
+            return "not tested yet"
+        return "desk work checked; your step still needed" if a.get("founder_step") else "passed its checks"
+    guesses = [dict(a, tested=tested(a)) for a in plan.get("assumption_tests") or []]
+    checked = [v for v in run.store.all("verification") if v["verdict"] == "VERIFIED" and (v.get("checks") or {}).get("numbers")]
+    return {"outcome": {"outcomes": req.get("outcomes") or [], "measures": req.get("measures") or []},
+            "foundations": foundations(run),
+            "guesses": guesses,
+            "your_next_steps": [{"guess": a["id"], "step": a["founder_step"]} for a in guesses if a.get("founder_step")],
+            "numbers": checked[-1]["checks"]["numbers"] if checked else None,
+            "organization": org, "documents": docs,
             "ceo_decisions": [{"kind": d["kind"], "problem": d["problem"][:200], "outcome": d.get("outcome_label")}
                               for d in decided],
             "ceo_informed": [{k: n[k] for k in ("kind", "headline", "detail", "usd_difference")}

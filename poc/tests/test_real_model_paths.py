@@ -122,7 +122,7 @@ class WorkerReplyTests(unittest.TestCase):
             return r
         self.src.faults["t_04"] = nested
         self.e = start(self.tmp.path, self.src)
-        approve_until(self.e, "review_merge")
+        approve_until(self.e, "deploy")  # the CTO settles the merge; the deploy is the founder's next question
         self.assertEqual((self.e.paths["integration"] / "static" / "help.txt").read_text(), "Press Add to add a candidate.")
         self.assertIsNotNone(self.e.store.get("artifact", "t_04/static/help.txt"))
 
@@ -138,7 +138,7 @@ class WorkerReplyTests(unittest.TestCase):
             return r
         self.src.faults["t_04"] = no_root
         self.e = start(self.tmp.path, self.src)
-        approve_until(self.e, "review_merge")
+        approve_until(self.e, "deploy")
         verdicts = [v for v in self.e.store.all("verification") if v["task_id"] == "t_04"]
         self.assertEqual(verdicts[0]["verdict"], "REQUIRES_REWORK")
         self.assertIn("delivery_contract", verdicts[0]["checks"])
@@ -156,9 +156,9 @@ class WorkerReplyTests(unittest.TestCase):
                 return content, usage
 
         self.e = start(self.tmp.path, BadAssign("candidate_tracker"))
-        self.e.run_until_idle()
-        self.e.decide(self.e.pending_decisions()[0]["id"], "approve")
         steps = self.e.run_until_idle()
+        self.e.decide(self.e.pending_decisions()[0]["id"], "approve")
+        steps += self.e.run_until_idle()
         self.assertIn("retry", [s["did"] for s in steps])
         t = self.e.task("t_03")
         self.assertTrue(t.get("handoff"), "the retried assignment produced a Handoff before any work")

@@ -1,8 +1,8 @@
-**Describe the company you want to build. Cynqra assembles the expert team it needs, checks every
-piece of their work, and asks you only what a CEO should decide.**
+**Describe what you want to build. Cynqra turns it into a working result, in weeks instead of months,
+within your budget, without you coordinating the work.**
 
-**What this is:** Cynqra as a desktop app, a proof of concept. **Why try it:** to see an expert team
-built from an idea, working like a real company, with every piece of work checked. **How:**
+**What this is:** Cynqra as a desktop app, a proof of concept. **Why try it:** to see an idea become a
+working result, with the right team worked out for you and every piece of work checked. **How:**
 
 1. **Start with the free demo.** A founder describes Bluedip, an app that predicts a restaurant's
    footfall and revenue hour by hour and estimates what an offer will really do. Cynqra builds the team

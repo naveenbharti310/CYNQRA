@@ -3,6 +3,12 @@
   "title": "Bluedip: fill a restaurant's quiet hours",
   "about": "A founder describes Bluedip, an app that predicts a restaurant's footfall and revenue hour by hour and estimates what an offer will really do before the owner runs it. Cynqra proposes three cofounders: a CTO, a Chief Product Officer and a CFO. Each builds the team for its area: the CTO a Data Scientist, a Backend Engineer, a Frontend Engineer, DevOps and QA; the CPO a Project Manager, a Designer, a Market Analyst and a Restaurant Revenue Management Specialist; the CFO a Legal and Compliance Advisor. Cofounders hand out their team's work, answer its doubts and review it before it counts. The platform backtests the forecast (its first version fails), the CPO sends the screen design back because it hid the margin, a test catches the ignored cap, the CEO decides one rule on discounts, and the app goes live. The owner's own example, 50% off for 15 customers from 1 to 4 pm, turns out to raise revenue and lose money; Bluedip recommends the offer that earns it.",
   "note": "Prepared script for demo mode. Every word a worker says in demo mode comes from this file, and the product shows that. The models and the app in files/ are real: they are tested, backtested and deployed for real.",
+  "founder": {
+    "leads": [],
+    "stage": "launch",
+    "hours_per_week": 10,
+    "background": "Has run a restaurant; not technical."
+  },
   "settings": {
     "self_checks": 0
   },
@@ -111,6 +117,12 @@
         "area": "qa",
         "text": "Every acceptance check is an automated test, run again on every change.",
         "verification": "The acceptance tests pass on the release candidate and on main."
+      },
+      {
+        "id": "r_15",
+        "area": "functional",
+        "text": "Owners open Bluedip in a browser on the restaurant's own computer or tablet, with nothing to install.",
+        "verification": "App test serves the page and its data"
       }
     ],
     "workstreams": [
@@ -144,7 +156,8 @@
           "r_10",
           "r_11",
           "r_13",
-          "r_14"
+          "r_14",
+          "r_15"
         ],
         "depends_on": [
           "ws_business",
@@ -161,6 +174,84 @@
           "ws_app"
         ]
       }
+    ],
+    "risks": [
+      {
+        "area": "finance",
+        "text": "An offer fills the room but loses money after food cost."
+      },
+      {
+        "area": "ai_ml",
+        "text": "Forecasts miss badly for a few weeks and owners stop trusting them."
+      },
+      {
+        "area": "legal",
+        "text": "An offer's advert misleads diners or breaks advertising rules."
+      },
+      {
+        "area": "security",
+        "text": "A restaurant's sales data is seen by someone outside it."
+      },
+      {
+        "area": "qa",
+        "text": "A change breaks a number owners already rely on."
+      }
+    ],
+    "assumptions": [
+      {
+        "text": "Owners will change their prices when a forecast tells them a quiet hour is coming.",
+        "kind": "desirability",
+        "risk": "high",
+        "tested_by": [
+          "r_02"
+        ],
+        "founder_step": "Show the live app to five restaurant owners and ask which recommended offer they would run this week."
+      },
+      {
+        "text": "A restaurant's own history is enough to forecast its hours better than last week's numbers.",
+        "kind": "feasibility",
+        "risk": "high",
+        "tested_by": [
+          "r_06"
+        ],
+        "founder_step": ""
+      },
+      {
+        "text": "A recommended offer earns money after food cost, instead of only filling seats.",
+        "kind": "viability",
+        "risk": "high",
+        "tested_by": [
+          "r_05",
+          "r_07"
+        ],
+        "founder_step": ""
+      },
+      {
+        "text": "Owners will pay ₹1,999 a month once the pilot shows what Bluedip adds.",
+        "kind": "viability",
+        "risk": "medium",
+        "tested_by": [
+          "r_03"
+        ],
+        "founder_step": "Ask the pilot owners what they would pay, before the paid launch."
+      }
+    ],
+    "measures": [
+      {
+        "measure": "Pilot restaurants that run at least one recommended offer in their first two weeks",
+        "target": "12 of 20",
+        "rethink_below": "6 of 20"
+      },
+      {
+        "measure": "Margin an owner gains from Bluedip's offers in a month, against the price",
+        "target": "at least 3 times the price",
+        "rethink_below": "less than the price"
+      },
+      {
+        "measure": "Forecast error against last week's numbers, on days the model has not seen",
+        "target": "better",
+        "rethink_below": "worse"
+      }
     ]
   },
   "workforce": {
@@ -171,6 +262,9 @@
         "why": "Bluedip is an app built on prediction models: someone must own how it is built, checked and put live.",
         "requirement_ids": [
           "r_12"
+        ],
+        "risk_ids": [
+          "k_04"
         ]
       },
       {
@@ -179,7 +273,8 @@
         "requirement_ids": [
           "r_01",
           "r_13"
-        ]
+        ],
+        "risk_ids": []
       },
       {
         "role": "CFO",
@@ -187,12 +282,15 @@
         "requirement_ids": [
           "r_03",
           "r_08"
+        ],
+        "risk_ids": [
+          "k_01"
         ]
       }
     ],
     "teams": {
       "CTO": {
-        "summary": "The product is its predictions and the app built on them. A Data Scientist for the models, a Backend Engineer for the demand and offer engine, a Frontend Engineer for the owner's app, QA for the acceptance tests, and DevOps to put it live and keep it running.",
+        "summary": "The product is its predictions and the app built on them. A Data Scientist for the models, a Backend Engineer for the demand and offer engine, a Frontend Engineer for the owner's app, QA for the acceptance tests, DevOps to put it live and keep it running, and a Security Expert to look after security.",
         "roles": [
           {
             "role": "DataScientist",
@@ -201,6 +299,10 @@
             "requirement_ids": [
               "r_06",
               "r_07"
+            ],
+            "supports": [],
+            "risk_ids": [
+              "k_02"
             ]
           },
           {
@@ -210,15 +312,19 @@
             "requirement_ids": [
               "r_09",
               "r_10"
-            ]
+            ],
+            "supports": [],
+            "risk_ids": []
           },
           {
             "role": "FrontendEngineer",
             "quantity": 1,
-            "why": "The one screen the owner uses, and the web server behind it.",
+            "why": "Builds the owner's screen from the design, and the web server that serves it in any browser.",
             "requirement_ids": [
-              "r_11"
-            ]
+              "r_15"
+            ],
+            "supports": [],
+            "risk_ids": []
           },
           {
             "role": "QA",
@@ -226,6 +332,10 @@
             "why": "Every acceptance check becomes a test that runs on every change.",
             "requirement_ids": [
               "r_14"
+            ],
+            "supports": [],
+            "risk_ids": [
+              "k_05"
             ]
           },
           {
@@ -234,7 +344,17 @@
             "why": "Puts Bluedip live on the company's own host with a health check and a way back.",
             "requirement_ids": [
               "r_12"
-            ]
+            ],
+            "supports": [],
+            "risk_ids": []
+          },
+          {
+            "role": "SecurityExpert",
+            "quantity": 1,
+            "why": "Someone should look after security as the product grows.",
+            "requirement_ids": [],
+            "supports": [],
+            "risk_ids": []
           }
         ]
       },
@@ -244,12 +364,12 @@
           {
             "role": "PM",
             "quantity": 1,
-            "why": "Plans the roadmap and writes the app's spec and acceptance checks.",
+            "why": "Plans the roadmap, keeps release 1 to what owners need, and writes the app's spec and acceptance checks.",
             "requirement_ids": [
-              "r_09",
-              "r_10",
               "r_13"
-            ]
+            ],
+            "supports": [],
+            "risk_ids": []
           },
           {
             "role": "Designer",
@@ -257,7 +377,9 @@
             "why": "One screen an owner reads standing up: what it shows first decides whether they trust it.",
             "requirement_ids": [
               "r_11"
-            ]
+            ],
+            "supports": [],
+            "risk_ids": []
           },
           {
             "role": "MarketAnalyst",
@@ -265,7 +387,9 @@
             "why": "Who pays, what they use today, and how to reach the first restaurants.",
             "requirement_ids": [
               "r_02"
-            ]
+            ],
+            "supports": [],
+            "risk_ids": []
           },
           {
             "role": "Specialist",
@@ -275,7 +399,9 @@
             "why": "Knows when a discount earns money and when it only gives it away: the core of every recommendation.",
             "requirement_ids": [
               "r_05"
-            ]
+            ],
+            "supports": [],
+            "risk_ids": []
           }
         ]
       },
@@ -288,6 +414,10 @@
             "why": "Offers must not mislead diners, and data and tax rules apply to every offer.",
             "requirement_ids": [
               "r_04"
+            ],
+            "supports": [],
+            "risk_ids": [
+              "k_03"
             ]
           }
         ]
@@ -620,7 +750,8 @@
         "requirement_ids": [
           "r_09",
           "r_10",
-          "r_11"
+          "r_11",
+          "r_15"
         ]
       },
       {
@@ -912,6 +1043,14 @@
     "t_07": [
       {
         "result": "done",
+        "summary": "₹1,999 a month per restaurant; a restaurant is worth about ₹50,000; break-even in month 19; raise ₹85 lakh.",
+        "files": {
+          "financial_model.md": "@files/t_07/attempt1/financial_model.md"
+        },
+        "acceptance_check": "Costs, pricing, revenue, funding, assumptions."
+      },
+      {
+        "result": "done",
         "summary": "₹1,999 a month per restaurant; break-even in month 19; raise ₹85 lakh.",
         "files": {
           "financial_model.md": "@files/t_07/financial_model.md"
@@ -1170,5 +1309,31 @@
   "review_default": {
     "verdict": "approve",
     "note": "Checked against the handoff and its acceptance criteria. Approved."
+  },
+  "challenge": {
+    "seats": [
+      {
+        "seat": "SecurityExpert",
+        "verdict": "cut",
+        "into": "",
+        "why": "Release 1 takes no payments and keeps no diner data. The CTO already watches the one security risk, and no requirement needs a separate security seat."
+      },
+      {
+        "seat": "Designer",
+        "verdict": "merge",
+        "into": "FrontendEngineer",
+        "why": "Release 1 is one screen; the Frontend Engineer could design it while building it."
+      },
+      {
+        "seat": "LegalAdvisor",
+        "verdict": "advisor",
+        "into": "",
+        "why": "One compliance register at the start, then questions as offers are written: an advisor, not a full-time seat."
+      }
+    ],
+    "failure_stories": [
+      "Owners stop trusting the forecast after one bad week: the Data Scientist watches this, and the backtest checks every forecast before it counts.",
+      "An offer that looked good loses money after food cost: the CFO watches this, and every estimate shows margin as well as revenue."
+    ]
   }
 }

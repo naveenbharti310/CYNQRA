@@ -2,8 +2,11 @@
 (Cynqra Product Flows and Architecture v1, section 3). It owns the run's state and the founder's gates; the work of
 every stage is done by an engine that sees the run only through the run contract (run.py):
 
-  Stage 0-1  objective.py     the founder's objective structured, then decomposed into requirements
+  Stage 0-1  objective.py     the founder's objective structured, then decomposed into outcomes, requirements and
+                              risks: the list the team is built from
   Stage 2-3  synthesis.py     the organization the objective needs, and the workforce approval gate
+             seats.py         every seat earns its place: seat cards, the independent challenge, the lean team,
+                              and the check of the plan's work
   Stage 4    intelligence_layer  the Intelligence Router binds an intelligence to every worker, from the
                               registry's evidence; every call goes through the Intelligence Gateway
   Stage 5    planner.py       milestones, tasks, acceptance criteria, owners, accountability
@@ -31,7 +34,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import binding, budget, delivery, deploy, execution, gateway, objective, performance, planner, policy
-from . import replacement, roles, synthesis
+from . import replacement, roles, seats, synthesis
 from . import settings as project_settings
 from .db import IST, Store, now
 from .intelligence import SCENARIOS, IntelligenceError, ModelSource, ScriptedSource
@@ -67,8 +70,11 @@ def scenarios() -> list[dict]:
 class Engine:
     """The run. It implements the run contract (run.Run) for the engines, and the founder's controls for the app."""
 
-    def __init__(self, data_dir: Path, intelligence=None, supply: IntelligenceSupply | None = None):
+    def __init__(self, data_dir: Path, intelligence=None, supply: IntelligenceSupply | None = None,
+                 memory: Path | None = None):
         self.dir = Path(data_dir).resolve()  # workers' tests run from inside it: a relative path would break them
+        # what Cynqra learns across projects (lessons.py): the app keeps it beside every run; a lone run keeps its own
+        self.memory = Path(memory) if memory else self.dir / "lessons.json"
         self.dir.mkdir(parents=True, exist_ok=True)
         self.store = Store(str(self.dir / "cynqra.db"))
         self.paths = {k: self.dir / k for k in ("workspaces", "integration", "main", "releases", "live", "exports",
@@ -92,6 +98,9 @@ class Engine:
     OUTDATED = ("This project was made by an earlier version of Cynqra, whose team had roles that no longer exist "
                 "(such as the Business Lead: you are the CEO now, with cofounders). It can be read and exported, but "
                 "not continued. Start a new run; this one is kept in the archive.")
+
+    LEAN_IN_DEMO = ("The demo's script has a plan for the recommended team only. In live mode Cynqra plans the work "
+                    "for whichever team you choose.")
 
     def _refuse_outdated(self) -> None:
         """A run saved before the catalog changed can hold a worker whose role is gone. It is stopped with a plain
@@ -251,8 +260,9 @@ class Engine:
             for v in (problem, recommendation, confidence, cost, change))
         today = datetime.now(IST).date().isoformat()
         worker_raised = source.startswith("w_")
-        todays = [d for d in self.store.all("decision")
-                  if d.get("created_day") == today and d.get("source", "").startswith("w_")]
+        todays = [d for d in self.store.all("decision")  # what a cofounder settled never interrupted the founder
+                  if d.get("created_day") == today and d.get("source", "").startswith("w_")
+                  and d.get("outcome_label") != "settled_by_cofounder"]
         digest_it = worker_raised and len(todays) >= delivery.ESCALATIONS_PER_DAY and severity != "SEV-1"
         base = "dec_" + (task_id or kind)
         did = base + ("_" + uuid.uuid4().hex[:4] if self.store.get("decision", base) else "")
@@ -287,6 +297,11 @@ class Engine:
 
     def requirements(self) -> dict | None:
         return self.store.get("requirements", "req_1")
+
+    def founder(self) -> dict:
+        """What the founder brings: the seats they lead themselves, their stage and their time."""
+        company = self.store.get("company", self.cid) or {}
+        return objective.founder_profile(company.get("founder") or objective.FOUNDER_DEFAULT)
 
     def proposal(self) -> dict | None:
         return synthesis.current(self)
@@ -407,12 +422,14 @@ class Engine:
             except EngineError:
                 self.set_meta(mode="demo", scenario=None)
                 raise
+            founder = dict(objective.FOUNDER_DEFAULT)
             if mode == "demo":
                 preset = json.loads((SCENARIOS / scenario / "scenario.json").read_text(encoding="utf-8"))
                 project_settings.update(self.store, preset.get("settings") or {})
+                founder = objective.founder_profile(preset.get("founder") or founder)
             company = {"id": self.cid, "name": (name or "").strip() or "My company", "stage": "IDEA",
                        "autonomy_level": "L1", "risk_tolerance": "conservative", "constraints": {}, "status": "active",
-                       "created_at": now()}
+                       "founder": founder, "created_at": now()}
             self.store.put("company", self.cid, company)
             self.event("company.created", "company", self.cid, {"stage": "IDEA", "autonomy_level": "L1", "mode": mode,
                        "scenario": self.meta["scenario"]}, actor="founder", actor_type="human", authority="founder")
@@ -467,9 +484,31 @@ class Engine:
             self.store.put("company", self.cid, company)
             return {"company": company, "settings": s}
 
+    def set_founder(self, profile: dict) -> dict:
+        """Stage 0: what the founder brings. The seats they lead themselves get no cofounder, and the stage sets how
+        many seats each cofounder may hire."""
+        with self.lock:
+            self._require("objective")
+            try:
+                clean = objective.founder_profile(profile)
+            except objective.ObjectiveError as exc:
+                raise EngineError(str(exc)) from exc
+            if "CTO" in clean["leads"]:
+                raise EngineError("In this version the CTO's seat reviews, merges and releases the code, which only a "
+                                  "team member can do. You can lead product, money or compliance yourself.")
+            company = self.store.get("company", self.cid)
+            company["founder"] = clean
+            self.store.put("company", self.cid, company)
+            self.event("company.founder_set", "company", self.cid, {"leads": clean["leads"], "stage": clean["stage"],
+                       "hours_per_week": clean["hours_per_week"]}, actor="founder", actor_type="human",
+                       authority="founder")
+            return clean
+
     def submit_objective(self) -> dict:
-        """Stage 0 ends: the founder hands over the outcome, not the team. Stage 1 decomposes it into requirements and
-        Stage 2 proposes the organization; the founder's first decision is the workforce gate."""
+        """Stage 0 ends: the founder hands over the outcome, not the team. Stage 1 decomposes it into outcomes,
+        requirements and risks, and Stage 2 builds the organization from that list; the founder's first decision is
+        the workforce gate, where the list, the team and the checks on it are shown together. No step is added for
+        the founder: the checks run by themselves."""
         with self.lock:
             self._require("objective")
             if self.objective() is None:
@@ -535,12 +574,19 @@ class Engine:
             return d
 
     def _check_edit(self, d: dict, edited: dict) -> None:
+        if d["kind"] == "approve_workforce" and edited.get("option") not in (None, "recommended", "lean"):
+            raise EngineError("option must be recommended or lean")
+        if d["kind"] == "approve_workforce" and edited.get("option") == "lean" and edited.get("roles"):
+            raise EngineError("choose the lean team or edit the team, not both")
+        if d["kind"] == "approve_workforce" and edited.get("option") == "lean" and self.meta["mode"] == "demo":
+            raise EngineError(self.LEAN_IN_DEMO)
         if d["kind"] == "approve_workforce" and edited.get("roles"):
             try:
                 synthesis.override(self.proposal(), edited["roles"], self.requirements(),
-                                   project_settings.get(self.store)["allow_workforce_override"])
+                                   project_settings.get(self.store)["allow_workforce_override"], self.founder())
             except (synthesis.OverrideRefused, IntelligenceError) as exc:
                 raise EngineError(str(exc)) from exc
+
         elif d["kind"] == "budget_breaker" and "budget_usd" in edited:
             spent = budget.ledger(self.store)["spent_total"]
             try:
@@ -557,7 +603,8 @@ class Engine:
             except IntelligenceError as exc:
                 self._stage_failed("workforce", exc)
             return
-        synthesis.approve(self, (d.get("edited") or {}).get("roles"))
+        edited = d.get("edited") or {}
+        synthesis.approve(self, edited.get("roles"), edited.get("option") or "recommended")
         try:
             self._staff()
         except IntelligenceError as exc:
@@ -571,15 +618,21 @@ class Engine:
                    "why": str(exc)[:200]})
         raise exc
 
+    def cycle(self) -> int:
+        return int(self.meta.get("cycle") or 1)
+
     def _roadmap(self, note: str = "") -> None:
         """Stage 5, then Stage 7: the roadmap for the approved organization and the budget built on it. Stage 6 puts
-        both in front of the founder."""
+        both in front of the founder. In a later cycle, only the new work is planned and priced."""
+        n = self.cycle()
         try:
-            p = planner.plan(self, note)
+            p = planner.plan(self, note, cycle=n)
+            wc = self._work_check(p, release=n == 1)
             self._staff(refine=True)
         except IntelligenceError as exc:
             self._stage_failed("roadmap", exc)
-        f = budget.construct(self.store, self.tasks(), self.workers(), self.registry)
+        new = [t for t in self.tasks() if int(t.get("cycle") or 1) == n]
+        f = budget.construct(self.store, new, self.workers(), self.registry)
         f["at"] = now()
         self.store.put("forecast", "current", f)
         for r in f["tasks"]:  # every task carries its budget: the forecast of its own work, in dollars
@@ -591,22 +644,65 @@ class Engine:
         ev = ["Milestones: " + "; ".join(f"{m['name']} (day {m['due_day']})" for m in p["milestones"]),
               f"Critical path: {' > '.join(p['critical_path'])}"]
         ev += [f"{t['id']}: {t['title']} ({t['kind']}), {t['owner_worker_id']} on {self.model_of(t['owner_worker_id'])}"
-               for t in self.tasks()]
+               for t in new]
         ev += [f"{k}: ${v['usd']:.4f} ({v['basis']})" for k, v in f["layers"].items()]
         ev += f["warnings"]
         if p["uncovered_requirements"]:
             ev.append("Requirements no task names: " + ", ".join(p["uncovered_requirements"]))
+        for a in p.get("assumption_tests") or []:  # the riskiest guesses, tested before what depends on them
+            ev.append(f"Guess {a['id']} ({a['risk']} risk): {a['text']} "
+                      + (f"Tested first by {a['task']} in {a['milestone']}." if a["task"] else "No task tests it.")
+                      + ("" if a["early"] or a["risk"] != "high" else " It is tested late: a wrong answer here is found "
+                         "only after most of the money is spent.")
+                      + (f" Only you can test the rest: {a['founder_step']}" if a["founder_step"] else ""))
+        ev += [f"{self.worker(wid)['title']} joins with {j['task']} ({j['milestone']})" for wid, j in wc["joins"].items()]
+        ev += ([f"{x['title']} had no work in this plan and was removed before anything started" for x in wc["idle"]]
+               if n == 1 else [f"{x['title']} has no work in this cycle and costs nothing in it" for x in wc["idle"]])
         self.decision("approve_roadmap",
-                      problem=f"The roadmap for the approved organization: {len(p['milestones'])} milestones, "
-                              f"{len(p['order'])} tasks, and the budget built on it.",
+                      problem=(f"The roadmap for the approved organization: {len(p['milestones'])} milestones, "
+                               f"{len(new)} tasks, and the budget built on it.") if n == 1 else
+                              (f"Cycle {n} on the live product: {len(new)} tasks for what you asked ({note[:160]}), "
+                               "and the budget built on it."),
                       recommendation="Approve the roadmap and the budget. Work starts; MEDIUM and HIGH steps still "
                                      "come back to you.",
                       risk="LOW" if f["fits"] else "MEDIUM", confidence="high" if f["fits"] else "medium",
                       cost=f"${f['subtotal_usd']:.4f} forecast of the ${f['cap_usd']:.2f} cap, reserve "
                            f"${f['reserve_usd']:.4f}",
                       evidence=ev, change="A task that does not serve the objective, a missing one, or a budget line "
-                                          "that looks wrong.", source="execution_planner")
+                                          "that looks wrong.", source="execution_planner",
+                      extra={"released": [x["worker"] for x in wc["idle"]] if n == 1 else [], "cycle": n})
         self.set_meta(phase="planning", failed_stage=None, notice="")
+
+    def _work_check(self, p: dict, release: bool = True) -> dict:
+        """Every member joins with its first task; a member with no work in the plan leaves before anything starts,
+        and the founder is told at the roadmap gate instead of being asked. In a later cycle a member with no work in
+        it stays, and costs nothing in it."""
+        n = int(p.get("cycle") or 1)
+        wc = seats.work_check([t for t in self.tasks() if int(t.get("cycle") or 1) == n], self.workers(), p["milestones"])
+        p["work_check"] = wc
+        self.store.put("plan", "plan_1", p)
+        for w in self.workers():
+            j = wc["joins"].get(w["id"])
+            if j and w.get("joins") != j:
+                w["joins"] = j
+                self.store.put("worker", w["id"], w)
+        if wc["idle"] and release:
+            self._release([x["worker"] for x in wc["idle"]])
+        return wc
+
+    def _release(self, wids: list[str]) -> None:
+        """Members with no work in the plan leave before any work starts. The founder is told in the roadmap gate."""
+        org = self.store.get("organization", "org_1")
+        for wid in wids:
+            w = self.worker(wid)
+            self.store.delete("worker", wid)
+            org["workers"] = [x for x in org["workers"] if x != wid]
+            org["reports_to"].pop(wid, None)
+            org["released"] = org.get("released", []) + [{"id": wid, "title": w["title"], "why": "no work in the plan"}]
+            self.event("worker.released", "worker", wid, {"role": w["role"], "why": "no work in the plan"},
+                       actor="execution_planner")
+        org["cofounders"] = [x for x in org["cofounders"] if x not in wids]
+        self.store.put("organization", "org_1", org)
 
     def _after_roadmap(self, d: dict, action: str) -> None:
         if action != "approve":
@@ -813,6 +909,111 @@ class Engine:
                        authority="founder")
         self.set_meta(phase=d["extra"].get("previous_phase", "running"))
 
+    # --- after launch: the company keeps running --------------------------------------------------------------
+    def feedback(self, text: str, source: str = "founder") -> dict:
+        """What users said, in the founder's words. It is kept and goes into the next cycle's plan."""
+        text = (text or "").strip()
+        if not text:
+            raise EngineError("write what users said first")
+        n = self.count("feedback") + 1
+        rec = {"id": f"fb_{n:03d}", "text": text[:1000], "source": source, "cycle": self.cycle(), "used_in": None,
+               "at": now()}
+        self.store.put("feedback", rec["id"], rec)
+        self.event("feedback.recorded", "company", self.cid, {"id": rec["id"], "cycle": rec["cycle"]}, actor="founder",
+                   actor_type="human", authority="founder")
+        return rec
+
+    def check_live(self) -> dict:
+        """Cynqra looks at the live product: is it up, and how fast does it answer. Kept as a record the next cycle
+        and the founder's update read."""
+        url = self.live_url()
+        if not url:
+            raise EngineError("nothing is live yet")
+        h = deploy.health(url, wait=3)
+        n = self.count("live_check") + 1
+        rec = {"id": f"lc_{n:03d}", "url": url, "ok": bool(h.get("ok")), "detail": {k: v for k, v in h.items()
+               if k in ("status", "ms", "why")}, "cycle": self.cycle(), "at": now()}
+        self.store.put("live_check", rec["id"], rec)
+        self.event("live.checked", "deployment", "live", {"ok": rec["ok"]}, actor="deployment")
+        return rec
+
+    def start_cycle(self, note: str, budget_usd: float | None = None) -> dict:
+        """After launch, the next piece of work on the live product: what the founder asks for, with what users said.
+        The same team plans only the new work; the founder approves its roadmap and budget once, then the team builds,
+        checks and releases it, and the release before it stays as the way back."""
+        with self.lock:
+            self._require("accepted", "delivered")
+            unused = [f for f in self.store.all("feedback") if not f.get("used_in")]
+            ask = (note or "").strip() or "; ".join(f["text"] for f in unused)
+            if not ask:
+                raise EngineError("say what the next cycle should do, or record what users said first")
+            if budget_usd:
+                try:
+                    extra = float(budget_usd)
+                except (TypeError, ValueError) as exc:
+                    raise EngineError("budget_usd must be a number") from exc
+                if extra <= 0:
+                    raise EngineError("the added budget must be above zero")
+                budget.raise_cap(self.store, project_settings.get(self.store)["budget_usd"] + extra)
+            n = self.cycle() + 1
+            full = ask + ("\nWhat users said: " + " | ".join(f["text"] for f in unused) if unused and note else "")
+            for f in unused:
+                f["used_in"] = n
+                self.store.put("feedback", f["id"], f)
+            self.set_meta(cycle=n)
+            self.intervention("cycle", f"started cycle {n}")
+            self.event("cycle.started", "company", self.cid, {"cycle": n, "feedback": [f["id"] for f in unused]},
+                       actor="founder", actor_type="human", authority="founder")
+            self._roadmap(note=full)
+            return self.meta
+
+    @staticmethod
+    def _caught(v: dict) -> str:
+        """What one failed check found, in a line."""
+        c = v.get("checks") or {}
+        if c.get("documents"):
+            return c["documents"][0].get("why", "")
+        if (c.get("backtest") or {}).get("why"):
+            return c["backtest"]["why"]
+        failed = c.get("failed") or []
+        if failed:
+            name = failed[0].get("id") if isinstance(failed[0], dict) else str(failed[0])
+            return f"the test {name.rsplit('.', 1)[-1]} failed" + (f", and {len(failed) - 1} more" if len(failed) > 1 else "")
+        return "a check failed and the work was fixed"
+
+    def update(self) -> dict:
+        """The founder's update, in plain words: the numbers, what was learned, what was decided, what is at risk, and
+        what is waiting for them. Built from the record; no model writes it."""
+        tasks = self.tasks()
+        L = budget.ledger(self.store)
+        cap = project_settings.get(self.store)["budget_usd"]
+        caught = [v for v in self.store.all("verification") if v["verdict"] != "VERIFIED"]
+        decided = [d for d in self.store.all("decision") if d["status"] != "pending"]
+        pend = self.pending_decisions()
+        risk = []
+        if L.get("state") in ("warning", "breaker") or (cap and L["spent_total"] >= 0.8 * cap):
+            risk.append(f"Spending is at ${L['spent_total']:.2f} of the ${cap:.2f} budget.")
+        risk += [f"{t['id']} ({t['title']}) is stuck and needs a decision." for t in tasks if t["status"] == "FAILED"]
+        plan = self.store.get("plan", "plan_1") or {}
+        risk += [f"The high-risk guess \"{a['text']}\" is not tested yet." for a in plan.get("assumption_tests") or []
+                 if a["risk"] == "high" and a.get("task") and self.store.get("task", a["task"])
+                 and self.task(a["task"])["status"] != "VERIFIED"]
+        live = self.store.all("live_check")
+        if live and not live[-1]["ok"]:
+            risk.append("The live product did not answer its last health check.")
+        return {"cycle": self.cycle(), "phase": self.meta["phase"],
+                "numbers": {"tasks_done": sum(t["status"] == "VERIFIED" for t in tasks), "tasks": len(tasks),
+                            "spent_usd": round(L["spent_total"], 4), "budget_usd": cap,
+                            "live": bool(self.live_url()), "live_checks_ok": sum(1 for x in live if x["ok"]),
+                            "live_checks": len(live)},
+                "learned": [f"{v['task_id']}: {self._caught(v)}" for v in caught][-5:],
+                "decided": [{"what": d["problem"][:140], "by": "you" if d.get("resolved_by") == "founder" else
+                             (self.worker(d["resolved_by"]) or {}).get("title", d.get("resolved_by")),
+                             "outcome": d["outcome_label"]} for d in decided][-8:],
+                "at_risk": risk,
+                "waiting_for_you": [{"id": d["id"], "what": d["problem"][:160]} for d in pend if not d.get("in_digest")],
+                "feedback": [f["text"] for f in self.store.all("feedback") if not f.get("used_in")]}
+
     # --- reading --------------------------------------------------------------------------------------------------
     def live_url(self) -> str | None:
         return delivery.live_url(self)
@@ -887,7 +1088,9 @@ class Engine:
             "denied": [a for a in self.store.all("action") if a["status"] == "denied"],
             "verifications": self.store.all("verification"),
             "deployments": self.store.all("deployment"),
-            "transition": self.store.get("transition", "tr_1"),
+            "transition": self.store.get("transition", f"tr_{self.cycle()}") or self.store.get("transition", "tr_1"),
+            "update": self.update() if company and self.meta["phase"] not in ("new", "objective") else None,
+            "feedback": self.store.all("feedback"), "live_checks": self.store.all("live_check")[-10:],
             "budget": {"settings": project_settings.get(self.store), "ledger": budget.ledger(self.store)},
             "forecast": forecast,
             "economics": budget.actual(self.store, forecast) if forecast else None,

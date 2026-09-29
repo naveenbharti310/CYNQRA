@@ -3,6 +3,12 @@
   "title": "Candidate tracker",
   "about": "A simple internal tool with two cofounders: a CTO with two engineers, and a Chief Product Officer with a Project Manager. They build an internal recruiting tracker: a spec, one product rule for the founder, two code tasks (the first fails verification and is reworked, the second raises a Blocker), a merge and a deploy.",
   "note": "Prepared script for demo mode. Every word a worker says in demo mode comes from this file, and the product shows that. Code in files/ is real and is tested and deployed for real.",
+  "founder": {
+    "leads": [],
+    "stage": "first_version",
+    "hours_per_week": 5,
+    "background": "Runs a small recruiting firm."
+  },
   "settings": {
     "self_checks": 0
   },
@@ -103,6 +109,44 @@
           "ws_build"
         ]
       }
+    ],
+    "risks": [
+      {
+        "area": "security",
+        "text": "Candidate details are seen by someone outside the company."
+      }
+    ],
+    "assumptions": [
+      {
+        "text": "Recruiters will keep every candidate's stage up to date if it takes one click.",
+        "kind": "desirability",
+        "risk": "high",
+        "tested_by": [
+          "r_02"
+        ],
+        "founder_step": "Ask the two recruiters to use it for one week instead of the spreadsheet."
+      },
+      {
+        "text": "A simple rule for 'stuck' catches the candidates the founder worries about.",
+        "kind": "desirability",
+        "risk": "medium",
+        "tested_by": [
+          "r_04"
+        ],
+        "founder_step": ""
+      }
+    ],
+    "measures": [
+      {
+        "measure": "Candidates whose stage is current at the end of each week",
+        "target": "all",
+        "rethink_below": "four in five"
+      },
+      {
+        "measure": "Times a week the founder asks a recruiter for a candidate's status",
+        "target": "none",
+        "rethink_below": "as many as before"
+      }
     ]
   },
   "workforce": {
@@ -114,6 +158,9 @@
         "requirement_ids": [
           "r_06",
           "r_07"
+        ],
+        "risk_ids": [
+          "k_01"
         ]
       },
       {
@@ -122,7 +169,8 @@
         "requirement_ids": [
           "r_01",
           "r_04"
-        ]
+        ],
+        "risk_ids": []
       }
     ],
     "teams": {
@@ -137,7 +185,9 @@
               "r_02",
               "r_03",
               "r_05"
-            ]
+            ],
+            "supports": [],
+            "risk_ids": []
           }
         ]
       },
@@ -151,7 +201,9 @@
             "requirement_ids": [
               "r_01",
               "r_04"
-            ]
+            ],
+            "supports": [],
+            "risk_ids": []
           }
         ]
       }
@@ -355,6 +407,14 @@
       ],
       "context_ref": "objective v1, acceptance checks 8 and 9",
       "acceptance_check": "Build app.py (JSON API and /health, PORT from the environment) and index.html on the handed store, and write test_app.py. Acceptance checks 8 and 9 must pass. Do not change store.py."
+    },
+    "t_07": {
+      "artifacts": [
+        "t_04/app.py",
+        "t_04/index.html"
+      ],
+      "context_ref": "objective v1, the recruiters' feedback in cycle 2",
+      "acceptance_check": "Add days_in_stage (whole days since last_moved_at) to every candidate in the API and a Days in stage column on the list; write test_days.py. Do not change store.py; release 1's tests must still pass."
     }
   },
   "work": {
@@ -446,6 +506,38 @@
           "summary": "Email the two recruiters that the tracker is live."
         }
       }
+    ],
+    "t_07": [
+      {
+        "result": "done",
+        "summary": "days_in_stage in the API and on the list, three tests.",
+        "files": {
+          "app.py": "@files/t_07/app.py",
+          "index.html": "@files/t_07/index.html",
+          "test_days.py": "@files/t_07/test_days.py"
+        },
+        "acceptance_check": "python -m unittest test_days test_app test_store"
+      }
+    ],
+    "t_08": [
+      {
+        "result": "proposal",
+        "problem": "Release 1.1 (days in stage) is verified on the integration branch and not yet on main.",
+        "recommendation": "Approve the merge to main. Every test passes, release 1's included.",
+        "cost": "no model cost: a test run and a merge on this machine",
+        "confidence": "high",
+        "what_would_change_this": "Any failing test."
+      }
+    ],
+    "t_09": [
+      {
+        "result": "proposal",
+        "problem": "Release 1.1 is merged and verified. The recruiters still see release 1.",
+        "recommendation": "Approve. Put release 1.1 live; release 1 stays as the way back if a check fails.",
+        "cost": "no model cost: a local release on the company's own host",
+        "confidence": "high",
+        "what_would_change_this": "A failing smoke test."
+      }
     ]
   },
   "answer_blocker": {
@@ -458,5 +550,102 @@
   "review_default": {
     "verdict": "approve",
     "note": "Checked against the handoff and its acceptance criteria. Approved."
+  },
+  "cycles": {
+    "2": {
+      "feedback": "The recruiters: we cannot tell how long someone has been waiting without opening each card.",
+      "note": "Show how many days each candidate has been in its stage, on the list and in the API.",
+      "plan": {
+        "workstreams": [
+          {
+            "id": "ws_build",
+            "name": "Build"
+          },
+          {
+            "id": "ws_release",
+            "name": "Release"
+          }
+        ],
+        "milestones": [
+          {
+            "id": "m_4",
+            "name": "Days in stage built and tested",
+            "due_day": 5
+          },
+          {
+            "id": "m_5",
+            "name": "Release 1.1 live",
+            "due_day": 6
+          }
+        ],
+        "tasks": [
+          {
+            "id": "t_07",
+            "workstream_id": "ws_build",
+            "kind": "code",
+            "owner_worker_id": "w_eng_b",
+            "title": "Days in stage on the list and the API",
+            "inputs": "app.py, index.html, the recruiters' feedback",
+            "expected_output": "app.py and index.html changed, test_days.py",
+            "dependencies": [],
+            "deadline_day": 5,
+            "milestone_id": "m_4",
+            "acceptance_criteria": [
+              "Every candidate carries days_in_stage, whole days since it last moved",
+              "Moving the stage starts the count again",
+              "The list shows a Days in stage column"
+            ],
+            "requirement_ids": [
+              "r_03",
+              "r_05"
+            ],
+            "documents": []
+          },
+          {
+            "id": "t_08",
+            "workstream_id": "ws_release",
+            "kind": "review_merge",
+            "owner_worker_id": "w_cto",
+            "title": "Review and merge release 1.1",
+            "inputs": "Integration branch",
+            "expected_output": "Release 1.1 on main",
+            "dependencies": [
+              "t_07"
+            ],
+            "deadline_day": 6,
+            "milestone_id": "m_5",
+            "acceptance_criteria": [
+              "Every test passes on main after the merge, release 1's included"
+            ],
+            "requirement_ids": [
+              "r_03",
+              "r_05"
+            ],
+            "documents": []
+          },
+          {
+            "id": "t_09",
+            "workstream_id": "ws_release",
+            "kind": "deploy",
+            "owner_worker_id": "w_cto",
+            "title": "Put release 1.1 live",
+            "inputs": "Main",
+            "expected_output": "Release 1.1 live, release 1 as the way back",
+            "dependencies": [
+              "t_08"
+            ],
+            "deadline_day": 6,
+            "milestone_id": "m_5",
+            "acceptance_criteria": [
+              "Health and smoke checks pass on the live URL"
+            ],
+            "requirement_ids": [
+              "r_07"
+            ],
+            "documents": []
+          }
+        ]
+      }
+    }
   }
 }

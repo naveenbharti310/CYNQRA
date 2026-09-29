@@ -5,7 +5,12 @@ POST /api/company                   {name, mode: demo|live, scenario}  (scenario
 POST /api/objective/draft           {messy}
 POST /api/objective/fields          {fields}
 POST /api/objective/guardrails      {budget_usd, time_value_per_hour, constraints, governance}
+POST /api/objective/founder         {leads, stage, hours_per_week, background}  what the founder brings
 POST /api/objective/submit          hand the objective over: requirements, then the proposed workforce
+GET  /api/update                    the founder's update: numbers, learned, decided, at risk, waiting for them
+POST /api/feedback                  {text}  what users said; it goes into the next cycle
+POST /api/live/check                Cynqra checks the live product is up
+POST /api/cycle                     {note, budget_usd}  the next cycle on the live product
 POST /api/decisions/<id>            {action: approve|reject|request_evidence, note, edited}
 POST /api/run/step
 POST /api/run/auto                  {on, delay}
@@ -87,7 +92,7 @@ class App:
 
     def _new_engine(self) -> Engine:
         intel = self.factory() if self.factory else None
-        return Engine(self.root / "current", intelligence=intel, supply=self.supply)
+        return Engine(self.root / "current", intelligence=intel, supply=self.supply, memory=self.root / "lessons.json")
 
     def _loop(self) -> None:
         while not self._stop.is_set():
@@ -320,6 +325,8 @@ def make_server(app: App, port: int = 8750) -> ThreadingHTTPServer:
                 return self._guard(lambda: app.engine.replay(m.group(1)))
             if path == "/api/intelligence":
                 return self._guard(lambda: {**app.supply.snapshot(), "probes": app.probes})
+            if path == "/api/update":
+                return self._guard(lambda: app.engine.update())
             if path == "/api/graph":
                 q = parse_qs(u.query)
                 return self._guard(lambda: app.engine.graph(q.get("q", [""])[0], q.get("subject", [""])[0]))
@@ -352,6 +359,10 @@ def make_server(app: App, port: int = 8750) -> ThreadingHTTPServer:
                 "/api/connections": lambda: app.supply_call("connect", None, body),
                 "/api/intelligence": lambda: app.supply_call("register", None, body),
                 "/api/objective/submit": e.submit_objective,
+                "/api/objective/founder": lambda: e.set_founder(body.get("founder") or {}),
+                "/api/feedback": lambda: e.feedback(body.get("text", "")),
+                "/api/live/check": e.check_live,
+                "/api/cycle": lambda: e.start_cycle(body.get("note", ""), body.get("budget_usd")),
                 "/api/run/step": app.step,
                 "/api/killswitch": lambda: e.kill_switch(bool(body.get("on"))),
                 "/api/run/resume": e.resume,

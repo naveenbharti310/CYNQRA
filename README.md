@@ -1,7 +1,7 @@
 # Cynqra
 
-**Describe the company you want to build. Cynqra assembles the expert team it needs, checks every piece of their
-work, and asks you only what a CEO should decide.**
+**Describe what you want to build. Cynqra turns it into a working result, in weeks instead of months, within your
+budget, without you coordinating the work.**
 
 ## The story
 
@@ -9,18 +9,24 @@ Say you want to start a company. In real life you would first find cofounders: s
 someone to lead the product, maybe someone to look after the money. Each cofounder would then hire their own
 people. As CEO you would not write the code or check every spreadsheet. You would make the big calls.
 
-Cynqra works the same way, with AI experts in place of people.
+Cynqra works the same way, with AI experts in place of people. What you buy is the result: your idea working in the
+real world, in weeks instead of months, within your budget, without you coordinating anyone. The team is how Cynqra
+gets there.
 
 1. **You describe your idea** in your own words.
 2. **Cynqra suggests your cofounders** and tells you why each one is needed.
 3. **Each cofounder picks a team** for their area. A CTO might pick engineers and a tester; a CFO might pick a legal
-   advisor.
+   advisor. Then an independent check tries to make the team smaller: every seat must own something no one else
+   covers, or it goes. You see who asked for each seat and what would be left undone without it, and a lean team
+   next to the recommended one.
 4. **You see the whole organization chart and approve it once.** Then you approve the plan and the budget.
 5. **The team gets to work.** Cofounders hand out the tasks, answer their team's questions and review every piece of
    work. Cynqra also checks each piece on its own, for example by running the code's tests.
-6. **You are asked only what a CEO should decide:** spending money, taking a risk, going live.
-7. **At the end you get the Company Pack:** the founding documents, the working product, every decision you made and
-   what it all cost.
+6. **You are asked only what a CEO should decide:** the choices that cannot be undone, such as money, law and going
+   live. What can be undone, like merging finished code, is settled by the cofounder in charge, and you are told.
+7. **At the end you get the Company Pack:** the working product, how you will know it worked, the business numbers
+   checked by the platform, the founding documents, every decision and what it all cost.
+8. **Then it keeps going.** Tell Cynqra what users said, and the same team builds the next version.
 
 ## Why it matters
 
@@ -41,7 +47,9 @@ Cynqra suggests three cofounders, and each picks a team:
 | Chief Product Officer | a Project Manager, a Designer, a Market Analyst and a Restaurant Revenue Management Specialist |
 | CFO | a Legal and Compliance Advisor |
 
-Together they write the company's founding documents, build and check the app, and put it live.
+The CTO also asked for a Security Expert, but it owned nothing: release 1 takes no payments and keeps no diner data.
+The independent check cut it before the founder saw the team. Together the rest write the company's founding
+documents, build and check the app, and put it live.
 
 Then the owner tries their own idea in the live app: 50% off for up to 15 customers between 1 pm and 4 pm. Bluedip
 shows that this brings in more sales but **loses money once food cost is counted**, because customers who would have

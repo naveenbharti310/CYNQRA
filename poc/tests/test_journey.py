@@ -42,13 +42,17 @@ class JourneyTests(unittest.TestCase):
 
     def test_founder_only_sees_what_needs_them(self):
         kinds = [d["kind"] for d in self.answered]
-        self.assertEqual(kinds, ["decision", "review_merge", "deploy", "accept_delivery"])
-        # submitting the objective, the workforce gate, the roadmap gate, and the four above
-        self.assertEqual(self.e.metrics()["founder_interventions"], 7)
-        risks = {d["kind"]: d["risk"] for d in self.answered}
-        self.assertEqual(risks["decision"], "MEDIUM")
-        self.assertEqual(risks["review_merge"], "MEDIUM")
-        self.assertEqual(risks["deploy"], "HIGH")
+        self.assertEqual(kinds, ["deploy", "accept_delivery"], "going live and acceptance cannot be undone")
+        # submitting the objective, the workforce gate, the roadmap gate, and the two above
+        self.assertEqual(self.e.metrics()["founder_interventions"], 5)
+        settled = {d["kind"]: d for d in self.e.store.all("decision") if d["outcome_label"] == "settled_by_cofounder"}
+        self.assertEqual(sorted(settled), ["decision", "review_merge"], "easy to undo: settled by a cofounder")
+        self.assertEqual((settled["decision"]["resolved_by"], settled["review_merge"]["resolved_by"]), ("w_cpo", "w_cto"))
+        self.assertEqual(settled["review_merge"]["risk"], "MEDIUM")
+        told = [n for n in self.e.store.all("ceo_notice") if n["kind"] == "settled_by_cofounder"]
+        self.assertEqual(len(told), 2, "the founder is told what was settled for them")
+        self.assertIn("by the Chief Product Officer", (self.e.paths["main"] / "docs" / "DECISIONS.md").read_text(
+            encoding="utf-8"))
 
     def test_objective_submitted_and_decomposed(self):  # A1, Stages 0 and 1
         o = self.e.objective()
@@ -290,10 +294,14 @@ class BluedipJourneyTests(unittest.TestCase):
                          [("t_11", "w_spec_revenue_management", False), ("t_12", "w_cto", False)])
 
     def test_the_ceo_decided_only_ceo_questions(self):
-        self.assertEqual([d["kind"] for d in self.answered], ["decision", "review_merge", "deploy", "accept_delivery"])
+        self.assertEqual([d["kind"] for d in self.answered], ["decision", "deploy", "accept_delivery"],
+                         "a rule on money is the founder's; the merge was settled by the CTO")
         self.assertEqual(self.answered[0]["source"], "w_cfo")
-        self.assertEqual((self.answered[2]["source"], self.answered[2]["extra"]["endorsed_by"]), ("w_devops", "w_cto"),
+        self.assertEqual(self.answered[0]["extra"]["door"], "one_way")
+        self.assertEqual((self.answered[1]["source"], self.answered[1]["extra"]["endorsed_by"]), ("w_devops", "w_cto"),
                          "DevOps's proposal reached the CEO through the CTO")
+        merge = next(d for d in self.e.store.all("decision") if d["kind"] == "review_merge")
+        self.assertEqual((merge["outcome_label"], merge["resolved_by"]), ("settled_by_cofounder", "w_cto"))
         self.assertIn("50%", (self.e.paths["main"] / "docs" / "DECISIONS.md").read_text(encoding="utf-8"))
 
     def test_the_live_app_shows_the_owners_example_loses_money_and_a_better_offer(self):
@@ -362,9 +370,9 @@ class RestaurantJourneyTests(unittest.TestCase):
         self.assertIn("plus 10 percent", (self.e.paths["main"] / "docs" / "DECISIONS.md").read_text())
 
     def test_the_founder_saw_only_what_needed_them(self):
-        self.assertEqual([d["kind"] for d in self.answered], ["decision", "review_merge", "deploy", "accept_delivery"])
-        self.assertEqual(self.answered[2]["source"], "w_devops", "DevOps proposed the deploy")
-        self.assertEqual(self.e.metrics()["founder_interventions"], 7)
+        self.assertEqual([d["kind"] for d in self.answered], ["deploy", "accept_delivery"])
+        self.assertEqual(self.answered[0]["source"], "w_devops", "DevOps proposed the deploy")
+        self.assertEqual(self.e.metrics()["founder_interventions"], 5)
 
     def test_every_task_replays_completely(self):
         for t in self.e.tasks():

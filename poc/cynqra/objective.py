@@ -1,9 +1,12 @@
 """Objective Intelligence: Stages 0 and 1 of the product definition.
 
 The founder hands over a project name, the outcome they want, a budget and any constraints (deadline, geography,
-technology, compliance, risk tolerance). They do not describe a team. Cynqra structures the outcome into seven
-fields, then decomposes it into requirements by area, groups them into workstreams, and computes the critical path.
-The model proposes; the platform checks (validate_requirements) and owns every identifier.
+technology, compliance, risk tolerance), and says what they bring themselves: the areas they will lead, the time they
+have, and the stage the company is at (FOUNDER). They do not describe a team. Cynqra structures the outcome into
+seven fields, then decomposes it into the outcomes, the requirements by area and the risks the company must control,
+groups the requirements into workstreams, and computes the critical path. The founder confirms that list before any
+team is proposed: the team is built from it and from nothing else. The model proposes; the platform checks
+(validate_requirements) and owns every identifier.
 """
 from __future__ import annotations
 
@@ -18,6 +21,12 @@ FIELDS = ["product", "target_customer", "primary_outcome", "business_outcome", "
 CONSTRAINT_KEYS = ["deadline", "geography", "technology", "compliance", "risk_tolerance"]
 NOT_STATED = "not stated in the brief"
 
+# What the founder brings. A real founder chooses cofounders to fill their own gaps: an area the founder leads
+# themselves gets no cofounder, and its requirements are the founder's own. The stage sets how large a team each
+# cofounder may hire: a company building its first version needs few people, one going live a few more.
+STAGES = {"idea": "Testing the idea", "first_version": "Building the first version", "launch": "Going live"}
+TEAM_LIMIT = {"idea": 2, "first_version": 4, "launch": 6}  # team seats one cofounder may hire, by stage
+FOUNDER_DEFAULT = {"leads": [], "stage": "first_version", "hours_per_week": 10, "background": ""}
 
 class ObjectiveError(ValueError):
     pass
@@ -40,9 +49,30 @@ def _slug_list(value) -> list[str]:
     return [str(v).strip() for v in value or [] if str(v).strip()] if isinstance(value, list) else []
 
 
-def validate_requirements(pkg: dict) -> dict:
-    """Stage 1's objective package, checked by the platform: known areas, ids it owns (r_01, ws_01), workstreams that
-    hold every requirement, dependencies without cycles, and the critical path computed from them."""
+def founder_profile(value) -> dict:
+    """The founder's profile, checked: only cofounder seats can be led by the founder, a known stage, whole hours."""
+    v = value if isinstance(value, dict) else {}
+    leads = [x for x in _slug_list(v.get("leads")) if x in roles.COFOUNDERS]
+    stage = str(v.get("stage") or FOUNDER_DEFAULT["stage"]).strip()
+    if stage not in STAGES:
+        raise ObjectiveError(f"stage must be one of {', '.join(STAGES)}")
+    try:
+        hours = max(0, min(100, int(float(v.get("hours_per_week", FOUNDER_DEFAULT["hours_per_week"])))))
+    except (TypeError, ValueError) as exc:
+        raise ObjectiveError("hours_per_week must be a number") from exc
+    return {"leads": list(dict.fromkeys(leads)), "stage": stage, "hours_per_week": hours,
+            "background": str(v.get("background") or "").strip()[:400]}
+
+
+def founder_areas(profile: dict | None) -> set[str]:
+    """The requirement areas the founder leads themselves: the areas of the cofounder seats they hold."""
+    return {a for c in (profile or {}).get("leads") or [] for a in roles.role(c)["areas"]}
+
+
+def validate_requirements(pkg: dict, founder: dict | None = None) -> dict:
+    """Stage 1's objective package, checked by the platform: known areas, ids it owns (r_01, ws_01, k_01), workstreams
+    that hold every requirement, dependencies without cycles, and the critical path computed from them. A requirement
+    in an area the founder leads is marked as the founder's own; a risk names what must not go wrong."""
     if not isinstance(pkg, dict) or not isinstance(pkg.get("requirements"), list) or not pkg["requirements"]:
         raise IntelligenceError("the objective package has no requirements")
     rename, reqs = {}, []
@@ -58,6 +88,8 @@ def validate_requirements(pkg: dict) -> dict:
             rename[str(r["id"]).strip()] = rid
         reqs.append({"id": rid, "area": area, "text": str(r["text"]).strip(),
                      "verification": str(r.get("verification") or "").strip()})
+        if area in founder_areas(founder):
+            reqs[-1]["owner"] = "founder"
     known = {r["id"] for r in reqs}
     ws_in = [w for w in pkg.get("workstreams") or [] if isinstance(w, dict) and str(w.get("name") or w.get("id") or "").strip()]
     ws_rename = {str(w.get("id") or "").strip(): f"ws_{i:02d}" for i, w in enumerate(ws_in, start=1)}
@@ -69,6 +101,12 @@ def validate_requirements(pkg: dict) -> dict:
         deps = [ws_rename.get(x) for x in _slug_list(w.get("depends_on"))]
         workstreams.append({"id": f"ws_{i:02d}", "name": str(w.get("name") or w.get("id")).strip(),
                             "requirement_ids": ids, "depends_on": [d for d in dict.fromkeys(deps) if d]})
+    if any(r["area"] in ("business", "finance") for r in reqs) and not any(r["area"] == "market" for r in reqs):
+        # a company must reach its customers: a business with no plan for it is missing its most common way to fail
+        reqs.append({"id": f"r_{len(reqs) + 1:02d}", "area": "market", "added_by": "platform",
+                     "text": "How the first customers will be reached, and what winning one costs.",
+                     "verification": "Go-to-market plan"})
+        known.add(reqs[-1]["id"])
     loose = [r["id"] for r in reqs if r["id"] not in placed]
     if loose:  # every requirement belongs to some workstream; the platform says when it had to place one
         workstreams.append({"id": f"ws_{len(workstreams) + 1:02d}", "name": "Other requirements",
@@ -97,9 +135,58 @@ def validate_requirements(pkg: dict) -> dict:
     critical = max(longest.values(), key=len, default=[])
     outs = pkg.get("outcomes")
     outs = [outs] if isinstance(outs, str) else outs if isinstance(outs, list) else []
+    risks = []
+    for r in pkg.get("risks") if isinstance(pkg.get("risks"), list) else []:
+        if not isinstance(r, dict) or not str(r.get("text") or "").strip():
+            continue
+        area = str(r.get("area") or "").strip().lower().replace(" ", "_")
+        area = AREA_ALIASES.get(area, area)
+        if area not in roles.AREAS:
+            raise IntelligenceError(f"risk {r.get('text')!r}: unknown area {r.get('area')!r}; use one of "
+                                    f"{', '.join(roles.AREAS)}")
+        risks.append({"id": f"k_{len(risks) + 1:02d}", "area": area, "text": str(r["text"]).strip()[:300]})
     return {"outcomes": [str(x).strip() for x in outs if str(x).strip()],
-            "requirements": reqs, "workstreams": workstreams, "critical_path": critical,
+            "requirements": reqs, "risks": risks, "assumptions": assumptions(pkg, reqs), "measures": measures(pkg),
+            "workstreams": workstreams, "critical_path": critical,
             "verification": [f"{r['id']}: {r['verification']}" for r in reqs if r["verification"]]}
+
+
+KINDS = {"desirability": "people want it", "viability": "it makes money", "feasibility": "it can be built"}
+LEVELS = ("high", "medium", "low")
+
+
+def assumptions(pkg: dict, reqs: list[dict]) -> list[dict]:
+    """The guesses the idea depends on, riskiest first: how bad it is if the guess is wrong (high, medium, low), then
+    whether people want it, whether it makes money, whether it can be built. Each names the requirements whose work
+    tests it and, when only a person can test it (talking to customers), the founder's step. Nothing here asks the
+    founder anything: the plan tests what it can, and the rest is prepared as a next step."""
+    known = {r["id"] for r in reqs}
+    out = []
+    for a in pkg.get("assumptions") if isinstance(pkg.get("assumptions"), list) else []:
+        if not isinstance(a, dict) or not str(a.get("text") or "").strip():
+            continue
+        kind = str(a.get("kind") or "").strip().lower()
+        risk = str(a.get("risk") or "medium").strip().lower()
+        out.append({"text": str(a["text"]).strip()[:300], "kind": kind if kind in KINDS else "desirability",
+                    "risk": risk if risk in LEVELS else "medium",
+                    "tested_by": [x for x in _slug_list(a.get("tested_by")) if x in known],
+                    "founder_step": str(a.get("founder_step") or "").strip()[:300]})
+    out.sort(key=lambda a: (LEVELS.index(a["risk"]), list(KINDS).index(a["kind"])))
+    for i, a in enumerate(out, start=1):
+        a["id"] = f"a_{i:02d}"
+    return out
+
+
+def measures(pkg: dict) -> list[dict]:
+    """How the founder will know it worked: each with its target and the line below which to rethink."""
+    out = []
+    for m in pkg.get("measures") if isinstance(pkg.get("measures"), list) else []:
+        if not isinstance(m, dict) or not str(m.get("measure") or "").strip():
+            continue
+        out.append({"id": f"m_{len(out) + 1:02d}", "measure": str(m["measure"]).strip()[:200],
+                    "target": str(m.get("target") or "").strip()[:80],
+                    "rethink_below": str(m.get("rethink_below") or "").strip()[:80]})
+    return out
 
 
 def draft(run, messy: str) -> dict:
@@ -162,13 +249,16 @@ def submit(run) -> dict:
     return obj
 
 
-def decompose(run) -> dict:
-    """Stage 1: requirements, workstreams, critical path. The model's answer is checked; refused once, it is asked
-    again with the reason; refused twice, the step stops and nothing is invented."""
-    pkg, usage = ask(lambda feedback: run.intel.decompose(run.objective_ctx(), feedback=feedback), validate_requirements)
+def decompose(run, note: str = "") -> dict:
+    """Stage 1: outcomes, requirements, risks, workstreams, critical path. The model's answer is checked; refused
+    once, it is asked again with the reason; refused twice, the step stops and nothing is invented. note: the
+    founder's feedback on the previous list."""
+    founder = run.founder()
+    pkg, usage = ask(lambda feedback: run.intel.decompose(run.objective_ctx(), feedback=feedback, note=note),
+                     lambda d: validate_requirements(d, founder))
     run.record_call("objective", "objective_intelligence", "decompose", usage)
     rec = {"id": "req_1", **pkg, "objective_version": run.objective()["version"], "intelligence": usage["label"],
-           "created_at": now()}
+           "note": note, "created_at": now()}
     run.store.put("requirements", "req_1", rec)
     run.event("objective.decomposed", "objective", "obj_1", {"requirements": len(pkg["requirements"]),
               "workstreams": len(pkg["workstreams"]), "critical_path": pkg["critical_path"]},

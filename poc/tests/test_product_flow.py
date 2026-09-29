@@ -9,7 +9,7 @@ import unittest
 
 from helpers import M1_ROLES, SCENARIO, TempDir, approve, no_model_env, restore_env
 
-from cynqra import budget, performance, policy, roles
+from cynqra import budget, performance, policy, roles, seats
 from cynqra import settings as project_settings
 from cynqra.engine import Engine, EngineError
 from cynqra.intelligence import IntelligenceError, ScriptedSource
@@ -250,10 +250,16 @@ class GateTests(unittest.TestCase):
         self.assertIn("add one of", str(ctx.exception), "a founder's edit is refused, not completed behind them")
         d = approve(self.e, "approve_workforce", edited=self.EDIT)
         self.assertEqual(d["outcome_label"], "approved_edited")
-        self.assertEqual(sorted(w["id"] for w in self.e.workers()), ["w_cto", "w_eng_a", "w_eng_b", "w_pm", "w_qa"])
-        self.assertEqual(self.e.worker("w_qa")["reports_to"], "w_cto", "QA reports to the CTO")
+        self.assertEqual(next(w for w in self.e.proposal()["workers"] if w["id"] == "w_qa")["reports_to"], "w_cto",
+                         "QA reports to the CTO")
         self.assertTrue(self.e.proposal()["overridden"])
         self.assertIn("workforce.overridden", [x["event_type"] for x in self.e.store.events()])
+        # the plan gives the QA engineer the founder added no work: it leaves before anything starts, and the
+        # roadmap says so instead of asking
+        self.assertEqual(sorted(w["id"] for w in self.e.workers()), ["w_cto", "w_eng_a", "w_eng_b", "w_pm"])
+        self.assertIn("worker.released", [x["event_type"] for x in self.e.store.events()])
+        road = next(x for x in self.e.pending_decisions() if x["kind"] == "approve_roadmap")
+        self.assertIn("QA Engineer had no work in this plan and was removed before anything started", road["evidence_refs"])
 
     def test_the_roadmap_is_a_separate_gate_and_can_be_rejected(self):
         approve(self.e, "approve_workforce")
@@ -344,8 +350,15 @@ class ScenariosAreHonestTests(unittest.TestCase):
         for lead in names:
             teams[lead] = validate_team(src.build_team({}, req, cofounder=lead)[0], req, lead, names, taken)
             taken.update({r["role"]: lead for r in teams[lead]["roles"]})
-        prop = validate_workforce({"summary": cof["summary"], "cofounders": cof["cofounders"], "teams": teams}, req)
-        self.assertFalse([r for r in prop["roles"] if r.get("added_by")], "the script needs nothing added")
+        proposed = validate_workforce({"summary": cof["summary"], "cofounders": cof["cofounders"], "teams": teams}, req)
+        self.assertFalse([r for r in proposed["roles"] if r.get("added_by")], "the script needs nothing added")
+        self.assertFalse(proposed["assigned"]["requirements"] or proposed["assigned"]["risks"],
+                         "every requirement and risk was claimed by the proposers")
+        challenge = seats.read_challenge(src.challenge({}, req, seats.cards(proposed, req))[0])
+        applied = seats.apply_challenge(proposed["roles"], req, challenge)  # the same challenge the product runs
+        prop = validate_workforce({"summary": "s", "roles": applied["rows"]}, req)
+        prop["removed"] = applied["removed"]
+        self.assertTrue(all(c["needed"] for c in seats.cards(prop, req)), "every seat left earns its place")
         self.assertEqual(sum(r["quantity"] for r in prop["roles"]), workers_expected)
         self.assertTrue(all(prop["coverage"].values()))
         plan = validate_plan(src.plan({}, prop["workers"], req)[0], prop["workers"], [r["id"] for r in req["requirements"]])
@@ -359,6 +372,8 @@ class ScenariosAreHonestTests(unittest.TestCase):
     def test_bluedip(self):
         prop, plan = self.check("bluedip", 13)
         self.assertEqual(prop["cofounders"], ["CTO", "CPO", "CFO"])
+        self.assertEqual([r["seat"] for r in prop["removed"]], ["SecurityExpert"],
+                         "the CTO's Security Expert owned nothing: the challenge cut it")
         lead = {w["title"]: w["reports_to"] for w in prop["workers"]}
         self.assertEqual({t for t, to in lead.items() if to == "w_cto"}, {
             "Senior Data Scientist", "Backend Engineer", "Frontend Engineer", "DevOps Engineer", "QA Engineer"})

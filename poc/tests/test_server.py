@@ -232,7 +232,8 @@ class BrowserEndToEnd(unittest.TestCase):  # A16
             res = json.loads(line)
             self.assertTrue(res["ok"], res)
             self.assertEqual(res["phase"], "accepted")
-            self.assertEqual(len([s for s in res["steps"] if s.startswith("founder approved")]), 4)
+            self.assertEqual(len([s for s in res["steps"] if s.startswith("founder approved")]), 3,
+                             "the rule on money, going live and acceptance; the CTO settled the merge")
         finally:
             proc.terminate()
             proc.wait(timeout=10)

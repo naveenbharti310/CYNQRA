@@ -47,6 +47,8 @@ def answer(prompt: str) -> str:
     elif "Propose the team you need for your own area" in prompt:
         lead = next((c for c in S["workforce"]["teams"] if f"(w_{c.lower()})" in prompt), None)
         out = S["workforce"]["teams"].get(lead) or {"summary": "", "roles": []}
+    elif "You are the independent challenger of a proposed team" in prompt:
+        out = S.get("challenge") or {"seats": [], "failure_stories": []}
     elif "Review it as the cofounder accountable for this area" in prompt:
         out = S.get("review_default") or {"verdict": "approve", "note": "Checked against the handoff. Approved."}
     elif "Plan the work for this organization" in prompt:

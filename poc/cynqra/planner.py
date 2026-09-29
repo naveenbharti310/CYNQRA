@@ -45,17 +45,20 @@ ESCALATION_CONDITIONS = [
 ]
 
 
-def validate_plan(plan: dict, workers: list[dict], requirement_ids: list[str] | None = None) -> dict:
+def validate_plan(plan: dict, workers: list[dict], requirement_ids: list[str] | None = None, start: int = 1,
+                  done: set[str] | None = None) -> dict:
     """The platform owns the rubric: a task type's risk, its verifier, and which roles may own it are not the model's
     call. Task ids are renumbered t_01, t_02 in plan order and dependencies follow them; model text never becomes an
-    identifier. Milestones, acceptance criteria and document types a model left out are derived and marked so."""
+    identifier. Milestones, acceptance criteria and document types a model left out are derived and marked so. A later
+    cycle's tasks are numbered after the earlier ones (start), and a dependency on work already done (done) is
+    dropped: that work is finished."""
     if not isinstance(plan, dict) or not isinstance(plan.get("tasks"), list) or not plan["tasks"]:
         raise IntelligenceError("plan has no tasks")
     if not all(isinstance(t, dict) for t in plan["tasks"]):
         raise IntelligenceError("every task must be an object")
     by_id = {w["id"]: w for w in workers}
     rename = {}
-    for i, t in enumerate(plan["tasks"], start=1):
+    for i, t in enumerate(plan["tasks"], start=start):
         old = str(t.get("id") or "").strip()
         if old:
             rename[old] = f"t_{i:02d}"
@@ -81,6 +84,8 @@ def validate_plan(plan: dict, workers: list[dict], requirement_ids: list[str] | 
             raise IntelligenceError(f"{t['id']}: dependencies must be a list")
         clean_deps = []
         for dep in deps:
+            if done and str(dep).strip() in done and str(dep).strip() not in rename:
+                continue  # finished in an earlier cycle
             dep = rename.get(str(dep).strip(), str(dep).strip())
             if dep not in ids:
                 raise IntelligenceError(f"{t['id']} depends on {dep}, which is not an earlier task")
@@ -140,6 +145,25 @@ def validate_plan(plan: dict, workers: list[dict], requirement_ids: list[str] | 
                                        if not any(r in t["requirement_ids"] for t in tasks)]}
 
 
+def assumption_tests(tasks: list[dict], milestones: list[dict], assumptions: list[dict]) -> list[dict]:
+    """When the plan tests each guess the idea depends on: the first task whose work covers a requirement that tests
+    it. The riskiest guesses should be tested early, before money goes into what depends on them; a high-risk guess
+    first tested only in the last milestone, or never, is said plainly at the roadmap gate."""
+    order = {m["id"]: i for i, m in enumerate(milestones)}
+    names = {m["id"]: m["name"] for m in milestones}
+    out = []
+    for a in assumptions:
+        hits = sorted((t for t in tasks if set(a.get("tested_by") or []) & set(t.get("requirement_ids") or [])),
+                      key=lambda t: (order.get(t.get("milestone_id"), 99), t["id"]))
+        first = hits[0] if hits else None
+        late = first is None or (len(milestones) > 1 and order.get(first.get("milestone_id")) == len(milestones) - 1)
+        out.append({"id": a["id"], "text": a["text"], "risk": a["risk"], "kind": a["kind"],
+                    "task": first["id"] if first else None, "tasks": [t["id"] for t in hits],
+                    "milestone": names.get(first.get("milestone_id"), "") if first else "",
+                    "early": not late, "founder_step": a.get("founder_step", "")})
+    return out
+
+
 def critical_path(tasks: list[dict]) -> list[str]:
     longest: dict[str, list[str]] = {}
     for t in tasks:  # dependencies only name earlier tasks
@@ -175,22 +199,27 @@ def enrich(plan: dict, workers: list[dict]) -> dict:
     return plan
 
 
-def plan(run, note: str = "") -> dict:
+def plan(run, note: str = "", cycle: int = 1) -> dict:
     """Stage 5 for the approved organization. Tasks keep their ids across a revised roadmap; the new plan replaces
-    the old one before any work starts."""
+    the old one before any work starts. A later cycle plans only the new work, numbered after what is done, and keeps
+    the earlier tasks in the record."""
     workers = run.workers()
     boss = roles.planner(workers)
-    rids = [r["id"] for r in run.requirements()["requirements"]]
+    earlier = [t for t in run.tasks() if int(t.get("cycle") or 1) < cycle]
+    done = {t["id"] for t in earlier}
+    rids = [] if cycle > 1 else [r["id"] for r in run.requirements()["requirements"] if r.get("owner") != "founder"]
     p, usage = ask(lambda feedback: run.intel.plan(run.objective_ctx(), workers, run.requirements(), note=note,
-                                                   feedback=feedback, planner=boss, persona=run.persona(boss)),
-                   lambda d: validate_plan(d, workers, rids))
+                                                   feedback=feedback, planner=boss, persona=run.persona(boss),
+                                                   cycle=cycle, done=[f"{t['id']}: {t['title']}" for t in earlier]),
+                   lambda d: validate_plan(d, workers, rids, start=len(earlier) + 1, done=done))
     run.record_call("plan", boss, "plan", usage)
     p = enrich(p, workers)
     order = []
     for i, t in enumerate(p["tasks"]):
         t.update({"company_id": run.cid, "objective_id": "obj_1", "context": f"objective v{run.objective()['version']}",
+                  "cycle": cycle,
                   "status": "PLANNED", "attempts": 0, "work_calls": 0, "blockers": 0, "feedback": "", "handoff_hash": None,
-                  "answers": [], "outputs": [], "decision_id": None, "seq": i, "created_at": now()})
+                  "answers": [], "outputs": [], "decision_id": None, "seq": len(earlier) + i, "created_at": now()})
         run.save_task(t)
         order.append(t["id"])
         run.event("task.created", "task", t["id"], {"kind": t["kind"], "risk_tier": t["risk_tier"],
@@ -198,5 +227,12 @@ def plan(run, note: str = "") -> dict:
                   "milestone": t["milestone_id"]}, actor=boss, actor_type="worker", correlation_id=t["id"])
     record = {k: p[k] for k in ("workstreams", "milestones", "critical_path", "escalation_conditions", "reporting",
                                 "coordination", "uncovered_requirements")}
-    run.store.put("plan", "plan_1", {"id": "plan_1", "order": order, "note": note, **record})
+    record["assumption_tests"] = assumption_tests(p["tasks"], p["milestones"],
+                                                  run.requirements().get("assumptions") or []) if cycle == 1 else \
+        (run.store.get("plan", "plan_1") or {}).get("assumption_tests", [])
+    before = run.store.get("plan", "plan_1") if cycle > 1 else None
+    history = (before or {}).get("earlier_cycles", []) + ([{"cycle": cycle - 1, "milestones": before["milestones"],
+                                                           "critical_path": before["critical_path"]}] if before else [])
+    run.store.put("plan", "plan_1", {"id": "plan_1", "order": [t["id"] for t in earlier] + order, "note": note,
+                                     "cycle": cycle, "earlier_cycles": history, **record})
     return run.store.get("plan", "plan_1")

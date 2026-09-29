@@ -1,6 +1,6 @@
 # 3. Status and roadmap
 
-Last updated: 28 September 2026.
+Last updated: 29 September 2026.
 
 **What** this covers: what works today, what is proven, and what comes next. **Why** it matters: the vision is only
 as good as the proof behind it. **How** to read it: the status table first, then what real AI models have done so
@@ -13,9 +13,14 @@ been proven end to end on strong real AI models in its current form.
 
 | Area | Status |
 | --- | --- |
-| The full flow (idea → team → plan → parallel work → checks → delivery) | ✅ Built. 272 automated tests pass. |
-| Demo mode (scripted words; real code, models, tests and going live) | ✅ Works end to end. It opens on Bluedip: three cofounders and the ten team members they chose, seventeen tasks, two mistakes caught by the checks, one piece of work sent back by a cofounder, two questions settled inside the team, four CEO decisions, the Company Pack. Two smaller demos are in the list. |
+| The full flow (idea → team → plan → parallel work → checks → delivery) | ✅ Built. 302 automated tests pass. |
+| Demo mode (scripted words; real code, models, tests and going live) | ✅ Works end to end. It opens on Bluedip: three cofounders and the ten team members they chose (fourteen seats proposed and one cut by the independent challenge), seventeen tasks, three mistakes caught by the checks, one piece of work sent back by a cofounder, two questions settled inside the team, three CEO decisions after the two approvals (a rule on money, going live, acceptance; the CTO settled the merge), the Company Pack. Two smaller demos are in the list. |
 | Cofounders proposed from the idea, each choosing its own team, Specialists named from it | ✅ Built and tested. |
+| Every seat earns its place: one owner per requirement, who asked for each seat, an independent challenge, the lean team beside the recommended one, members with no work removed | ✅ Built and tested. Asks the founder nothing more. |
+| The guesses an idea rests on, riskiest first and tested early; measures of success | ✅ Built and tested. |
+| The financial model's numbers recomputed by the platform | ✅ Built and tested. |
+| Decisions that can be undone settled by the accountable cofounder; the CEO told | ✅ Built and tested. |
+| After launch: the CEO's update, live checks, what users said, the next cycle on the live product, the foundations checklist, the track record across projects | ✅ Built and tested. The demos script a second cycle for the candidate tracker only. |
 | Cofounders run their areas: hand out, answer doubts, review before work counts, endorse proposals to the CEO | ✅ Built and tested. |
 | Team works in parallel | ✅ Built and tested. |
 | Best AI per member, measured | ✅ Built and tested. |
@@ -25,7 +30,7 @@ been proven end to end on strong real AI models in its current form.
 | Installable desktop app (Windows, macOS, Linux) | ✅ Builds and installs; version 0.1.2. |
 | **A full project on strong real models, current design** | ❌ **Not yet done.** See "Real-model results". |
 | Web research and calculation tools for the experts | ❌ Not built. |
-| Checks of document substance (facts, numbers, consistency) | ❌ Not built; documents are checked for structure and trust sections only. |
+| Checks of document substance | Partly: the financial model's numbers are recomputed, and foundation documents must mark assumptions and list sources. Facts are not yet checked against their sources. |
 | Hosted web product (accounts, workspaces, billing) | ❌ Not built. Today it runs on one computer. |
 
 **What the automated tests prove:** the machinery works. They use stand-in AIs (test doubles) and the demo's
@@ -51,7 +56,7 @@ Hugging Face PRO. Nothing in it is scripted: it is the test of whether real AI m
 | 2 | **Founder conversations:** show 10 to 20 target founders the Bluedip result; ask if they would pay, and how much | Confirms demand, price and the first buyer. |
 | 3 | **Speed:** online models by default; smaller tasks; faster rescue when a task fails twice | Real runs took hours. |
 | 4 | **Tools for the experts:** web research with sources; a calculator for the CFO; real tool use for building, or hand building to proven coding agents | Experts need current facts; a model's memory goes out of date. |
-| 5 | **Checks of substance:** facts against sources, numbers recomputed, documents consistent with each other, an independent reviewer | Trust is the product. |
+| 5 | **Checks of substance:** facts against their sources, documents consistent with each other (the financial model's numbers are already recomputed) | Trust is the product. |
 | 6 | **Kickoff agreements:** before parallel work starts, the team agrees on how the parts connect and the key facts | Parallel work must fit together. |
 | 7 | **Company memory:** a shared knowledge base; a CEO change updates every affected document | The team must stay consistent over time. |
 | 8 | **Field playbooks:** what companies in a field usually need, as a starting point the idea adjusts | Better teams, faster. |
@@ -83,3 +88,11 @@ Hugging Face PRO. Nothing in it is scripted: it is the test of whether real AI m
 - The evidence for choosing models is thin (1 to 3 trial tasks per model) until more projects run.
 - The desktop app keeps everything on one computer; there is no multi-user version.
 - The demo video (`poc/demo/`) still shows the earlier candidate-tracker demo.
+- The independent challenge of a team runs on the same AI Cynqra uses for planning, with its own brief to make the
+  team smaller; what is cut is decided by the platform's removal test. Running it on a different AI
+  when more than one is connected is a next step.
+- In the demos, the lean team is shown but cannot be chosen, because each script plans the recommended team; only
+  the candidate tracker has a scripted second cycle. In live mode both work for any idea.
+- A cycle after launch must ship a code change; a cycle of documents only is not supported yet.
+- The business numbers are checked for arithmetic and for where each input comes from; whether an assumption is
+  realistic is for the founder and a professional to judge.

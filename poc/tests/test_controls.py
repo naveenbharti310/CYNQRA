@@ -65,10 +65,13 @@ class GatewayTests(Base):  # A6
         self.assertIn("action.executed", types)
 
 
+FOUNDER_DECIDES_ALL = {"cofounders_settle_reversible": False}  # these tests exercise the founder's decision card
+
+
 class DecisionTests(Base):  # A9
     def setUp(self):
         super().setUp()
-        self.e = engine_to_running(self.tmp.path)
+        self.e = engine_to_running(self.tmp.path, governance=FOUNDER_DECIDES_ALL)
         self.e.run_until_idle()
         self.d = self.e.pending_decisions()[0]
 
@@ -187,7 +190,7 @@ class BudgetTests(Base):  # A10: one currency, US dollars, from the forecast to 
 
 class KillSwitchTests(Base):  # A14
     def test_freeze_mid_run_and_release(self):
-        self.e = engine_to_running(self.tmp.path)
+        self.e = engine_to_running(self.tmp.path, governance=FOUNDER_DECIDES_ALL)
         self.e.step()
         self.e.kill_switch(True)
         self.assertEqual(self.e.step()["why"], "kill switch is on")
