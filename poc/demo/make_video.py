@@ -53,7 +53,7 @@ def encode(out: Path, name: str) -> Path:
     mp4 = out / name
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-framerate", str(FPS), "-i", str(seq / "%06d.jpg"),
                     "-vf", "scale=1920:1080:flags=lanczos,format=yuv420p", "-c:v", "libx264", "-preset", "slow",
-                    "-crf", "20", "-movflags", "+faststart", str(mp4)], check=True)
+                    "-tune", "stillimage", "-crf", "26", "-movflags", "+faststart", str(mp4)], check=True)
     shutil.rmtree(seq, ignore_errors=True)
     return mp4
 
