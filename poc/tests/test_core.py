@@ -81,11 +81,12 @@ class PolicyTests(unittest.TestCase):  # A13
         self.assertEqual(self.ev("CTO", "assign_task"), "ALLOW", "a cofounder hands out its team's work")
         self.assertEqual(self.ev("PM", "assign_task"), "DENY", "a team member does not hand out work")
 
-    def test_medium_goes_to_the_founder_d17(self):
+    def test_medium_needs_an_approval_on_record_d17(self):
         for role, action in (("Engineer", "merge_to_main"), ("CTO", "merge_to_main"), ("PM", "product_rule_decision")):
             d = policy.evaluate(role=role, action_type=action)
             self.assertEqual(d["decision"], "REQUIRE_APPROVAL")
-            self.assertEqual(d["required_approver"], "founder")
+            self.assertEqual(d["required_approver"], "founder or accountable cofounder",
+                             "one that can be undone may be settled by its cofounder (execution.door)")
 
     def test_production_deploy_needs_the_founder_d21(self):
         d = policy.evaluate(role="CTO", action_type="deploy_production", autonomy_level="L3")

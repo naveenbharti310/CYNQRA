@@ -11,7 +11,7 @@ from helpers import SCENARIO, TempDir, approve, engine_to_running, no_model_env,
 
 from cynqra import execution, lessons
 from cynqra.engine import Engine, EngineError
-from cynqra.intelligence import IntelligenceError
+from cynqra.intelligence import IntelligenceError, ScriptedSource
 
 
 class DoorTests(unittest.TestCase):
@@ -35,6 +35,43 @@ class DoorTests(unittest.TestCase):
         answered = run_journey(e)
         self.assertEqual([d["kind"] for d in answered], ["decision", "review_merge", "deploy", "accept_delivery"])
         self.assertFalse([d for d in e.store.all("decision") if d["outcome_label"] == "settled_by_cofounder"])
+        e.close()
+
+
+    def test_a_proposal_its_cofounder_did_not_approve_goes_to_the_founder(self):
+        class Unconvinced(ScriptedSource):
+            def review(self, task, worker="system", round_index=0, **_):
+                return {"verdict": "revise", "note": f"Not right yet ({round_index})"}, self._usage(worker)
+        e = engine_to_running(self.tmp.path, intelligence=Unconvinced("candidate_tracker"))
+        answered = run_journey(e, max_rounds=30)
+        self.assertEqual([d["kind"] for d in answered], ["decision", "deploy", "accept_delivery"],
+                         "the CPO kept a concern on the stuck rule, so it may not settle it")
+        e.close()
+
+    def test_a_rule_whose_subject_is_unclear_or_about_money_is_the_founders(self):
+        e = engine_to_running(self.tmp.path)
+        t = e.task("t_02")
+        self.assertEqual(execution.door(e, t)[0], "two_way", "a product rule")
+        self.assertEqual(execution.door(e, dict(t, requirement_ids=[]))[0], "one_way", "no known subject")
+        cfo = dict(e.worker("w_pm"), id="w_cfo", role="CFO", tier="cofounder")
+        e.store.put("worker", "w_cfo", cfo)
+        self.assertEqual(execution.door(e, dict(t, owner_worker_id="w_cfo"))[0], "one_way", "the CFO's rule is money")
+        e.close()
+
+    def test_a_member_who_leaves_is_never_asked_for_help(self):
+        e = Engine(self.tmp.path)
+        e.create_company("H", "demo", "candidate_tracker")
+        e.draft_objective(SCENARIO["messy"])
+        e.set_guardrails(governance={"allow_workforce_override": True})
+        e.submit_objective()
+        roles_ = [{"role": "CTO", "quantity": 1, "why": "x"}, {"role": "CPO", "quantity": 1, "why": "x"},
+                  {"role": "PM", "quantity": 1, "why": "x"}, {"role": "Engineer", "quantity": 2, "why": "x"},
+                  {"role": "Designer", "quantity": 1, "why": "answers design questions"}]
+        approve(e, "approve_workforce", edited={"roles": roles_})
+        self.assertIsNone(e.worker("w_design"), "no work in the plan: it left before anything started")
+        self.assertFalse([t["id"] for t in e.tasks() if "w_design" in t["blockers_to"]])
+        self.assertNotIn("w_design", e.store.get("plan", "plan_1")["coordination"]["answers_blockers"])
+        self.assertNotIn("Designer", e.store.get("organization", "org_1")["roles"])
         e.close()
 
 
@@ -81,6 +118,7 @@ class CycleTests(unittest.TestCase):
         page = urllib.request.urlopen(self.e.live_url() + "/", timeout=5).read().decode()
         self.assertIn("Days in stage", page, "release 1.1 is what is live")
         self.assertEqual(self.e.store.get("transition", "tr_2")["cycle"], 2)
+        self.assertTrue(all(self.e.replay(t["id"])["complete"] for t in new), "the cycle's work replays like any")
         self.assertEqual(self.e.store.get("plan", "plan_1")["earlier_cycles"][0]["cycle"], 1)
 
     def test_a_demo_without_a_script_for_the_cycle_stops_plainly(self):
@@ -92,6 +130,25 @@ class CycleTests(unittest.TestCase):
             self.e.start_cycle("Something else.")
         self.assertEqual(self.e.meta["phase"], "stopped_error")
         self.assertIn("no plan for cycle 3", self.e.meta["notice"])
+
+    def test_a_cycle_whose_plan_failed_is_retried_with_the_same_ask(self):
+        run_journey(self.e)
+        asked = []
+        real = self.e.intel.plan
+
+        def flaky(*a, **k):
+            asked.append(k.get("note"))
+            if len(asked) <= 2:
+                return {"tasks": []}, self.e.intel._usage()
+            return real(*a, **k)
+        self.e.intel.plan = flaky
+        with self.assertRaises(IntelligenceError):
+            self.e.start_cycle("Show how many days each candidate has been in its stage.")
+        self.assertEqual(self.e.meta["phase"], "stopped_error")
+        self.e.resume()
+        self.assertEqual(self.e.meta["phase"], "planning")
+        self.assertEqual(len(set(asked)), 1, "the retry asks for the same thing")
+        self.assertIn("days each candidate", asked[-1])
 
     def test_a_rejected_delivery_can_be_fixed_in_a_cycle(self):
         for _ in range(20):
@@ -128,6 +185,10 @@ class UpdateAndMemoryTests(unittest.TestCase):
     def test_the_foundations_say_what_the_work_prepared(self):
         e = engine_to_running(self.tmp.path, scenario="bluedip")
         run_journey(e, max_rounds=40)
+        pack = e.final_report()["company_pack"]
+        self.assertEqual([d["kind"] for d in pack["ceo_decisions"]],
+                         ["approve_workforce", "approve_roadmap", "decision", "deploy", "accept_delivery"])
+        self.assertEqual([(d["kind"], d["by"]) for d in pack["settled_for_you"]], [("review_merge", "CTO")])
         f = {x["what"]: x for x in e.final_report()["company_pack"]["foundations"]}
         self.assertIn("Risk and compliance register", f["Register the company"]["prepared_in"])
         self.assertIn("a professional should review it", f["Register the company"]["status"])

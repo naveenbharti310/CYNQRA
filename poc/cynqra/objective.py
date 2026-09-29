@@ -26,7 +26,7 @@ NOT_STATED = "not stated in the brief"
 # cofounder may hire: a company building its first version needs few people, one going live a few more.
 STAGES = {"idea": "Testing the idea", "first_version": "Building the first version", "launch": "Going live"}
 TEAM_LIMIT = {"idea": 2, "first_version": 4, "launch": 6}  # team seats one cofounder may hire, by stage
-FOUNDER_DEFAULT = {"leads": [], "stage": "first_version", "hours_per_week": 10, "background": ""}
+FOUNDER_DEFAULT = {"leads": [], "stage": "launch", "hours_per_week": 10, "background": ""}  # Cynqra's aim: live
 
 class ObjectiveError(ValueError):
     pass
@@ -101,7 +101,9 @@ def validate_requirements(pkg: dict, founder: dict | None = None) -> dict:
         deps = [ws_rename.get(x) for x in _slug_list(w.get("depends_on"))]
         workstreams.append({"id": f"ws_{i:02d}", "name": str(w.get("name") or w.get("id")).strip(),
                             "requirement_ids": ids, "depends_on": [d for d in dict.fromkeys(deps) if d]})
-    if any(r["area"] in ("business", "finance") for r in reqs) and not any(r["area"] == "market" for r in reqs):
+    earns = any(r["area"] == "finance" for r in reqs) or any(
+        r["area"] == "business" and EARNS.search(r["text"]) for r in reqs)
+    if earns and not any(r["area"] == "market" for r in reqs):
         # a company must reach its customers: a business with no plan for it is missing its most common way to fail
         reqs.append({"id": f"r_{len(reqs) + 1:02d}", "area": "market", "added_by": "platform",
                      "text": "How the first customers will be reached, and what winning one costs.",
@@ -146,16 +148,18 @@ def validate_requirements(pkg: dict, founder: dict | None = None) -> dict:
                                     f"{', '.join(roles.AREAS)}")
         risks.append({"id": f"k_{len(risks) + 1:02d}", "area": area, "text": str(r["text"]).strip()[:300]})
     return {"outcomes": [str(x).strip() for x in outs if str(x).strip()],
-            "requirements": reqs, "risks": risks, "assumptions": assumptions(pkg, reqs), "measures": measures(pkg),
+            "requirements": reqs, "risks": risks, "assumptions": assumptions(pkg, reqs, rename), "measures": measures(pkg),
             "workstreams": workstreams, "critical_path": critical,
             "verification": [f"{r['id']}: {r['verification']}" for r in reqs if r["verification"]]}
 
 
+EARNS = re.compile(r"\b(pay|pays|paid|paying|price|pricing|revenue|sell|sells|selling|sales|subscri\w*|customers?)\b",
+                   re.I)  # a business requirement about earning money; an internal tool's "business" goal is not
 KINDS = {"desirability": "people want it", "viability": "it makes money", "feasibility": "it can be built"}
 LEVELS = ("high", "medium", "low")
 
 
-def assumptions(pkg: dict, reqs: list[dict]) -> list[dict]:
+def assumptions(pkg: dict, reqs: list[dict], rename: dict | None = None) -> list[dict]:
     """The guesses the idea depends on, riskiest first: how bad it is if the guess is wrong (high, medium, low), then
     whether people want it, whether it makes money, whether it can be built. Each names the requirements whose work
     tests it and, when only a person can test it (talking to customers), the founder's step. Nothing here asks the
@@ -169,7 +173,8 @@ def assumptions(pkg: dict, reqs: list[dict]) -> list[dict]:
         risk = str(a.get("risk") or "medium").strip().lower()
         out.append({"text": str(a["text"]).strip()[:300], "kind": kind if kind in KINDS else "desirability",
                     "risk": risk if risk in LEVELS else "medium",
-                    "tested_by": [x for x in _slug_list(a.get("tested_by")) if x in known],
+                    "tested_by": list(dict.fromkeys(y for x in _slug_list(a.get("tested_by"))
+                                                    if (y := (rename or {}).get(x, x)) in known)),
                     "founder_step": str(a.get("founder_step") or "").strip()[:300]})
     out.sort(key=lambda a: (LEVELS.index(a["risk"]), list(KINDS).index(a["kind"])))
     for i, a in enumerate(out, start=1):

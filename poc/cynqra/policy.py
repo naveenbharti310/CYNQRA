@@ -1,8 +1,11 @@
 """Policy and authority: the canonical policy.evaluate contract of the Book 2 addendum.
 
 Rows come from the working text of D-27 (risk rubric) and D-28 (authority matrix) in
-archive/old_docs/POC_SPEC.md, pending re-ratification under D-34. D-17 (founder reviews every MEDIUM
-action) and D-21 (founder approves every production deploy) are enforced here.
+archive/old_docs/POC_SPEC.md, pending re-ratification under D-34. D-17 (every MEDIUM action needs an approval on
+record) and D-21 (founder approves every production deploy) are enforced here. Since 29 September 2026 a MEDIUM
+action that can be undone (a merge, a product rule outside money and law) may be approved by the cofounder
+accountable for it, when governance allows (settings.cofounders_settle_reversible, execution.door); the rest is the
+founder's.
 Default is DENY: an action type or role not listed is refused.
 """
 from __future__ import annotations
@@ -71,8 +74,9 @@ def evaluate(*, role: str, action_type: str, autonomy_level: str = "L1", budget_
         return out("REQUIRE_APPROVAL", f"{action_type} is HIGH risk; production deploys need the founder at every level (D-21).",
                    approver="founder")
     if risk == "MEDIUM":
-        return out("REQUIRE_APPROVAL", f"{action_type} is MEDIUM risk; the founder reviews every MEDIUM action in the MVP (D-17).",
-                   approver="founder")
+        return out("REQUIRE_APPROVAL", f"{action_type} is MEDIUM risk; it needs an approval on record: the founder's, or "
+                                       "for one that can be undone, the accountable cofounder's (D-17).",
+                   approver="founder or accountable cofounder")
     if grant == P:
         return out("REQUIRE_APPROVAL", f"{role} may only propose {action_type}.", approver="founder")
     return out("ALLOW", f"{role} executes {action_type} at LOW risk inside its workspace.",

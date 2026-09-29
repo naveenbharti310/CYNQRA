@@ -18,6 +18,7 @@ claimed it: the unit economics, and whether the company reaches profit before it
 from __future__ import annotations
 
 import json
+import math
 import re
 
 INPUTS = {
@@ -55,10 +56,27 @@ def read(text: str) -> dict:
 def _value(inputs: dict, name: str):
     v = inputs.get(name)
     v = v.get("value") if isinstance(v, dict) else v
+    if isinstance(v, bool):
+        return None
     try:
-        return float(v)
+        f = float(v)
     except (TypeError, ValueError):
         return None
+    return f if math.isfinite(f) else None  # "NaN" and "Infinity" parse as JSON numbers, and compare as anything
+
+
+LIMITS = {"price_per_month": (0, None, False), "cost_to_serve_per_month": (0, None, True),
+          "fixed_costs_per_month": (0, None, True), "cost_to_win": (0, None, True), "monthly_churn": (0, 1, True),
+          "funding": (0, None, True), "customers_per_month": (0, None, True), "months_before_revenue": (0, 120, True)}
+
+
+def _out_of_range(name: str, v: float) -> str:
+    low, high, zero_ok = LIMITS.get(name, (None, None, True))
+    if low is not None and (v < low or (v == low and not zero_ok)):
+        return f"{name} must be above {low:g}" if not zero_ok else f"{name} cannot be negative"
+    if high is not None and v > high:
+        return f"{name} must be at most {high:g}"
+    return ""
 
 
 def compute(inputs: dict) -> dict:
@@ -101,6 +119,10 @@ def check(text: str) -> dict:
     if missing:
         findings.append({"rule": "numbers_inputs", "why": "inputs missing or not numbers: " + ", ".join(missing)})
         return {"passed": False, "findings": findings, "computed": {}}
+    bad = [why for k in inputs if (x := _value(inputs, k)) is not None and (why := _out_of_range(k, x))]
+    if bad:
+        findings.append({"rule": "numbers_inputs", "why": "; ".join(bad)})
+        return {"passed": False, "findings": findings, "computed": {}}
     for k, v in inputs.items():
         basis = str(v.get("basis") or "").strip().lower() if isinstance(v, dict) else ""
         if not (basis in ("assumption", "measured") or basis.startswith("source:")):
@@ -116,6 +138,8 @@ def check(text: str) -> dict:
         try:
             c = float(claimed)
         except (TypeError, ValueError):
+            c = None
+        if c is None or isinstance(claimed, bool) or not math.isfinite(c):
             findings.append({"rule": "numbers_recomputed", "why": f"{k}: {claimed!r} is not a number"})
             continue
         if abs(c - right) > max(abs(right) * TOLERANCE, 0.01):

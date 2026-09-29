@@ -13,7 +13,7 @@ been proven end to end on strong real AI models in its current form.
 
 | Area | Status |
 | --- | --- |
-| The full flow (idea → team → plan → parallel work → checks → delivery) | ✅ Built. 302 automated tests pass. |
+| The full flow (idea → team → plan → parallel work → checks → delivery) | ✅ Built. 308 automated tests pass. |
 | Demo mode (scripted words; real code, models, tests and going live) | ✅ Works end to end. It opens on Bluedip: three cofounders and the ten team members they chose (fourteen seats proposed and one cut by the independent challenge), seventeen tasks, three mistakes caught by the checks, one piece of work sent back by a cofounder, two questions settled inside the team, three CEO decisions after the two approvals (a rule on money, going live, acceptance; the CTO settled the merge), the Company Pack. Two smaller demos are in the list. |
 | Cofounders proposed from the idea, each choosing its own team, Specialists named from it | ✅ Built and tested. |
 | Every seat earns its place: one owner per requirement, who asked for each seat, an independent challenge, the lean team beside the recommended one, members with no work removed | ✅ Built and tested. Asks the founder nothing more. |
@@ -94,5 +94,7 @@ Hugging Face PRO. Nothing in it is scripted: it is the test of whether real AI m
 - In the demos, the lean team is shown but cannot be chosen, because each script plans the recommended team; only
   the candidate tracker has a scripted second cycle. In live mode both work for any idea.
 - A cycle after launch must ship a code change; a cycle of documents only is not supported yet.
-- The business numbers are checked for arithmetic and for where each input comes from; whether an assumption is
-  realistic is for the founder and a professional to judge.
+- The business numbers are checked for arithmetic, for sensible ranges (no negative churn, a price above zero) and
+  for where each input comes from; whether an assumption is realistic is for the founder and a professional to judge.
+- If the founder chooses the lean team in live mode and the plan for it cannot be made, the run stops like any failed
+  planning step; going back to the recommended team means starting a new run.

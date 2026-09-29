@@ -31,8 +31,9 @@ the code. All code paths are inside `poc/cynqra/` unless stated. The example thr
 - **The independent challenge.** A reviewer outside the team, whose only job is to make it smaller, says which
   seats to cut, merge, keep only as an advisor or bring in later, and the likeliest reasons the company would fail.
   The platform decides: a seat the removal test finds nothing behind is cut; a seat the challenger wanted gone but
-  that is the only one on something stays, with the reason. If the challenger's answer cannot be read, the removal
-  test still runs and the confidence drops.
+  that is the only one on something stays, with the reason. "Advisor" and "later" are shown as labels on the seat;
+  every member joins with its first task in any case. If the challenger's answer cannot be read, the removal test
+  still runs and the confidence drops.
 - **The lean team,** the smallest team that still covers every requirement, risk and delivery step, is shown next to
   the recommended one with what each extra seat adds. A seat's work goes to another only if that seat covers the
   same area and can do every kind of work it did.
@@ -40,7 +41,8 @@ the code. All code paths are inside `poc/cynqra/` unless stated. The example thr
   proposers needed no help; medium when Cynqra had to fill a gap or could not read the challenge; low when anything
   is left without an owner.
 - **A headcount limit by stage:** a cofounder hires at most 2 seats at the idea stage, 4 for a first version and 6
-  for going live.
+  for going live, the default. In a demo the founder's areas and stage are part of the script and cannot be changed;
+  the hours can.
 - **After planning,** every member joins with its first task, and a member with no work leaves before anything starts.
 
 **Why.** A founder should be able to ask "why are you confident this is the team?" and get an answer backed by
@@ -68,7 +70,9 @@ plans the recommended team; in live mode Cynqra plans whichever team the CEO cho
   endorses it);
 - **only real decisions go to the CEO:** the ones that cannot be undone, such as money, law and going live. A
   decision that can be undone (a merge, a product rule outside money and law) is settled by the cofounder accountable
-  for it, recorded like the CEO's, and the CEO is told. A governance setting (`cofounders_settle_reversible`) sends
+  for it, recorded like the CEO's, and the CEO is told. A cofounder settles only what it approved in its review or
+  proposed itself; a rule whose subject is unclear, or proposed by the CFO or the Chief Compliance Officer, goes to
+  the CEO. A governance setting (`cofounders_settle_reversible`) sends
   every decision to the CEO instead.
 
 **Why.** Working one at a time made real runs take hours; a real company does not wait for one person to finish

@@ -497,6 +497,12 @@ class Engine:
                 raise EngineError("In this version the CTO's seat reviews, merges and releases the code, which only a "
                                   "team member can do. You can lead product, money or compliance yourself.")
             company = self.store.get("company", self.cid)
+            fixed = company.get("founder") or {}
+            if not (profile or {}).get("background") and fixed.get("background"):
+                clean["background"] = fixed["background"]  # a form that does not show it keeps it
+            if self.meta["mode"] == "demo" and (clean["leads"], clean["stage"]) != (fixed.get("leads"), fixed.get("stage")):
+                raise EngineError("A demo's founder is part of its script: its team was written for that founder. "
+                                  "In live mode Cynqra builds the team around what you bring.")
             company["founder"] = clean
             self.store.put("company", self.cid, company)
             self.event("company.founder_set", "company", self.cid, {"leads": clean["leads"], "stage": clean["stage"],
@@ -702,7 +708,23 @@ class Engine:
             self.event("worker.released", "worker", wid, {"role": w["role"], "why": "no work in the plan"},
                        actor="execution_planner")
         org["cofounders"] = [x for x in org["cofounders"] if x not in wids]
+        org["roles"] = {}
+        for w in self.workers():
+            org["roles"][w["role"]] = org["roles"].get(w["role"], 0) + 1
         self.store.put("organization", "org_1", org)
+        for t in self.tasks():  # nobody may be asked for help, hand work out or review it once they have left
+            ask = [x for x in t.get("blockers_to") or [] if x not in wids]
+            if ask != t.get("blockers_to"):
+                t["blockers_to"] = ask or [x for x in org["cofounders"]] or ["founder"]
+                self.save_task(t)
+        plan = self.store.get("plan", "plan_1")
+        if plan:
+            coord = plan.get("coordination") or {}
+            coord["answers_blockers"] = [x for x in coord.get("answers_blockers") or [] if x not in wids]
+            if coord.get("planner") in wids:
+                coord["planner"] = roles.planner(self.workers())
+            plan["coordination"] = coord
+            self.store.put("plan", "plan_1", plan)
 
     def _after_roadmap(self, d: dict, action: str) -> None:
         if action != "approve":
@@ -872,7 +894,7 @@ class Engine:
             elif stage == "roadmap":
                 if not any(self.model_of(w["id"]) for w in self.workers()):
                     self._staff()
-                self._roadmap()
+                self._roadmap(note=self.meta.get("cycle_note", "") if self.cycle() > 1 else "")
             else:
                 self.set_meta(phase="running", failed_stage=None, notice="")
             return self.meta
@@ -915,10 +937,11 @@ class Engine:
         text = (text or "").strip()
         if not text:
             raise EngineError("write what users said first")
-        n = self.count("feedback") + 1
-        rec = {"id": f"fb_{n:03d}", "text": text[:1000], "source": source, "cycle": self.cycle(), "used_in": None,
-               "at": now()}
-        self.store.put("feedback", rec["id"], rec)
+        with self.store.lock:  # numbered and written as one: two notes at once never share an id
+            n = self.count("feedback") + 1
+            rec = {"id": f"fb_{n:03d}", "text": text[:1000], "source": source, "cycle": self.cycle(), "used_in": None,
+                   "at": now()}
+            self.store.put("feedback", rec["id"], rec)
         self.event("feedback.recorded", "company", self.cid, {"id": rec["id"], "cycle": rec["cycle"]}, actor="founder",
                    actor_type="human", authority="founder")
         return rec
@@ -929,11 +952,12 @@ class Engine:
         url = self.live_url()
         if not url:
             raise EngineError("nothing is live yet")
-        h = deploy.health(url, wait=3)
-        n = self.count("live_check") + 1
-        rec = {"id": f"lc_{n:03d}", "url": url, "ok": bool(h.get("ok")), "detail": {k: v for k, v in h.items()
-               if k in ("status", "ms", "why")}, "cycle": self.cycle(), "at": now()}
-        self.store.put("live_check", rec["id"], rec)
+        h = deploy.health(url, wait=3)  # outside any lock: a slow product never holds up the run
+        with self.store.lock:
+            n = self.count("live_check") + 1
+            rec = {"id": f"lc_{n:03d}", "url": url, "ok": bool(h.get("ok")), "detail": {k: v for k, v in h.items()
+                   if k in ("status", "ms", "why")}, "cycle": self.cycle(), "at": now()}
+            self.store.put("live_check", rec["id"], rec)
         self.event("live.checked", "deployment", "live", {"ok": rec["ok"]}, actor="deployment")
         return rec
 
@@ -944,7 +968,7 @@ class Engine:
         with self.lock:
             self._require("accepted", "delivered")
             unused = [f for f in self.store.all("feedback") if not f.get("used_in")]
-            ask = (note or "").strip() or "; ".join(f["text"] for f in unused)
+            ask = ((note or "").strip() or "; ".join(f["text"] for f in unused))[:2000]
             if not ask:
                 raise EngineError("say what the next cycle should do, or record what users said first")
             if budget_usd:
@@ -960,7 +984,7 @@ class Engine:
             for f in unused:
                 f["used_in"] = n
                 self.store.put("feedback", f["id"], f)
-            self.set_meta(cycle=n)
+            self.set_meta(cycle=n, cycle_note=full)  # kept: a failed plan is retried with the same ask
             self.intervention("cycle", f"started cycle {n}")
             self.event("cycle.started", "company", self.cid, {"cycle": n, "feedback": [f["id"] for f in unused]},
                        actor="founder", actor_type="human", authority="founder")

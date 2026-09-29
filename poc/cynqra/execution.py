@@ -282,26 +282,33 @@ def propose(run, t: dict, result: dict) -> dict:
 
 
 def door(run, t: dict) -> tuple[str, str]:
-    """How hard a decision is to undo. A one-way door (going live, a rule on money or law) is the founder's; a
-    two-way door (a merge, which every test reruns and nothing is live until the founder approves going live; a
-    product rule outside money and law) can be settled by the cofounder accountable for it."""
+    """How hard a decision is to undo. A one-way door (going live, a rule on money or law, a rule whose subject is
+    not known) is the founder's; a two-way door (a merge, which every test reruns and nothing is live until the
+    founder approves going live; a product rule outside money and law) can be settled by the cofounder accountable
+    for it."""
     if t["kind"] == "deploy":
         return "one_way", "customers see it the moment it is live"
     if t["kind"] == "review_merge":
         return "two_way", "a merge can be undone; every test reruns on main, and nothing is live until you approve going live"
-    areas = {r["area"] for r in (run.requirements() or {}).get("requirements", []) if r["id"] in (t.get("requirement_ids") or [])}
-    if areas & {"finance", "legal"}:
-        return "one_way", "a rule on money or law binds the company"
+    ids = set(t.get("requirement_ids") or [])
+    areas = {r["area"] for r in (run.requirements() or {}).get("requirements", []) if r["id"] in ids}
+    owner = (run.worker(t["owner_worker_id"]) or {}).get("role")
+    if not areas or areas & {"finance", "legal"} or owner in ("CFO", "CCO"):
+        return "one_way", "a rule on money or law, or one whose subject is not clear, binds the company"
     return "two_way", "a product rule can be changed later without cost"
 
 
 def _settler(run, t: dict, endorsed_by: str | None) -> str | None:
-    """The cofounder accountable for a decision: the one that endorsed it, the owner's cofounder, or the owner."""
-    for who in (endorsed_by, t.get("accountable"), t["owner_worker_id"]):
-        w = run.worker(who) if who and str(who).startswith("w_") else None
-        if w and w.get("tier") == "cofounder":
-            return w["id"]
-    return None
+    """The cofounder who may settle a decision: the one that reviewed and approved its team member's proposal, or the
+    cofounder whose own proposal it is. A proposal its cofounder did not approve (a concern kept on record, a review
+    that could not be read) goes to the founder."""
+    if endorsed_by:
+        w = run.worker(endorsed_by)
+        return endorsed_by if w and w.get("tier") == "cofounder" else None
+    if t.get("reviewed_by"):
+        return None
+    w = run.worker(t["owner_worker_id"])
+    return w["id"] if w and w.get("tier") == "cofounder" else None
 
 
 def bring_to_founder(run, t: dict, pending: dict, endorsed_by: str | None = None) -> dict:

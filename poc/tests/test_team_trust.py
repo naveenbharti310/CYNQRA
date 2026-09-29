@@ -84,6 +84,10 @@ class TeamCheckTests(unittest.TestCase):
         self.assertTrue(all(ln["coverage"].values()), "the lean team still covers every requirement")
         self.assertTrue(all(ln["watchers"].values()), "and watches every risk")
         self.assertIn("QA", {r["role"] for r in ln["roles"]}, "no one else on the team can write the acceptance tests")
+        cards = {c["seat"]: c for c in ln["cards"]}
+        self.assertNotIn("FrontendEngineer", cards, "the lean team shows its own seats")
+        self.assertIn("r_13", cards["CPO"]["owns"], "the Chief Product Officer takes over the Project Manager's work")
+        self.assertNotIn("Frontend Engineer", " ".join(cards["CTO"]["without"]))
         with self.assertRaises(EngineError) as ctx:
             approve(e, "approve_workforce", edited={"option": "lean"})
         self.assertIn("recommended team only", str(ctx.exception), "the demo's script plans one team, and says so")
@@ -145,8 +149,15 @@ class FounderTests(unittest.TestCase):
         with self.assertRaises(EngineError) as ctx:
             e.set_founder({"leads": ["CTO"]})
         self.assertIn("only a team member can do", str(ctx.exception))
-        self.assertEqual(e.set_founder({"leads": ["CFO", "Engineer"], "hours_per_week": "400"}),
-                         {"leads": ["CFO"], "stage": "first_version", "hours_per_week": 100, "background": ""})
+        with self.assertRaises(EngineError) as ctx:  # the demo's team was written for its founder
+            e.set_founder({"leads": ["CFO"], "stage": "launch"})
+        self.assertIn("part of its script", str(ctx.exception))
+        kept = e.set_founder({"stage": "launch", "hours_per_week": "400"})
+        self.assertEqual((kept["hours_per_week"], kept["background"]), (100, "Has run a restaurant; not technical."),
+                         "hours are capped, and a form that does not show the background keeps it")
+        self.assertEqual(objective.founder_profile({"leads": ["CFO", "Engineer"]})["leads"], ["CFO"],
+                         "only a cofounder seat can be led by the founder")
+        self.assertEqual(objective.founder_profile({})["stage"], "launch", "by default Cynqra aims at a live product")
         e.close()
 
     def test_the_stage_limits_how_many_seats_a_cofounder_may_hire(self):
@@ -158,8 +169,8 @@ class FounderTests(unittest.TestCase):
         self.assertIn("at most 2", str(ctx.exception))
         synthesis.validate_team(cto, req, "CTO", ["CTO", "CPO", "CFO"], {}, objective.TEAM_LIMIT["launch"])
 
-    def test_a_founder_at_the_idea_stage_gets_a_smaller_team_or_a_plain_refusal(self):
-        with self.assertRaises(IntelligenceError):  # the demo's CTO hires six: twice refused, nothing is invented
+    def test_a_demo_founder_cannot_be_changed_into_one_its_script_does_not_fit(self):
+        with self.assertRaises(EngineError):  # the demo's CTO hires six, too many for the idea stage
             to_gate(self.tmp.path, founder={"stage": "idea"})
 
 

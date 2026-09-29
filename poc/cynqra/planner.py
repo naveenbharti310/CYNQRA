@@ -41,7 +41,9 @@ ESCALATION_CONDITIONS = [
     "A Blocker cannot be cleared by any worker allowed to answer it.",
     "Policy denies an action a task cannot finish without.",
     "Spending reaches the budget cap: the breaker pauses all work.",
-    "Every MEDIUM action (product rules, merges) and every HIGH action (production deploy) needs the founder.",
+    "Every HIGH action (production deploy) and every MEDIUM action that cannot be undone (a rule on money or law) "
+    "needs the founder; a MEDIUM action that can be undone (a merge, a product rule) is settled by the accountable "
+    "cofounder and the founder is told.",
 ]
 
 

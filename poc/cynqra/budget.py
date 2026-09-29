@@ -183,7 +183,7 @@ def construct(store, tasks: list[dict], workers: list[dict], reg) -> dict:
     spent_before = round(ledger(store)["spent_total"], 4)  # the objective, the synthesis and the roadmap itself
     reserve = round(cap - subtotal - spent_before, 4)
     layers["reserve"] = {"usd": reserve, "basis": "the rest of the cap: rework, retries and replacements"
-                         + (f"; ${spent_before} already spent on planning" if spent_before else "")}
+                         + (f"; ${spent_before} already spent" if spent_before else "")}
     warnings = []
     if reserve < 0:
         warnings.append(f"The forecast is ${-reserve:.4f} over the ${cap:.2f} cap.")

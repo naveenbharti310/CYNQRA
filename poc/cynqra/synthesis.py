@@ -423,7 +423,8 @@ def _draft(run, req: dict, note: str) -> tuple[dict, dict]:
     lean_prop = validate_workforce({"summary": "The lean team.", "roles": _flat(ln["rows"])}, req, founder=founder)
     prop["lean"] = {"seats": ln["seats"], "left_out": ln["left_out"], "fewer": ln["fewer"],
                     "roles": lean_prop["roles"], "workers": lean_prop["workers"], "owners": lean_prop["owners"],
-                    "watchers": lean_prop["watchers"], "coverage": lean_prop["coverage"]}
+                    "watchers": lean_prop["watchers"], "coverage": lean_prop["coverage"],
+                    "cards": seats.cards(lean_prop, req)}  # its own cards: who takes over what in the lean team
     prop["why_team"] = seats.why(prop, req, lessons.track_record(run, {r["area"] for r in req["requirements"]}))
     return prop, {"label": ", ".join(dict.fromkeys(labels))}
 
@@ -494,7 +495,7 @@ def approve(run, edited_roles=None, option: str = "recommended") -> dict:
         ln = prop["lean"]
         prop = dict(prop, roles=ln["roles"], workers=ln["workers"], owners=ln["owners"], watchers=ln["watchers"],
                     coverage=ln["coverage"], chosen="lean")
-        prop["cards"] = seats.cards(prop, run.requirements())
+        prop["cards"] = ln.get("cards") or seats.cards(prop, run.requirements())
         run.event("workforce.lean_chosen", "organization", "org_1", {"proposal": prop["id"], "seats": ln["seats"]},
                   actor="founder", actor_type="human", authority="founder")
     elif edited_roles:

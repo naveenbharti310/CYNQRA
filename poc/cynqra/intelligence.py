@@ -498,7 +498,8 @@ class ModelSource:
                   '"verification"}], "risks": [{"area", "text"}], "assumptions": [{"text", "kind", "risk", '
                   '"tested_by", "founder_step"}], "measures": [{"measure", "target", "rethink_below"}], '
                   '"workstreams": [{"id", "name", "requirement_ids", "depends_on"}]}' + self._refused(feedback))
-        return self._call(prompt, max_tokens=3000, schema=SCHEMAS["requirements"])
+        # the list now carries risks, guesses and measures as well: room for them, so the answer is not cut off
+        return self._call(prompt, max_tokens=4500, schema=SCHEMAS["requirements"])
 
     @staticmethod
     def _catalog(names) -> str:

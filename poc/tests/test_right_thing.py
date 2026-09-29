@@ -47,6 +47,16 @@ class NumbersTests(unittest.TestCase):
         self.assertEqual(numbers.check(block({"price_per_month": {"value": 1}}, {}))["findings"][0]["rule"],
                          "numbers_inputs")
 
+    def test_numbers_that_are_not_numbers_or_make_no_sense_are_refused(self):
+        # "NaN" and "Infinity" parse as JSON numbers and compare as anything; the audit found a NaN claim passed
+        for claims in ({"lifetime_value": float("nan")}, {"payback_months": float("inf")}, {"payback_months": True}):
+            self.assertFalse(numbers.check(block(BASE, claims))["passed"], claims)
+        for name, value in (("monthly_churn", -0.5), ("monthly_churn", 1.5), ("price_per_month", 0),
+                            ("cost_to_win", -1), ("price_per_month", float("nan"))):
+            r = numbers.check(block(dict(BASE, **{name: {"value": value, "basis": "assumption"}}), {}))
+            self.assertFalse(r["passed"], (name, value))
+            self.assertEqual(r["findings"][0]["rule"], "numbers_inputs")
+
     def test_months_to_profit_and_whether_the_money_lasts(self):
         inputs = dict(BASE, customers_per_month={"value": 20, "basis": "assumption"},
                       months_before_revenue={"value": 2, "basis": "assumption"},
@@ -90,14 +100,23 @@ class GuessesTests(unittest.TestCase):
         self.assertEqual(len(req["measures"]), 3)
         self.assertTrue(all(m["target"] and m["rethink_below"] for m in req["measures"]))
 
+    def test_a_guess_keeps_its_link_when_the_model_numbers_requirements_its_own_way(self):
+        req = objective.validate_requirements({"requirements": [{"id": "REQ-1", "area": "functional", "text": "a"},
+                                                                {"id": "REQ-2", "area": "ai_ml", "text": "b"}],
+                                               "assumptions": [{"text": "x", "kind": "feasibility", "risk": "high",
+                                                                "tested_by": ["REQ-2", "REQ-9"]}]})
+        self.assertEqual(req["assumptions"][0]["tested_by"], ["r_02"])
+
     def test_a_company_that_must_earn_money_gets_a_way_to_reach_customers(self):
         pkg = {"requirements": [{"area": "business", "text": "Sell cakes"}, {"area": "functional", "text": "Order"}],
                "workstreams": []}
         req = objective.validate_requirements(pkg)
         added = [r for r in req["requirements"] if r.get("added_by") == "platform"]
         self.assertEqual([r["area"] for r in added], ["market"])
-        tool = objective.validate_requirements({"requirements": [{"area": "functional", "text": "Track"}]})
-        self.assertFalse([r for r in tool["requirements"] if r.get("added_by")], "an internal tool sells nothing")
+        tool = objective.validate_requirements({"requirements": [{"area": "functional", "text": "Track"},
+                                                                 {"area": "business", "text": "Recruiters see who is stuck"}]})
+        self.assertFalse([r for r in tool["requirements"] if r.get("added_by")],
+                         "an internal tool's business goal earns nothing: no one is hired to sell it")
 
     def test_a_high_risk_guess_tested_only_at_the_end_is_said_plainly(self):
         ms = [{"id": "m1", "name": "Build"}, {"id": "m2", "name": "Release"}]

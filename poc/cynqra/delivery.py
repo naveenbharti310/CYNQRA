@@ -198,7 +198,10 @@ def company_pack(run) -> dict:
             "numbers": checked[-1]["checks"]["numbers"] if checked else None,
             "organization": org, "documents": docs,
             "ceo_decisions": [{"kind": d["kind"], "problem": d["problem"][:200], "outcome": d.get("outcome_label")}
-                              for d in decided],
+                              for d in decided if d.get("resolved_by") == "founder"],
+            "settled_for_you": [{"kind": d["kind"], "problem": d["problem"][:200],
+                                 "by": (run.worker(d["resolved_by"]) or {}).get("title", d["resolved_by"])}
+                                for d in decided if d.get("resolved_by") not in (None, "founder")],
             "ceo_informed": [{k: n[k] for k in ("kind", "headline", "detail", "usd_difference")}
                              for n in run.store.all("ceo_notice")],
             "settled_by_the_team": len([b for b in run.store.all("blocker_cleared") if not b["founder_involved"]]),

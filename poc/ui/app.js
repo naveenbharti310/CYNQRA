@@ -162,7 +162,7 @@ function wizard() {
       <h1 class="hero">Describe what you want to build.</h1>
       <p class="lede">Cynqra turns it into a working result, in weeks instead of months, within your budget. It works out the people, skills, AI, plan and cost, checks every piece of work, and asks you only what a CEO should decide.</p>
       ${modeChoice}
-      <label class="lbl" for="messy">Your company, in your own words</label>
+      <label class="lbl" for="messy">What you want to build, in your own words</label>
       <textarea class="big" id="messy">${esc(obj ? obj.statement : scen ? scen.messy : "")}</textarea>
       <div class="row"><button class="btn primary" id="structure" ${S.busy ? "disabled" : ""}>${obj ? "Make the brief again" : "Make it a brief"}</button></div>
       <div class="err" role="alert">${esc(S.err)}</div>
@@ -196,7 +196,7 @@ function objectiveCard(obj) {
       ${founderFields()}
     </div>
     <div class="between" style="margin-top:auto;padding-top:14px;border-top:1px solid var(--line)">
-      <span class="small muted">Cynqra decomposes it into requirements and proposes the workforce. Submitting counts as one founder intervention.</span>
+      <span class="small muted">Cynqra turns it into what must be true when it's done, and the team that delivers it. Submitting counts as one founder intervention.</span>
       <button class="btn dark" id="submit" ${S.busy ? "disabled" : ""}>Submit to Cynqra</button></div></div>`;
 }
 
@@ -204,11 +204,11 @@ const STAGE_TITLE = { idea: "Testing the idea", first_version: "Building the fir
 const LEADS = [["CPO", "I lead the product myself", "no Chief Product Officer"], ["CFO", "I handle the money myself", "no CFO"],
   ["CCO", "I handle compliance myself", "no Chief Compliance Officer"]];
 function founderFields() {
-  const f = (S.st.company || {}).founder || {}, leads = f.leads || [];
+  const f = (S.st.company || {}).founder || {}, leads = f.leads || [], demo = S.st.meta.mode === "demo", off = demo ? "disabled" : "";
   return `<div class="field" style="border-style:dashed"><div class="caps">What you bring, optional</div>
-    <p class="small muted" style="margin:0">Cynqra proposes cofounders only for what you don't do yourself.</p>
-    ${LEADS.map(([k, l, n]) => `<label class="small"><input type="checkbox" data-founder-lead="${k}" data-keep="no" ${leads.includes(k) ? "checked" : ""}> ${l} <span class="muted">(${n})</span></label>`).join("")}
-    <div class="between"><label for="f_stage">Stage</label><select id="f_stage" data-keep="no">${Object.entries(STAGE_TITLE).map(([k, v]) => `<option value="${k}" ${f.stage === k ? "selected" : ""}>${v}</option>`).join("")}</select></div>
+    <p class="small muted" style="margin:0">${demo ? "In a demo the founder is part of the script, so these are fixed. In live mode Cynqra builds the team around what you bring." : "Cynqra proposes cofounders only for what you don't do yourself."}</p>
+    ${LEADS.map(([k, l, n]) => `<label class="small"><input type="checkbox" data-founder-lead="${k}" data-keep="no" ${off} ${leads.includes(k) ? "checked" : ""}> ${l} <span class="muted">(${n})</span></label>`).join("")}
+    <div class="between"><label for="f_stage">Stage</label><select id="f_stage" data-keep="no" ${off}>${Object.entries(STAGE_TITLE).map(([k, v]) => `<option value="${k}" ${f.stage === k ? "selected" : ""}>${v}</option>`).join("")}</select></div>
     <div class="between"><label for="f_hours">Your hours a week</label><input type="number" id="f_hours" data-keep="no" min="0" max="100" value="${esc(f.hours_per_week ?? 10)}" style="width:110px"></div></div>`;
 }
 
@@ -246,7 +246,7 @@ function workforceStep() {
   const lean = S.teamOption === "lean", ln = prop.lean || {}, demo = st.meta.mode === "demo";
   const rows = lean ? (ln.roles || []) : (prop.roles || []);
   const cost = (lean ? ln.cost_by_role : prop.cost_by_role) || {};
-  const cards = {}; (prop.cards || []).forEach((c) => cards[c.seat] = c);
+  const cards = {}; ((lean ? ln.cards : prop.cards) || []).forEach((c) => cards[c.seat] = c);
   const keyOf = (r) => r.field ? "Specialist:" + r.field.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") : r.role;
   const row = (r) => {
     const cat = (st.catalog || []).find((c) => c.role === r.role) || {}, c = cards[keyOf(r)] || {};
@@ -269,7 +269,7 @@ function workforceStep() {
   const leanNote = lean ? `<div class="small"><b>What the recommended team adds:</b><ul style="margin:4px 0 0;padding-left:18px">${(ln.left_out || []).map((x) => `<li>${esc(x.title)}: ${esc(x.adds)} <span class="muted">(its work goes to ${esc([...new Set(Object.values(x.work_goes_to))].map((k) => seatName(prop, k)).join(", "))})</span></li>`).join("")}${(ln.fewer || []).map((x) => `<li>${x.from} ${esc(x.title)}s instead of one: the work goes faster</li>`).join("")}</ul></div>` : "";
   const nSeats = (rs) => rs.reduce((n, r) => n + Number(r.quantity || 0), 0);
   const outcomes = ((req || {}).outcomes || []).map((o) => `<li>${esc(o)}</li>`).join("");
-  const risks = ((req || {}).risks || []).map((k) => `<div class="small"><span class="mono">${esc(k.id)}</span> ${esc(k.text)} <span class="muted">watched by ${esc(((prop.watchers || {})[k.id] || []).map((x) => seatName(prop, x)).join(", "))}</span></div>`).join("");
+  const risks = ((req || {}).risks || []).map((k) => `<div class="small"><span class="mono">${esc(k.id)}</span> ${esc(k.text)} <span class="muted">watched by ${esc((((lean ? ln.watchers : prop.watchers) || {})[k.id] || []).map((x) => seatName(prop, x)).join(", "))}</span></div>`).join("");
   return `<div class="wiz-body">
     <div class="wiz-left">
       ${steps(1)}
@@ -304,7 +304,7 @@ function budgetTable(f) {
   const rows = Object.entries(f.layers).map(([k, v]) => `<tr><td>${esc(k.charAt(0).toUpperCase() + k.slice(1))}</td><td class="mono">${usd(v.usd)}</td><td class="small">${esc(v.basis)}</td></tr>`).join("");
   const byw = Object.entries(f.by_worker || {}).map(([w, v]) => `<span class="pill grey">${esc(wt(w))} ${usd(v.usd)}</span>`).join(" ");
   return `<div class="tscroll"><table class="tbl"><thead><tr><th>Layer</th><th>USD</th><th>Basis</th></tr></thead><tbody>${rows}
-    <tr><td><b>Project total</b></td><td class="mono"><b>${usd(f.total_usd)}</b></td><td class="small">against the hard cap of ${usd(f.cap_usd)}${f.spent_before_usd ? `, ${usd(f.spent_before_usd)} of it already spent on planning` : ""}</td></tr></tbody></table></div>
+    <tr><td><b>Project total</b></td><td class="mono"><b>${usd(f.total_usd)}</b></td><td class="small">against the hard cap of ${usd(f.cap_usd)}${f.spent_before_usd ? `, ${usd(f.spent_before_usd)} of it already spent` : ""}</td></tr></tbody></table></div>
     <div class="small">By worker: ${byw}</div>${(f.warnings || []).map((w) => `<div class="notice small">${esc(w)}</div>`).join("")}`;
 }
 
@@ -717,7 +717,8 @@ function companyPack(f) {
     ${guesses ? `<h3 style="font-size:14px;margin:6px 0 0">The guesses it rests on, riskiest first</h3>${guesses}` : ""}
     ${nums ? `<h3 style="font-size:14px;margin:6px 0 0">The numbers, recomputed by the platform</h3>${nums}<p class="small muted" style="margin:0">Every input is marked as an assumption, measured, or sourced in the financial model.</p>` : ""}
     ${steps ? `<h3 style="font-size:14px;margin:6px 0 0">Next steps only you can take</h3><ul class="small" style="margin:0;padding-left:18px">${steps}</ul>` : ""}
-    <h3 style="font-size:14px;margin:6px 0 0">Documents</h3>${docs}<h3 style="font-size:14px;margin:6px 0 0">Your decisions</h3>${dec}
+    <h3 style="font-size:14px;margin:6px 0 0">Documents</h3>${docs}
+    ${(p.settled_for_you || []).length ? `<h3 style="font-size:14px;margin:6px 0 0">Settled for you by a cofounder</h3>${p.settled_for_you.map((d) => `<div class="small">${esc(d.by)}: ${esc(d.problem)}</div>`).join("")}` : ""}<h3 style="font-size:14px;margin:6px 0 0">Your decisions</h3>${dec}
     ${(p.ceo_informed || []).length ? `<h3 style="font-size:14px;margin:6px 0 0">What Cynqra changed and told you</h3>${p.ceo_informed.map((n) => `<div class="small">${esc(n.headline)}</div>`).join("")}` : ""}</div>`;
 }
 
