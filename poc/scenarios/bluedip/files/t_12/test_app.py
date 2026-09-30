@@ -1,19 +1,28 @@
+"""The app's API as the owner's screen uses it. The restaurant's history is fixed so every number is the same on
+every run, whatever day the tests run on."""
 import json
+import os
+import shutil
+import tempfile
 import threading
 import unittest
 import urllib.error
 import urllib.request
-from datetime import date, timedelta
+from datetime import date
 
 from app import make_server
+from store import Store
 
-TOMORROW = (date.today() + timedelta(days=1)).isoformat()
+DAY = "2026-10-07"  # a Wednesday, the day after the history
 
 
 class AppTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.server = make_server(0)
+        cls.dir = tempfile.mkdtemp()
+        data = os.path.join(cls.dir, "bluedip.json")
+        Store(data, today=date(2026, 10, 7))  # the sample restaurant, its history ending the day before DAY
+        cls.server = make_server(0, data)
         cls.base = f"http://127.0.0.1:{cls.server.server_address[1]}"
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
@@ -22,6 +31,7 @@ class AppTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.server.shutdown()
         cls.server.server_close()
+        shutil.rmtree(cls.dir, ignore_errors=True)
 
     def call(self, path, body=None):
         data = None if body is None else json.dumps(body).encode()
@@ -34,7 +44,7 @@ class AppTests(unittest.TestCase):
             return exc.code, json.loads(exc.read() or b"null")
 
     def offer(self, **kw):
-        body = {"date": TOMORROW, "start": 13, "end": 16, "discount": 0.5, "cap": 15}
+        body = {"date": DAY, "start": 13, "end": 16, "discount": 0.5, "cap": 15}
         body.update(kw)
         return body
 
@@ -44,7 +54,7 @@ class AppTests(unittest.TestCase):
             self.assertIn(b"Bluedip", resp.read())
 
     def test_the_day_by_hour_and_by_meal_with_recommendations(self):
-        code, d = self.call(f"/api/day?date={TOMORROW}")
+        code, d = self.call(f"/api/day?date={DAY}")
         self.assertEqual(code, 200)
         self.assertEqual(len(d["hours"]), 15)
         self.assertEqual([s["slot"] for s in d["slots"]], ["breakfast", "lunch", "dinner"])
@@ -72,11 +82,11 @@ class AppTests(unittest.TestCase):
     def test_the_rule_on_record_refuses_deep_discounts(self):
         self.assertEqual(self.call("/api/offers", self.offer(discount=0.6))[0], 400)
         self.assertEqual(self.call("/api/offers", self.offer(start=5, end=7))[0], 400)
-        self.assertEqual(self.call("/api/offers/estimate", {"date": TOMORROW})[0], 400)
+        self.assertEqual(self.call("/api/offers/estimate", {"date": DAY})[0], 400)
         self.assertEqual(self.call("/api/offers/of_999/redeem", {})[0], 404)
 
     def test_the_rest_of_the_day_follows_what_has_happened(self):
-        code, d = self.call("/api/nowcast", {"date": TOMORROW, "now_hour": 12,
+        code, d = self.call("/api/nowcast", {"date": DAY, "now_hour": 12,
                                              "seen": {"8": 4, "9": 9, "10": 10, "11": 10}})
         self.assertEqual(code, 200)
         self.assertGreater(d["correction"], 1.0)
