@@ -45,7 +45,10 @@ const ACTION_TITLE = { write_file: "writing a file", read_artifact: "reading a d
   change_authority: "changing who may do what" };
 const actionTitle = (a) => ACTION_TITLE[a] || a;
 const taskTitle = (id) => (((S.st && S.st.tasks) || []).find((t) => t.id === id) || {}).title || id;
-const wt = (id) => { const w = ((S.st && S.st.workers) || []).find((x) => x.id === id); return w ? w.title : SERVICE_TITLE[id] || id; };
+// A seat is a title; the person in it has a name, and is always shown as an AI.
+const seatOf = (w) => (w.title || w.role || "").replace(" (you lead this area)", "").replace(/ [A-Z]$/, "");
+const label = (w) => (w.name ? `${w.name}, AI ${seatOf(w)}` : seatOf(w));
+const wt = (id) => { const w = ((S.st && S.st.workers) || []).find((x) => x.id === id); return w ? label(w) : SERVICE_TITLE[id] || id; };
 
 async function api(path, body) {
   const opts = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
@@ -252,14 +255,14 @@ function founderStep() {
     <div class="wiz-right"><div class="card stack">
       <h2 style="font-size:20px">The cofounders the plan proposes</h2>
       <p class="small muted" style="margin:0">Tick an area you lead and its cofounder becomes a lead who reports to you.</p>
-      ${cofs.map((w) => `<div class="kv"><span><b>${esc(w.title)}</b><br><span class="small muted">${esc(w.why || "")}</span></span><span class="small">${(st.workers || []).filter((x) => x.reports_to === w.id).length} in its team</span></div>`).join("") || `<p class="muted small">None.</p>`}
+      ${cofs.map((w) => `<div class="kv"><span><b>${esc(w.name || "")}</b> <span class="muted">AI ${esc(seatOf(w))}</span><br><span class="small muted">${esc(w.why || "")}</span></span><span class="small">${(st.workers || []).filter((x) => x.reports_to === w.id).length} in its team</span></div>`).join("") || `<p class="muted small">None.</p>`}
       ${orgChart(st.workers || [])}
     </div></div></div>`;
 }
 
 function orgChart(workers) {
   const kids = (id) => workers.filter((w) => (w.reports_to || "founder") === id);
-  const node = (w) => `<li><div class="onode${w.tier === "cofounder" ? " cofounder" : ""}"><b>${esc(w.title.replace(" (you lead this area)", ""))}</b><small>${w.tier === "cofounder" ? "AI cofounder" : w.led_by_founder ? "Reports to you: you lead this area" : "Team"}${w.model ? " · " + esc(w.model) : ""}</small></div>${kids(w.id).length ? `<ul>${kids(w.id).map(node).join("")}</ul>` : ""}</li>`;
+  const node = (w) => `<li><div class="onode${w.tier === "cofounder" ? " cofounder" : ""}"><b>${esc(w.name || seatOf(w))}</b><small>${esc([w.name ? `AI ${seatOf(w)}` : "", w.tier === "cofounder" ? "cofounder" : w.led_by_founder ? "reports to you: you lead this area" : "", w.model || ""].filter(Boolean).join(" · "))}</small></div>${kids(w.id).length ? `<ul>${kids(w.id).map(node).join("")}</ul>` : ""}</li>`;
   return `<div class="ochart"><div class="onode founder"><b>You, the founder</b><small>the vision and the calls that cannot be undone</small></div><ul class="otop">${kids("founder").map(node).join("")}</ul></div>`;
 }
 
@@ -350,7 +353,7 @@ function fitCard(mine) {
   if (fit && fit.added.length) lines.push(`<li>Added for what you do not bring: ${esc(fit.added.join(", "))}</li>`);
   if (fit && fit.removed.length) lines.push(`<li>Not needed, because you bring it: ${esc(fit.removed.join(", "))}</li>`);
   if (fit && !lines.length) lines.push(`<li>Rebuilt around your background: the same seats still fit.</li>`);
-  mine.forEach((w) => lines.push(`<li>${esc(w.title.replace(" (you lead this area)", ""))} reports to you: you lead this area</li>`));
+  mine.forEach((w) => lines.push(`<li>${esc(label(w))} reports to you: you lead this area</li>`));
   return lines.length ? `<div class="card stack" data-fit="1"><div class="caps">Fitted to you</div><ul class="small" style="margin:0;padding-left:18px">${lines.join("")}</ul></div>` : "";
 }
 
@@ -573,12 +576,19 @@ function statusText(t) {
   }[t.status] || t.status;
 }
 
+/* Who held a seat before, why they left, and the record they left. */
+function formerList(w) {
+  const f = w.former || [];
+  if (!f.length) return "";
+  return `<div class="stack" style="gap:6px"><span class="caps">Before in this seat</span>${f.map((x) => `<div class="small"><b>${esc(x.name)}</b> <span class="muted">on ${esc(modelName(x.model) || x.model || "an AI")}</span>: replaced because ${esc(x.why)}. Record: ${esc((x.record || {}).verified || 0)} verified, ${esc((x.record || {}).reworks || 0)} reworks.</div>`).join("")}</div>`;
+}
+
 function vOrg() {
   const st = S.st, ws = Object.fromEntries((st.workers || []).map((w) => [w.id, w]));
   const busyTask = (id) => (st.tasks || []).find((t) => t.owner_worker_id === id && !["PLANNED", "VERIFIED"].includes(t.status));
   const node = (id, note) => {
     const b = busyTask(id);
-    return `<button class="node ${S.worker === id ? "sel" : ""}" data-worker="${id}"><b>${esc(ws[id] ? ws[id].title : id)}</b><small>${esc(note)}</small>
+    return `<button class="node ${S.worker === id ? "sel" : ""}" data-worker="${id}"><b>${esc(ws[id] ? ws[id].name || seatOf(ws[id]) : id)}</b><small>${ws[id] && ws[id].name ? `AI ${esc(seatOf(ws[id]))}. ` : ""}${esc(note)}</small>
       ${b ? `<span class="busy">${esc(b.id)}: ${esc(statusText(b))}</span>` : ""}</button>`;
   };
   if (!ws[S.worker] && (st.workers || []).length) S.worker = st.workers[st.workers.length - 1].id;
@@ -594,15 +604,16 @@ function vOrg() {
   }).join("");
   const ans = S.graph ? `<div class="small" id="graph-answer">${graphAnswer(S.graph)}</div>` : "";
   const kids = (id) => (st.workers || []).filter((x) => (x.reports_to || "founder") === id);
-  const branch = (id) => kids(id).length ? `<div class="vline"></div><div class="nodes">${kids(id).map((x) => `<div class="branch">${node(x.id, x.tier === "cofounder" ? "Cofounder, reports to you" : `Reports to the ${(ws[x.reports_to] || {}).title || "founder"}`)}${branch(x.id)}</div>`).join("")}</div>` : "";
+  const branch = (id) => kids(id).length ? `<div class="vline"></div><div class="nodes">${kids(id).map((x) => `<div class="branch">${node(x.id, x.tier === "cofounder" ? "Cofounder, reports to you" : `Reports to ${ws[x.reports_to] ? ws[x.reports_to].name || "the " + seatOf(ws[x.reports_to]) : "you"}`)}${branch(x.id)}</div>`).join("")}</div>` : "";
   return `<div class="org"><div class="card tree">
-      <div class="node founder"><b>You, the CEO</b><small>Outcome, budget, the two approval gates, MEDIUM and HIGH risk</small></div>${branch("founder")}
+      <div class="node founder"><b>You, the founder</b><small>Outcome, budget, the two approval gates, MEDIUM and HIGH risk</small></div>${branch("founder")}
       <div class="nodes" style="margin-top:18px"><div class="node svc"><b>Verification Service</b><small style="color:var(--accent-ink)">Not a worker. Tests, lint, review</small></div></div>
       <div class="card stack" style="margin-top:28px;width:100%;background:var(--paper);border:0">
         <label class="lbl" for="gq">Ask the organization graph</label>
         <div class="row"><select id="gq"><option value="approves">Who approves</option><option value="owns">Who owns</option><option value="depends">What depends on</option></select>
           <input type="text" id="gs" value="merge_to_main" aria-label="Action type or task id" style="flex:1"><button class="btn sm" id="ask">Ask</button></div>${ans}</div></div>
-    <div class="card side-panel stack"><div><span class="caps">Worker ${esc(w.id)}</span><h2 style="font-size:22px">${esc(w.title)}</h2></div>
+    <div class="card side-panel stack"><div><span class="caps">AI ${esc(seatOf(w))} · seat ${esc(w.id)}</span><h2 style="font-size:22px">${esc(w.name || seatOf(w))}</h2></div>
+      ${w.name ? `<div class="row" style="gap:8px"><input type="text" id="rn_name" data-keep="yes" value="${esc(w.name)}" style="flex:1;min-width:0" aria-label="Name"><button class="btn sm" id="rename" data-id="${esc(w.id)}" ${S.busy ? "disabled" : ""}>Rename</button></div>` : ""}
       <div class="kv"><span>Intelligence bound by the Intelligence Router</span><span>${esc(w.model || "not yet")}${w.binding && w.binding.version ? " · version " + esc(w.binding.version) : ""}</span></div>
       <div class="kv"><span>Capabilities</span><span>${esc((w.capabilities || []).join(", "))}</span></div>
       <div class="kv"><span>Reports to</span><span>${esc(wt(w.reports_to))}</span></div>
@@ -610,7 +621,8 @@ function vOrg() {
       <div class="kv"><span>Verified, first pass</span><span class="mono">${p.verified || 0}, ${p.first_pass || 0}</span></div>
       <div class="kv"><span>Reworks, Blockers raised</span><span class="mono">${p.reworks || 0}, ${p.blockers || 0}</span></div>
       <h3 style="font-size:15px;margin-top:6px">Authority (${esc(st.policy.version)})</h3>${auth}
-      <p class="small muted" style="margin:6px 0 0">Worker is not model: the identity, role, authority and history stay when the intelligence under it changes.</p></div></div>`;
+      ${formerList(w)}
+      <p class="small muted" style="margin:6px 0 0">The seat keeps its work, authority and history. When an AI in it cannot do the work, a new person takes the seat, with a record of their own; an outage replaces no one.</p></div></div>`;
 }
 /* ---------------------------------------------------------------- the AI workforce and the model registry -- */
 const wfv = () => (S.st && S.st.workforce) || {};
@@ -639,12 +651,12 @@ function vWorkforce() {
   const alloc = Object.values(L.allocated || {}).reduce((a, b) => a + b, 0);
   const tile = (v, l) => `<div class="tile"><b>${v}</b><span>${l}</span></div>`;
   const workers = (wf.workers || []).map((w) => `<div class="card stack">
-      <div class="between"><div style="min-width:0;overflow-wrap:anywhere"><span class="caps">${esc(w.role)} · ${esc(w.id)}</span><h2 style="font-size:19px">${esc(w.title)}</h2></div>
+      <div class="between"><div style="min-width:0;overflow-wrap:anywhere"><span class="caps">AI ${esc(w.seat || w.title)} · seat ${esc(w.id)}</span><h2 style="font-size:19px">${esc(w.name || w.title)}</h2></div>
         <span class="pill teal">${esc(w.model)}</span></div>
       <div class="kv"><span>Budget allocated, spent</span><span class="mono">${usd(w.budget.allocated)}, ${usd(w.budget.spent)}</span></div>
       <div class="kv"><span>Verified, first pass, reworks</span><span class="mono">${w.performance.verified || 0}, ${w.performance.first_pass || 0}, ${w.performance.reworks || 0}</span></div>
       <div class="small muted">${esc(w.why)}</div>
-      ${w.binding && (w.binding.history || []).length ? `<div class="small muted">Before: ${esc(w.binding.history.map((h) => `${h.intelligence} (${h.reason})`).join("; "))}. The worker is the same; only its intelligence changed.</div>` : ""}
+      ${formerList(w)}${w.binding && (w.binding.history || []).length && !(w.former || []).length ? `<div class="small muted">Earlier AIs for ${esc(w.name || "this seat")}: ${esc(w.binding.history.map((h) => `${h.intelligence} (${h.reason})`).join("; "))}.</div>` : ""}
       <details><summary class="small">The staffing choice: every available intelligence, scored for this worker's work</summary>${candTable(w.candidates, w.model_id, true)}</details></div>`).join("");
   const reps = (wf.replacements || []).map((r) => `<div class="card stack rep">
       <div class="between"><b>${esc(r.task_id)}: ${esc(r.role)} ${esc(r.worker_id)} moved from ${esc(modelName(r.from))} to ${esc(modelName(r.to))}</b><span class="small muted">${esc(r.at)}</span></div>
@@ -820,7 +832,7 @@ function vWork() {
     return `<span class="small muted">${esc(statusText(t))}</span>`;
   };
   const colHtml = cols.map(([name, sts]) => `<div class="col"><span class="caps" style="font-weight:600">${name}</span>
-    ${ts.filter((t) => sts.includes(t.status)).map((t) => `<div class="tcard ${active === t.id ? "active" : ""} ${fresh("t:" + t.id + ":" + t.status)}" data-task="${esc(t.id)}"><span class="meta" title="${esc(wt(t.owner_worker_id))}">${esc(t.id)} · ${esc(t.owner_worker_id)} · ${esc(t.risk_tier)}</span>
+    ${ts.filter((t) => sts.includes(t.status)).map((t) => `<div class="tcard ${active === t.id ? "active" : ""} ${fresh("t:" + t.id + ":" + t.status)}" data-task="${esc(t.id)}"><span class="meta" title="${esc(wt(t.owner_worker_id))}">${esc(t.id)} · ${esc(((S.st.workers || []).find((x) => x.id === t.owner_worker_id) || {}).name || t.owner_worker_id)} · ${esc(t.risk_tier)}</span>
       <span class="ttl">${esc(t.title)}</span>${note(t)}</div>`).join("")}</div>`).join("");
   const tape = (st.protocols || []).slice().reverse().map((p) => `<div class="pobj ${esc(p.kind)} ${fresh("p:" + p.id)}" data-task="${esc(p.task_id)}"><span class="h">${esc(p.kind)} · ${esc(wt(p.sender))} to ${esc(wt(p.to))} · ${esc(p.task_id)}</span>
     <span class="small">${esc(p.summary)}</span>${p.artifacts && p.artifacts.length ? `<span class="small muted mono">${esc(p.artifacts.join(", "))}</span>` : ""}</div>`).join("");
@@ -980,6 +992,8 @@ function bind() {
   on("replan", (ev) => act(() => api(`/api/decisions/${ev.currentTarget.dataset.id}`, { action: "reject", note: "Ask for a different roadmap" })));
   on("step", () => act(() => api("/api/run/step", {})));
   on("live-check", () => act(() => api("/api/live/check", {})));
+  on("rename", (ev) => { const id = ev.currentTarget.dataset.id, name = ($("#rn_name") || {}).value || "";
+    act(() => api("/api/worker/rename", { worker_id: id, name })); });
   on("rework", () => { const note = ($("#rw_note") || {}).value || "", usd = Number(($("#rw_usd") || {}).value || 0);
     act(async () => { await api("/api/rework", { note, budget_usd: usd || null }); const el = $("#rw_note"); if (el) el.value = ""; }); });
   on("guide-toggle", () => { S.guide = !S.guide; paint(true); });

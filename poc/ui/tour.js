@@ -5,7 +5,9 @@
    what is happening and why it matters to them, in their words. */
 const CynqraTour = (() => {
   let WORKERS = [];
-  const who = (id) => { if (id === "orchestrator") return "Cynqra"; const w = WORKERS.find((x) => x.id === id); return w ? `the ${w.title}` : id || "a team member"; };
+  const seat = (w) => (w.title || w.role || "").replace(" (you lead this area)", "").replace(/ [A-Z]$/, "");
+  // a person by name, and always as the AI in a seat; no pronouns are assumed from a name
+  const who = (id) => { if (id === "orchestrator") return "Cynqra"; const w = WORKERS.find((x) => x.id === id); return w ? (w.name ? `${w.name}, the AI ${seat(w)}` : `the ${w.title}`) : id || "a team member"; };
   const Who = (id) => { const w = who(id); return w.charAt(0).toUpperCase() + w.slice(1); };
   const CH = { objective: "Step 1: Describe the idea", workforce: "Step 2: Approve the plan", you: "Step 3: Define yourself",
     plan: "Step 4: Approve the team and budget", work: "Step 5: Watch it being built", decide: "Step 5: A decision only you can make",
@@ -23,7 +25,7 @@ const CynqraTour = (() => {
     const via = d.extra && d.extra.endorsed_by ? `It reaches you through ${who(d.extra.endorsed_by)}, who leads this area and reviewed it first. ` : "";
     if (d.kind === "approve_workforce" || d.kind === "approve_roadmap") return null;
     if (d.kind === "decision") return { chapter: CH.decide, view: "decisions", title: "A business rule for you to decide",
-      body: `Nobody has said this yet, so ${who(d.source)} will not guess: "${d.problem}" ${Who(d.source)} proposes a rule, with its evidence, how sure it is, and what would change its mind. ${via}Rules like this are yours to decide. This is your decision ${n}: approve it, edit it, reject it with a reason, or ask for more evidence.` };
+      body: `Nobody has said this yet, and ${who(d.source)} does not guess: "${d.problem}" A rule is proposed, with the evidence, how sure the proposal is, and what would change it. ${via}Rules like this are yours to decide. This is your decision ${n}: approve it, edit it, reject it with a reason, or ask for more evidence.` };
     if (d.kind === "review_merge") {
       const tests = (d.evidence_refs || []).find((e) => /tests on the release candidate/.test(e)) || "every test ran on the finished version";
       return { chapter: CH.decide, view: "decisions", title: `${Who(d.source)} asks to merge the finished product`,
@@ -64,11 +66,11 @@ const CynqraTour = (() => {
     if (m.phase === "workforce") {
       const p = st.proposal || {}, req = st.requirements || { requirements: [] }, ws = p.workers || [];
       const cofs = ws.filter((w) => w.tier === "cofounder");
-      const teams = cofs.map((c) => { const team = ws.filter((w) => w.reports_to === c.id).map((w) => w.title);
-        return `the ${c.title} chose ${team.length ? team.join(", ") : "no one: it does its part itself"}`; });
+      const teams = cofs.map((c) => { const team = ws.filter((w) => w.reports_to === c.id).map((w) => w.name ? `${w.name} (${seat(w)})` : w.title);
+        return `${c.name || "the " + c.title}, the AI ${seat(c)}, chose ${team.length ? team.join(", ") : "no one, and does the work alone"}`; });
       const ch = p.challenge || {}, ln = p.lean || {};
       return { chapter: CH.workforce, title: "The plan: what it takes, and who builds it",
-        body: `Your idea became ${(req.outcomes || []).length} outcomes and ${req.requirements.length} requirements. Cynqra proposes ${cofs.length} AI cofounders (${cofs.map((c) => c.title).join(", ")}), and each chose a team: ${teams.join("; ")}. An independent check tried to make it smaller${(ch.removed || []).length ? ` and cut ${ch.removed.map((r) => r.title).join(", ")}` : ""}. A lean team of ${ln.seats || 0} is beside it. Approve the plan; next you define your own role.` };
+        body: `Your idea became ${(req.outcomes || []).length} outcomes and ${req.requirements.length} requirements. Cynqra proposes ${cofs.length} AI cofounders (${cofs.map((c) => c.name ? `${c.name}, ${seat(c)}` : c.title).join("; ")}), and each chose a team: ${teams.join("; ")}. An independent check tried to make it smaller${(ch.removed || []).length ? ` and cut ${ch.removed.map((r) => r.title).join(", ")}` : ""}. A lean team of ${ln.seats || 0} is beside it. Approve the plan; next you define your own role.` };
     }
     if (m.phase === "founder") return { chapter: CH.you, title: "Define yourself",
       body: m.mode === "demo" ? "Say what you bring: your experience, your skills, the areas you lead yourself. An area you lead gets no AI cofounder; that seat becomes a lead who reports to you. In a demo the founder and the team are part of the script." :
@@ -76,7 +78,7 @@ const CynqraTour = (() => {
     if (m.phase === "planning" && (m.cycle || 1) > 1) return { chapter: CH.plan, title: `Cycle ${m.cycle}: the next piece of work`,
       body: `The product is live, and the same team planned only what you asked for next, with what users said. ${(st.tasks || []).filter((t) => t.cycle === m.cycle).length} tasks, priced against your budget. Approve once; the team builds, checks and releases it, and the release before it stays as the way back.` };
     if (m.phase === "planning") return { chapter: CH.plan, title: "Your team and budget",
-      body: `The organisation is fitted around you, and each member has the AI best suited to its work. The work is ${((st.plan || {}).milestones || []).length} milestones and ${(st.tasks || []).length} tasks, each with an owner and a check it must pass, priced against your budget. Nothing starts until you approve.` };
+      body: `The organisation is fitted around you, and each member has the AI best suited to their work. The work is ${((st.plan || {}).milestones || []).length} milestones and ${(st.tasks || []).length} tasks, each with an owner and a check it must pass, priced against your budget. Nothing starts until you approve.` };
     if (m.phase === "stopped_error") return { chapter: CH.work, view: "work", title: "The AI failed, and nothing was invented",
       body: "An AI or network error stopped this step. Cynqra never fills a gap with made-up work. Press Try the same step again once the AI is reachable." };
     if (m.phase === "stopped") return { chapter: CH.work, view: "work", title: "The project was stopped", body: m.notice || "" };
@@ -84,7 +86,7 @@ const CynqraTour = (() => {
       body: `Your product is live and accepted. Whenever something should change, say it on the Product screen and Cynqra reworks it. You were needed ${decisionsSoFar(st)} times. Everything else, including ${plural(st.metrics.defects_caught_before_verified, "mistake")} caught by the checks, ${plural(st.metrics.sent_back_by_cofounders || 0, "piece")} of work sent back by a cofounder, ${plural(st.metrics.blockers_cleared_without_founder, "question")} settled within the team and ${plural(st.metrics.actions_stopped_by_policy, "action")} stopped by the rules, the team handled itself, and every step is on record.` };
     if (pend.length) { const n = forDecision(st, pend[0]); if (n) return n; }
     if (last.did === "approved" && last.kind === "approve_workforce") return { chapter: CH.you, title: "The plan is approved",
-      body: "Next, define yourself. Cynqra then fits the team around you, gives each member the AI that suits its work, and draws up the budget for your approval." };
+      body: "Next, define yourself. Cynqra then fits the team around you, gives each member the AI that suits their work, and draws up the budget for your approval." };
     if (last.did === "approved" && last.kind === "approve_roadmap") return { chapter: CH.work, view: "work", title: "The team starts work",
       body: "From here you do nothing unless a decision needs you. Cofounders run their areas: they hand out their team's work, answer its doubts and review it before it counts. Everyone works at the same time, and every action is checked against the rules and recorded." };
     if (last.did === "approved") {
@@ -113,7 +115,7 @@ const CynqraTour = (() => {
     }
     if (last.did === "blocked") {
       const to = (t.blocker || {}).needs_from, lead = to === t.reviewed_by;
-      return { chapter: CH.work, view: "work", title: `${Who(t.owner_worker_id)} asks ${lead ? "its cofounder" : "a colleague"} instead of guessing`,
+      return { chapter: CH.work, view: "work", title: `${Who(t.owner_worker_id)} asks ${lead ? "their cofounder" : "a colleague"} instead of guessing`,
         body: `"${(t.blocker || {}).description || ""}" Guessing here could build the wrong thing. The question goes to ${who(to)}${lead ? ", who leads this area" : ", who knows the answer"}. You are not interrupted.` };
     }
     if (last.did === "blocker_cleared") {
@@ -150,10 +152,11 @@ const CynqraTour = (() => {
     }
     if (last.did === "delivered") return forDecision(st, { kind: "accept_delivery" });
     if (last.did === "paused") return { chapter: CH.work, view: "work", title: "Paused", body: "An answer arrived after work was paused, so it was set aside. Nothing was lost." };
-    if (last.did === "replaced" || last.did === "rerouted") return { chapter: CH.work, view: "workforce", title: last.did === "replaced" ? "A team member got a better AI" : "Work moved to a colleague",
-      body: "The AI could not do this role's work: its work kept failing the checks. Cynqra picked another that passed a trial on this kind of work first, and told you why and what it costs. The team member keeps its name, role and history." };
+    if (last.did === "replaced" || last.did === "rerouted") return { chapter: CH.work, view: "workforce", title: last.did === "replaced" ? "A new person takes a seat" : "Work moved to a colleague",
+      body: last.did === "replaced" ? "The AI in this seat could not do the work: it kept failing the checks. Cynqra replaced them with a new person, an AI that passed a trial on this kind of work first, and told you who left, who joined, why, and what the newcomer costs. The seat keeps its work and files; the one who left stays in the history with their record, and the newcomer's record starts now."
+        : "The work moved to a colleague in the same role whose AI is expected to do better. Both stay in their seats." };
     if (["model_error_retry", "waiting", "waiting_on_ceo", "stand_in"].includes(last.did)) return { chapter: CH.work, view: "work", title: "An AI provider is not answering",
-      body: "Cynqra checked why: the fault is on the provider's side and the AI is fine, so nothing is replaced. That work waits and tries again; the rest of the team keeps going." };
+      body: "Cynqra checked why: the fault is on the provider's side and the AI is fine, so no one is replaced. That work waits and tries again; the rest of the team keeps going." };
     if (last.did === "retry" || last.did === "write_refused") return { chapter: CH.work, view: "work", title: "A reply was refused and tried again",
       body: "The reply broke a rule, so it was refused and the step runs again. After three refusals, Cynqra looks for a better AI or brings it to you." };
     return { chapter: CH.work, view: "work", title: "The team is at work", body: "Team members are handing work over and checking it. Nothing needs you right now." };

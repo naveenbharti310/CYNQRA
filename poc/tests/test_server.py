@@ -122,6 +122,9 @@ class ApiTests(unittest.TestCase):
             if st["meta"]["phase"] == "accepted":
                 break
             if st["meta"]["phase"] == "founder":
+                code, w = self.call("/api/worker/rename", {"worker_id": "w_cto", "name": "Ada Byron"})
+                self.assertEqual((code, w["name"]), (200, "Ada Byron"))
+                self.assertEqual(self.call("/api/worker/rename", {"worker_id": "w_cto", "name": "R2"})[0], 400)
                 self.assertEqual(self.call("/api/founder/define", {"founder": {"background": "Ran recruiting"}})[0], 200)
                 continue
             pend = st["decisions"]["pending"]

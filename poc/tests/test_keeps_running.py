@@ -179,7 +179,7 @@ class UpdateAndMemoryTests(unittest.TestCase):
         u = e.update()
         self.assertEqual([w["what"][:15] for w in u["waiting_for_you"]], ["Release 1 is me"],
                          "the only thing waiting is going live")
-        self.assertIn("Chief Product Officer", [d["by"] for d in u["decided"]])
+        self.assertIn("Chief Product Officer", [d["by"].split(", AI ")[-1] for d in u["decided"]])
         self.assertEqual(u["numbers"]["tasks"], 6)
         e.close()
 
@@ -189,7 +189,8 @@ class UpdateAndMemoryTests(unittest.TestCase):
         pack = e.final_report()["company_pack"]
         self.assertEqual([d["kind"] for d in pack["ceo_decisions"]],
                          ["approve_workforce", "approve_roadmap", "decision", "deploy", "accept_delivery"])
-        self.assertEqual([(d["kind"], d["by"]) for d in pack["settled_for_you"]], [("review_merge", "CTO")])
+        self.assertEqual([(d["kind"], d["by"].split(", AI ")[-1]) for d in pack["settled_for_you"]],
+                         [("review_merge", "CTO")])
         f = {x["what"]: x for x in e.final_report()["company_pack"]["foundations"]}
         self.assertIn("Risk and compliance register", f["Register the company"]["prepared_in"])
         self.assertIn("a professional should review it", f["Register the company"]["status"])
@@ -201,7 +202,7 @@ class UpdateAndMemoryTests(unittest.TestCase):
             "Financial model: for what a customer is worth over its life, the model says 49,975, the inputs give 43,725",
             "Demand and offer engine: the test \"the cap is never exceeded\" failed"], "the founder reads names, not keys")
         settled = [d for d in u["decided"] if d["by"] != "you"]
-        self.assertEqual([(d["by"], d["status"], d["task"]) for d in settled],
+        self.assertEqual([(d["by"].split(", AI ")[-1], d["status"], d["task"]) for d in settled],
                          [("CTO", "approved", "Review and merge release 1")])
         created = {ev["aggregate_id"]: ev["payload"] for ev in e.store.events() if ev["event_type"] == "decision.created"}
         self.assertEqual(created["dec_t_16"]["settled_by"], "w_cto",

@@ -3,7 +3,7 @@
 **What:** the scripts that record a video of the Bluedip demo. **Why:** a video shows Cynqra to people who will not
 run it. **How:** below.
 
-The video, Cynqra_POC_demo.mp4, is about 5 minutes 45 seconds long and follows the seven
+The video, Cynqra_POC_demo.mp4, is about 5 minutes 55 seconds long and follows the seven
 steps of the journey, 1920 x 1080, 30 frames a second, silent with on screen captions. It was recorded on 30 September
 2026. It is kept outside the repository because of its size; make it again with the command at the end. Every screen in it is the real software doing the real work in demo mode: the
 idea becomes a brief, the plan and organisation are approved, the founder defines themselves, the team and budget are
@@ -34,10 +34,10 @@ How it is shown:
 | --- | --- |
 | Title | You bring the vision. Cynqra creates the organisation that can build it. |
 | Step 1: Describe the idea | The founder's words become a brief with the two guesses marked, and a hard budget in dollars |
-| Step 2: Approve the plan | What the founder will get and the capabilities it takes; the proposed organisation, three AI cofounders and their teams; the estimated budget. The founder approves the plan. |
+| Step 2: Approve the plan | What the founder will get and the capabilities it takes; the proposed organisation, three named AI cofounders and their teams, every member named; the estimated budget. The founder approves the plan. |
 | Step 3: Define yourself | The founder's background; an area the founder leads gets no AI cofounder. This founder is not technical, so all three stay. |
-| Step 4: Approve the team and budget | The budget, the timeline and the organisation. The founder approves. |
-| Step 5: Watch it being built | Everyone working at once; the forecast sent back after losing to last week's numbers; the rule on money brought to the founder; a test catching an estimate that ignored the owner's cap; the merge settled by the CTO, the founder told; going live brought to the founder |
+| Step 4: Approve the team and budget | The budget, the timeline and the organisation, each person with the AI best suited to their work, and what happens if one cannot do it: a new person takes the seat. The founder approves. |
+| Step 5: Watch it being built | Everyone working at once; the data scientist's forecast, by name, sent back after losing to last week's numbers; the rule on money brought to the founder; a test catching an estimate that ignored the owner's cap; the merge settled by the AI CTO, by name, the founder told; going live brought to the founder |
 | Step 6: Receive the working product | The product live; Bluedip used as the owner would: the day hour by hour, the owner's 50% idea losing money after food cost and 20% earning it |
 | Step 7: Audit and refine | Every requirement checked against the original objective; where to ask for a rework; the founder accepts |
 | End | Times the founder was needed, requirements met, mistakes caught, tests in the live release |

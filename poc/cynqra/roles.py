@@ -346,15 +346,17 @@ def prompt_text(worker: dict, workers: list[dict] | None = None) -> str:
     r = role(worker["role"])
     docs = "; ".join(f"{DOC_TYPES[d]['title']}" for d in r["documents"])
     field = f" Your field: {worker['field']}." if worker.get("field") else ""
-    out = f"You are {worker['title']} ({worker['id']}). {r['charter']}{field}" + (f" You write: {docs}." if docs else "")
+    who = f"{worker['name']}, the AI {worker['title']}" if worker.get("name") else worker["title"]
+    out = f"You are {who} ({worker['id']}). {r['charter']}{field}" + (f" You write: {docs}." if docs else "")
     by_id = {w["id"]: w for w in workers or []}
     if r["tier"] == "cofounder":
         team = [w for w in workers or [] if w.get("reports_to") == worker["id"]]
         out += (" You are a cofounder: the founder is the CEO and you report to them." +
-                (" Your team: " + ", ".join(f"{w['title']} ({w['id']})" for w in team) + "." if team else ""))
+                (" Your team: " + ", ".join(f"{w.get('name') + ', ' if w.get('name') else ''}{w['title']} ({w['id']})" for w in team) + "." if team else ""))
     elif worker.get("reports_to") in by_id:
         lead = by_id[worker["reports_to"]]
-        out += f" You report to {lead['title']} ({lead['id']}), the cofounder who leads your area."
+        out += (f" You report to {lead.get('name') + ', ' if lead.get('name') else ''}{lead['title']} ({lead['id']}), "
+                "the cofounder who leads your area.")
     return out
 
 

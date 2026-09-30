@@ -16,7 +16,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from . import budget, deploy, replacement, roles, verifier
+from . import budget, deploy, people, replacement, roles, verifier
 from . import settings as project_settings
 from .db import digest, now
 from .protocol import ProtocolError
@@ -350,16 +350,16 @@ def settle(run, t: dict, pending: dict, extra: dict, settler: str, why: str) -> 
                      risk=t["risk_tier"], confidence=pending["confidence"], cost=pending["cost"],
                      evidence=pending["evidence"], change=pending["what_would_change_this"], task_id=t["id"],
                      action_type=pending["action_type"], source=owner, extra=dict(extra, settled_by=settler))
-    title = run.worker(settler)["title"]
+    who = run.worker(settler)
     d.update({"status": "approved", "outcome_label": "settled_by_cofounder", "labeled_by": settler, "in_digest": False,
               "labeled_at": now(), "resolved_by": settler, "resolved_at": now()})
     run.store.put("decision", d["id"], d)
     run.event("decision.approved", "decision", d["id"], {"kind": d["kind"], "outcome_label": d["outcome_label"],
               "task_id": t["id"], "by": settler}, actor=settler, actor_type="worker", correlation_id=t["id"])
     replacement.inform(run, "settled_by_cofounder", worker_id=settler, task_id=t["id"],
-                       headline=f"The {title} approved: {t['title']}",
-                       detail=f"{pending['recommendation'][:300]} Settled by the {title} because {why}. You can change "
-                              "it later.")
+                       headline=f"{people.label(who)} approved: {t['title']}",
+                       detail=f"{pending['recommendation'][:300]} Settled by {who.get('name') or people.seat(who)} "
+                              f"because {why}. You can change it later.")
     t.update({"status": "APPROVED", "decision_id": d["id"], "pending_proposal": None})
     run.save_task(t)
     return {"did": "settled", "task": t["id"], "decision": d["id"], "by": settler}
@@ -533,7 +533,7 @@ def execute_approved(run, t: dict) -> dict:
         doc = run.paths["integration"] / "docs" / "DECISIONS.md"
         doc.parent.mkdir(parents=True, exist_ok=True)
         with doc.open("a", encoding="utf-8") as fh:
-            by = "the founder" if d.get("resolved_by") == "founder" else f"the {run.worker(d['resolved_by'])['title']}"
+            by = "the founder" if d.get("resolved_by") == "founder" else people.label(run.worker(d["resolved_by"]))
             fh.write(f"## {t['title']} ({d['id']}, {d['outcome_label']} by {by})\n\n{rule}\n\n")
         aid = f"{t['id']}/DECISIONS.md"
         run.store.put("artifact", aid, {"id": aid, "task_id": t["id"], "path": "docs/DECISIONS.md",

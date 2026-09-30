@@ -16,8 +16,9 @@ For the AI itself, Cynqra evaluates the alternatives and decides one of three th
   keep      no alternative is expected to do better, or no better one passes its regression check
   reroute   the task moves to another worker of the same role whose model is expected to do better; both workers
             keep their identities
-  replace   the worker is bound to another intelligence; its identity, role, authority, history and workspace
-            stay (binding.py keeps the previous binding in its history)
+  replace   another intelligence takes the seat: a new person, with a new name and a record of its own (people.py).
+            The seat's role, authority, work, history and workspace stay; the one who left stays in the history
+            as a former holder with their record (binding.py keeps the previous binding in its history)
 
 Before a new intelligence continues the work it passes a regression check (probe.regression_check): its verified
 record on this kind of work for its current version, or the calibration work of that kind done now. A model that
@@ -39,7 +40,7 @@ import re
 import shutil
 import time
 
-from . import binding, budget, performance, planner, roles
+from . import binding, budget, people, performance, planner, roles
 from . import settings as project_settings
 from .db import now
 from .intelligence import IntelligenceError
@@ -146,7 +147,7 @@ def _cost_line(before: float | None, after: float | None, old: str | None = None
 
 def inform(run, kind: str, *, worker_id: str, task_id: str | None, headline: str, detail: str,
            usd_before: float | None = None, usd_after: float | None = None) -> dict:
-    """Tell the CEO what Cynqra changed and why. Not a decision: nothing waits on it, and it is not counted as the
+    """Tell the founder what Cynqra changed and why. Not a decision: nothing waits on it, and it is not counted as the
     CEO being needed. It stays in the run's record and in the Company Pack."""
     n = run.count("ceo_notice") + 1
     rec = {"id": f"note_{n:03d}", "kind": kind, "worker_id": worker_id, "task_id": task_id, "headline": headline,
@@ -253,12 +254,14 @@ def _swap(run, t: dict, best: dict, rows: list, why: str, regression: str) -> di
     prior = [o for o in reg.outcomes(old) if o["run_id"] == run.cid and o["task_id"] == t["id"]]
     binding.bind(run, wid, reg.get(best["model_id"]), reason=why, by="replacement_engine", candidates=rows,
                  task_id=t["id"])
+    left, joined = people.replace(run, wid, why, old, best["model_id"])
+    w = run.worker(wid)
     e = router.estimate(reg, reg.get(best["model_id"]), t["kind"],
                         project_settings.get(run.store)["time_value_per_hour"])
     budget.reallocate(run.store, t["id"], old, e)
     n = run.count("replacement") + 1
     rep = {"id": f"rep_{n:03d}", "task_id": t["id"], "worker_id": wid, "role": w["role"], "from": old,
-           "to": best["model_id"], "reason": why[:400], "attempts": len(prior), "usd_spent_by_previous": round(spent, 4),
+           "to": best["model_id"], "left": left, "joined": joined, "reason": why[:400], "attempts": len(prior), "usd_spent_by_previous": round(spent, 4),
            "candidates": rows, "regression_check": regression, "rerouted": False, "at": now(),
            "inherited": ["objective", "task specification and handoff", "decided rules", "workspace files",
                          "previous attempts and their failures", "test results"]}
@@ -267,8 +270,8 @@ def _swap(run, t: dict, best: dict, rows: list, why: str, regression: str) -> di
               "usd_spent_by_previous", "regression_check")} | {"candidates": [{k: r[k] for k in (
                   "model", "score", "p_task", "expected_usd")} for r in rows]},
               actor="replacement_engine", correlation_id=t["id"])
-    handover = (f"You are taking over {t['id']} ({t['title']}) as {w['title']}; the previous intelligence, "
-                f"{reg.get(old)['name']}, made {len(prior)} attempts without passing verification. Why it was "
+    handover = (f"You are {joined}, taking over {t['id']} ({t['title']}) as {people.seat(w)} from {left}, who "
+                f"worked on {_name(run, old)} and made {len(prior)} attempts without passing verification. Why it was "
                 f"replaced: {why[:300]} Its files are in your workspace and kept; continue from them rather than "
                 "starting again.")
     t.update({"status": "REWORK" if t["kind"] in roles.FILE_TYPES else "ASSIGNED", "attempts": 0, "cut_offs": 0,
@@ -277,10 +280,11 @@ def _swap(run, t: dict, best: dict, rows: list, why: str, regression: str) -> di
     run.save_task(t)
     before, after = _per_task(run, old, t["kind"]), e["expected_usd"]
     inform(run, "intelligence_replaced", worker_id=wid, task_id=t["id"], usd_before=before, usd_after=after,
-           headline=f"{w['title']} now works on {reg.get(best['model_id'])['name']}, in place of {_name(run, old)}",
-           detail=f"Why: {why[:300]} It is not the provider's side: the AI could not do this role's work. "
-                  f"{reg.get(best['model_id'])['name']} passed its check first ({regression}). The worker keeps its "
-                  f"role, history and files." + _cost_line(before, after, old, best["model_id"], run))
+           headline=f"{left} was replaced as your AI {people.seat(w)} by {joined}",
+           detail=f"Why: {why[:300]} It is not the provider's side: the AI could not do this role's work. {joined} "
+                  f"works on {reg.get(best['model_id'])['name']} and passed a check on this kind of work before taking "
+                  f"the seat ({regression}). The seat keeps its work, files and history; {left}'s record stays in "
+                  f"the history and {joined}'s starts now." + _cost_line(before, after, old, best["model_id"], run))
     return {"did": "replaced", "task": t["id"], "from": old, "to": best["model_id"]}
 
 
@@ -308,9 +312,9 @@ def _reroute(run, t: dict, peer: dict, why: str) -> dict:
     run.save_task(t)
     before, after = _per_task(run, rep["from"], t["kind"]), _per_task(run, rep["to"], t["kind"])
     inform(run, "task_rerouted", worker_id=frm, task_id=t["id"], usd_before=before, usd_after=after,
-           headline=f"{t['title']} moved from {(run.worker(frm) or {}).get('title', frm)} to {peer['title']}",
-           detail=f"Why: {why[:300]} {peer['title']} works on {_name(run, rep['to'])}, which passed its check on "
-                  "this kind of work; both keep their roles." + _cost_line(before, after, rep["from"], rep["to"], run))
+           headline=f"{t['title']} moved from {people.label(run.worker(frm)) or frm} to {people.label(peer)}",
+           detail=f"Why: {why[:300]} {peer.get('name') or peer['title']} works on {_name(run, rep['to'])}, which "
+                  "passed its check on this kind of work; both keep their seats." + _cost_line(before, after, rep["from"], rep["to"], run))
     return {"did": "rerouted", "task": t["id"], "from": frm, "to": peer["id"]}
 
 
@@ -392,14 +396,17 @@ def _rebind(run, t: dict, wid: str, m: dict, why: str) -> dict:
             continue
         new = reg.get(r["model_id"])
         binding.bind(run, wid, new, reason=why, by="intelligence_router", candidates=rows)
+        left, joined = people.replace(run, wid, why, m["id"], new["id"])
+        w = run.worker(wid)
         before = router.estimate(reg, m, kind, s["time_value_per_hour"])["usd_per_attempt"] if m else None
         after = router.estimate(reg, new, kind, s["time_value_per_hour"])["usd_per_attempt"]
         inform(run, "intelligence_replaced", worker_id=wid, task_id=t["id"], usd_before=before, usd_after=after,
-               headline=f"{w['title']} now works on {new['name']}, in place of {m['name']}",
-               detail=f"Why: {why} {w['title']} keeps its role and its history." +
+               headline=f"{left} was replaced as your AI {people.seat(w)} by {joined}",
+               detail=f"Why: {why} {joined} works on {new['name']} and passed a check first. The seat keeps its "
+                      f"work and history; {left}'s record stays in the history." +
                       _cost_line(before, after, m["id"], new["id"], run))
         return {"did": "replaced", "task": t["id"], "worker": wid, "from": m["id"], "to": new["id"]}
-    return run.escalate(t, why + f" No other model passed its check for {w['title']}'s work.")
+    return run.escalate(t, why + f" No other model passed its check for {people.label(w)}'s work.")
 
 
 def _withdrawn(run, t: dict, m: dict, exc) -> dict:
@@ -421,9 +428,12 @@ def _withdrawn(run, t: dict, m: dict, exc) -> dict:
             if pick:
                 binding.bind(run, w["id"], reg.get(pick["model_id"]), reason=f"{m['name']} {PLAIN['withdrawn']}",
                              by="intelligence_router", candidates=rows)
+                left, joined = people.replace(run, w["id"], f"{m['name']} {PLAIN['withdrawn']}", m["id"],
+                                              pick["model_id"])
                 inform(run, "intelligence_replaced", worker_id=w["id"], task_id=None,
-                       headline=f"{w['title']} now works on {pick['model']}, in place of {m['name']}",
-                       detail=f"{m['name']} {PLAIN['withdrawn']} ({str(exc)[:200]}).")
+                       headline=f"{left} was replaced as your AI {people.seat(w)} by {joined}",
+                       detail=f"{m['name']}, the AI {left} worked on, {PLAIN['withdrawn']} ({str(exc)[:200]}). {joined} "
+                              f"works on {pick['model']}. The seat keeps its work and history.")
     # the control plane's own binding is chosen again on its next call, since its intelligence is unavailable
     return out or {"did": "model_replaced", "task": t["id"], "model": m["id"]}
 
@@ -497,7 +507,7 @@ def _outage(run, t: dict, m: dict, cause: str, exc) -> dict:
     s = project_settings.get(run.store)
     _, rows = router.choose(run.registry, s, [kind], exclude={m["id"]})
     alt = rows[0] if rows else None
-    waiting = sorted({w["title"] for w in run.workers() if run.model_of(w["id"]) == m["id"]})
+    waiting = sorted({people.label(w) for w in run.workers() if run.model_of(w["id"]) == m["id"]})
     if alt is None:
         _park(run, t, {m["id"]}, cause, None, _down_until(run, m))
         inform(run, "waiting_for_provider", worker_id=t.get("owner_worker_id") or "", task_id=t["id"],
@@ -553,15 +563,16 @@ def _stand_in(run, t: dict, m: dict, cause: str, pick: str | None, kind: str, au
             run.store.put("replacement", rep["id"], rep)
             run.event("worker.stand_in", "worker", w["id"], {"from": m["id"], "to": mid, "cause": cause},
                       actor="replacement_engine", correlation_id=t["id"])
-            moved.append(w["title"])
+            moved.append(w.get("name") or w["title"])
         for x in run.tasks():
             if x["status"] == "WAITING" and m["id"] in x["waiting"].get("model_ids", []):
                 _unpark(run, x)
         inform(run, "stand_in", worker_id=t.get("owner_worker_id") or "", task_id=t["id"], usd_before=before,
-               usd_after=after, headline=f"{reg.get(mid)['name']} stands in for {m['name']} ({', '.join(moved)})",
-               detail=f"{m['name']} stopped answering: {PLAIN[cause]}. The AI is not at fault and was not replaced. "
-                      f"By {authority}, {reg.get(mid)['name']} covers the wait (it passed its check: "
-                      f"{check['evidence']}); each worker returns to {m['name']} when it answers again."
+               usd_after=after, headline=f"A stand-in AI covers for {', '.join(moved)} while {m['name']} is down",
+               detail=f"{m['name']} stopped answering: {PLAIN[cause]}. The AI is not at fault, so no one was "
+                      f"replaced: {', '.join(moved)} stay in their seats. By {authority}, {reg.get(mid)['name']} "
+                      f"covers the wait (it passed its check: {check['evidence']}); they return to {m['name']} when "
+                      "it answers again."
                       + _cost_line(before, after, m["id"], mid, run))
         return {"did": "stand_in", "task": t["id"], "from": m["id"], "to": mid}
     return None
@@ -575,7 +586,7 @@ def _account(run, t: dict, m: dict, cause: str, exc) -> dict:
     d = _pending(run, "provider_account", "connection_id", conn)
     if d is None:
         c = run.supply.connections.find_id(conn) if run.supply else None
-        waiting = sorted({w["title"] for w in run.workers() if run.model_of(w["id"]) in on_account})
+        waiting = sorted({people.label(w) for w in run.workers() if run.model_of(w["id"]) in on_account})
         fix = ("Add credit to the account" if cause == "no_credit" else "Give Cynqra a key the provider accepts")
         d = run.decision(
             "provider_account", problem=f"{(c or {}).get('name') or m['name']}: {PLAIN[cause]}. No AI is at fault, so "
@@ -639,7 +650,17 @@ def resume_waiting(run) -> None:
         try:
             back = reg.availability(reg.get(rep["from"]))[0]
         except Exception:  # noqa: BLE001 - the original was removed: the stand-in stays, as a replacement
-            back = False
+            rep.update(active=False, temporary=False)
+            run.store.put("replacement", rep["id"], rep)
+            if run.model_of(rep["worker_id"]) == rep["to"]:  # a new person takes the seat for good
+                why = "their AI was removed while a stand-in covered for them"
+                left, joined = people.replace(run, rep["worker_id"], why, rep["from"], rep["to"])
+                w = run.worker(rep["worker_id"])
+                inform(run, "intelligence_replaced", worker_id=rep["worker_id"], task_id=rep.get("task_id"),
+                       headline=f"{left} was replaced as your AI {people.seat(w)} by {joined}",
+                       detail=f"Why: {why}. {joined} works on {_name(run, rep['to'])}, the stand-in that passed its "
+                              "check. The seat keeps its work and history.")
+            continue
         if not back:
             continue
         rep["active"] = False

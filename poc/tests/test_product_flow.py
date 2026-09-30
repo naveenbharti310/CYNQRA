@@ -455,6 +455,7 @@ class FitToFounderTests(unittest.TestCase):
     def test_the_organization_is_built_again_around_the_founder(self):
         e, src = self.engine()
         self.assertEqual([r["quantity"] for r in e.proposal()["roles"] if r["role"] == "Engineer"], [2])
+        cto_name = e.worker("w_cto")["name"]
         e.define_founder({"background": "Ten years as a backend engineer"})
         self.assertEqual(src.seen[-1]["background"], "Ten years as a backend engineer", "the founder reaches the model")
         prop = e.proposal()
@@ -467,6 +468,7 @@ class FitToFounderTests(unittest.TestCase):
         self.assertIn("workforce.fitted_to_founder", kinds)
         self.assertIn("worker.left", kinds)
         self.assertTrue(all(e.model_of(w["id"]) for w in e.workers()), "the new organization is staffed")
+        self.assertEqual(e.worker("w_cto")["name"], cto_name, "a seat that remains keeps its person")
         e.close()
 
     def test_the_model_is_told_to_fit_the_organization_to_the_founder(self):

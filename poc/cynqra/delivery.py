@@ -13,7 +13,7 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-from . import budget, lessons, performance, policy, roles
+from . import budget, lessons, people, performance, policy, roles
 from .db import IST, digest, now
 
 ESCALATIONS_PER_DAY = 5  # D-29
@@ -171,15 +171,16 @@ def company_pack(run) -> dict:
         if t["kind"] != "document":
             continue
         w = run.worker(t["owner_worker_id"]) or {}
-        docs.append({"task": t["id"], "title": t["title"], "author": w.get("title", t["owner_worker_id"]),
+        docs.append({"task": t["id"], "title": t["title"], "author": people.label(w) or t["owner_worker_id"],
                      "types": [roles.DOC_TYPES[d]["title"] for d in t.get("documents") or [] if d in roles.DOC_TYPES],
                      "files": [o.get("file") for o in t.get("outputs") or [] if isinstance(o, dict)],
                      "verified": t["status"] == "VERIFIED"})
     decided = [d for d in run.store.all("decision") if d["status"] != "pending"]
     title = lambda tid: (run.store.get("task", tid) or {}).get("title", "") if tid else ""  # noqa: E731
     workers = run.workers()
-    org = [{"cofounder": c["title"], "why": c.get("why", ""),
-            "team": [{"title": w["title"], "why": w.get("why", "")} for w in workers if w.get("reports_to") == c["id"]]}
+    org = [{"cofounder": people.label(c), "why": c.get("why", ""),
+            "team": [{"title": people.label(w), "why": w.get("why", "")} for w in workers
+                     if w.get("reports_to") == c["id"]]}
            for c in workers if c.get("tier") == "cofounder"]
     req = run.requirements() or {}
     plan = run.store.get("plan", "plan_1") or {}
@@ -204,7 +205,7 @@ def company_pack(run) -> dict:
                               for d in decided if d.get("resolved_by") == "founder"],
             "settled_for_you": [{"kind": d["kind"], "problem": d["problem"][:200], "status": d["status"],
                                  "task": title(d.get("task_id")),
-                                 "by": (run.worker(d["resolved_by"]) or {}).get("title", d["resolved_by"])}
+                                 "by": people.label(run.worker(d["resolved_by"])) or d["resolved_by"]}
                                 for d in decided if d.get("resolved_by") not in (None, "founder")],
             "ceo_informed": [{k: n[k] for k in ("kind", "headline", "detail", "usd_difference")}
                              for n in run.store.all("ceo_notice")],

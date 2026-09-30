@@ -34,7 +34,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import binding, budget, delivery, deploy, execution, gateway, numbers, objective, performance, planner, policy
-from . import replacement, roles, seats, synthesis
+from . import people, replacement, roles, seats, synthesis
 from . import settings as project_settings
 from .db import IST, Store, now
 from .intelligence import SCENARIOS, IntelligenceError, ModelSource, ScriptedSource
@@ -618,6 +618,14 @@ class Engine:
         self.set_meta(phase="founder", notice="")
         self.event("state.changed", "company", self.cid, {"phase": "founder"})
 
+    def rename_worker(self, worker_id: str, name: str) -> dict:
+        """The founder names a team member as they like. The seat, the record and the history stay."""
+        with self.lock:
+            try:
+                return people.rename(self, worker_id, name)
+            except ValueError as exc:
+                raise EngineError(str(exc)) from exc
+
     def define_founder(self, profile: dict | None = None) -> dict:
         """Step 3: the founder says who they are and what they bring. In live mode, when their background or stage
         is not what the plan's organization was built around, the organization is built again around them (a demo's
@@ -707,9 +715,9 @@ class Engine:
                       + ("" if a["early"] or a["risk"] != "high" else " It is tested late: a wrong answer here is found "
                          "only after most of the money is spent.")
                       + (f" Only you can test the rest: {a['founder_step']}" if a["founder_step"] else ""))
-        ev += [f"{self.worker(wid)['title']} joins with {j['task']} ({j['milestone']})" for wid, j in wc["joins"].items()]
-        ev += ([f"{x['title']} had no work in this plan and was removed before anything started" for x in wc["idle"]]
-               if n == 1 else [f"{x['title']} has no work in this cycle and costs nothing in it" for x in wc["idle"]])
+        ev += [f"{people.label(self.worker(wid))} joins with {j['task']} ({j['milestone']})" for wid, j in wc["joins"].items()]
+        ev += ([f"{people.label(x)} had no work in this plan and was removed before anything started" for x in wc["idle"]]
+               if n == 1 else [f"{people.label(x)} has no work in this cycle and costs nothing in it" for x in wc["idle"]])
         self.decision("approve_roadmap",
                       problem=(f"The roadmap for the approved organization: {len(p['milestones'])} milestones, "
                                f"{len(new)} tasks, and the budget built on it.") if n == 1 else
@@ -1115,7 +1123,7 @@ class Engine:
                             "live_checks": len(live)},
                 "learned": [f"{title(v['task_id'])}: {self._caught(v)}" for v in caught][-5:],
                 "decided": [{"what": d["problem"][:140], "by": "you" if d.get("resolved_by") == "founder" else
-                             (self.worker(d["resolved_by"]) or {}).get("title", d.get("resolved_by")),
+                             people.label(self.worker(d["resolved_by"])) or d.get("resolved_by"),
                              "outcome": d["outcome_label"], "status": d["status"], "kind": d["kind"],
                              "task": title(d["task_id"]) if d.get("task_id") else ""} for d in decided][-8:],
                 "at_risk": risk,
@@ -1162,6 +1170,7 @@ class Engine:
                 "replacements": self.store.all("replacement"), "models_in_use": in_use,
                 "ceo_notices": self.store.all("ceo_notice"),
                 "workers": [{"id": w["id"], "role": w["role"], "title": w["title"], "reports_to": w.get("reports_to"),
+                             "name": w.get("name"), "seat": people.seat(w), "former": w.get("former") or [],
                              "binding": bound.get(w["id"]),
                              "model_id": (bound.get(w["id"]) or {}).get("intelligence_id"),
                              "model": (bound.get(w["id"]) or {}).get("intelligence"),

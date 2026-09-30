@@ -101,9 +101,10 @@ A founder describes Bluedip: an app that helps restaurant owners fill their quie
 revenue for every hour and meal, recommends offers, and lets an owner try an offer, such as 50% off for at most 15
 customers between 1 pm and 4 pm, and see what it will do before it runs.
 
-- **The organisation.** Cynqra proposes a CTO, because Bluedip is an app built on prediction models; a Chief Product
-  Officer, because restaurant owners must find it useful; and a CFO, because the whole value is whether an offer
-  earns or loses money. Each cofounder picks the team for its own area. A Security Expert is cut before the founder
+- **The organisation.** Cynqra proposes a CTO (Imani Lindqvist), because Bluedip is an app built on prediction
+  models; a Chief Product Officer (Wen Torres), because restaurant owners must find it useful; and a CFO (Joaquín
+  Khalil), because the whole value is whether an offer earns or loses money. Each is an AI with a name, and each picks
+  the team for their own area, every member named too. A Security Expert is cut before the founder
   sees the team, because release 1 takes no payments and keeps no diner data.
 - **The founder.** In the demo the founder ran a restaurant and is not technical, so every cofounder seat stays. A
   technical founder who leads the technology would get no CTO; that area would report to them.

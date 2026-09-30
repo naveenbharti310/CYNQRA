@@ -62,6 +62,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const reworked = (st, id) => (st.verifications || []).some((v) => v.task_id === id && v.verdict === "REQUIRES_REWORK");
   const pending = (st, kind) => (st.decisions.pending || []).some((d) => d.kind === kind);
   const work = (on) => api("/api/run/auto", on ? { on: true, delay: WORK_DELAY } : { on: false });
+  // the team's people, by seat: the names the founder sees on screen
+  const person = async (id) => { const st = await state(); const w = [...(st.workers || []), ...((st.proposal || {}).workers || [])].find((x) => x.id === id); return w && w.name ? w.name : id; };
 
   // ---------- the presentation ----------
   const D = (fn, ...args) => page.evaluate(([f, a]) => window.__demo[f](...a), [fn, args]);
@@ -304,7 +306,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await spot(".wiz-left .card >> nth=0");
   await say("What you'll get, and the capabilities it takes to build it.", "Plan");
   await spot(".wiz-right .ochart");
-  await say("The organisation it proposes: three AI cofounders, each with the team for its own area. A seat that owned nothing was cut before you saw it.", "Organisation");
+  const cofs = ((await state()).proposal.workers || []).filter((w) => w.tier === "cofounder").map((w) => w.name.split(" ")[0]);
+  await say(`Meet your organisation: three AI cofounders, ${cofs[0]}, ${cofs[1]} and ${cofs[2]}, each with a team of named people. A seat that owned nothing was cut before you saw it.`, "Organisation");
   await spot(".wiz-left .card >> nth=1");
   await say("And an estimated budget. Nothing is spent yet.", "Budget");
   await unsay();
@@ -337,7 +340,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await spot(".wiz-left .card >> nth=1");
   await say("The timeline, milestone by milestone.", "Timeline");
   await spot(".wiz-right .ochart");
-  await say("Your organisation, with each member given the AI best suited to its work.", "Team");
+  await say("Your organisation, each person given the AI best suited to their work. If an AI cannot do the work, a new person takes the seat and you are told why.", "Team");
   await unsay();
   await clear();
   await click("#approve-plan");
@@ -368,7 +371,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sleep(1600);
   await unsay();
   await moment(0, "the forecast sent back", '.tcard[data-task="t_06"]',
-    "Every piece of work is checked. The footfall forecast loses to last week's numbers on days it has not seen, so it goes back.", "Checked", { tone: "red" });
+    `Every piece of work is checked. ${await person("w_ds")}'s footfall forecast loses to last week's numbers on days it has not seen, so it goes back.`, "Checked", { tone: "red" });
   await caught(1, "the rule on money");
   await nav("decisions");
   await page.waitForSelector(".dcard");
@@ -384,7 +387,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await moment(2, "the cap caught", '.tcard[data-task="t_11"]',
     "A test catches an estimate that ignored the owner's cap of 15 customers. Fixed before it counts.", "Checked", { tone: "red" });
   await moment(3, "the merge settled",
-    '.tcard[data-task="t_16"]', "Merging the finished code can be undone, so the CTO settles it, and you are told instead of asked.", "Settled");
+    '.tcard[data-task="t_16"]', `Merging the finished code can be undone, so ${await person("w_cto")}, your AI CTO, settles it, and you are told instead of asked.`, "Settled");
   await caught(4, "going live");
   watching(false);
   await nav("decisions");

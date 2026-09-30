@@ -50,9 +50,10 @@ with the founder. The full journey is in [docs/0_USER_JOURNEY.md](docs/0_USER_JO
 A founder describes **Bluedip**: an app that tells a restaurant owner how many customers and how much money to expect
 each hour, and what an offer would really do before trying it.
 
-Cynqra proposes three AI cofounders, a CTO, a Chief Product Officer and a CFO, and each picks the team for its own
-area: engineers, a data scientist and a tester; a project manager, a designer and a restaurant revenue specialist; a
-legal and compliance advisor. A Security Expert the CTO asked for is cut before the founder sees the team, because
+Cynqra proposes three AI cofounders: Imani Lindqvist, AI CTO; Wen Torres, AI Chief Product Officer; and Joaquín
+Khalil, AI CFO. Each picks the team for their own area, every member with a name: engineers, a data scientist and a
+tester; a project manager, a designer and a restaurant revenue specialist; a legal and compliance advisor. If an AI
+in a seat cannot do the work, a new person takes the seat and you are told who left, who joined and why. A Security Expert the CTO asked for is cut before the founder sees the team, because
 release 1 takes no payments and keeps no diner data. The team builds and checks the app and puts it live. The founder
 is asked twice while it is built: one rule about money, and going live.
 

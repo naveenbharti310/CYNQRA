@@ -17,7 +17,7 @@ import urllib.request
 
 from helpers import POC, SCENARIO, TempDir, engine_to_gates, no_model_env, restore_env, run_journey
 
-from cynqra import binding
+from cynqra import binding, people
 from cynqra.engine import Engine
 from cynqra.intelligence_layer import IntelligenceSupply, SupplyError
 from cynqra.intelligence_layer.router import estimate, rank
@@ -150,6 +150,7 @@ class WorkforceTests(unittest.TestCase):
         stand-in may cover the wait, and each worker returns to its own AI when it answers again."""
         e = self.engine()
         before = sorted(w["id"] for w in e.workers())
+        names = {w["id"]: w["name"] for w in e.workers()}
         self.reg.set_fault("model-a", offline=True)  # after staffing: every worker is on Model A
         e.run_until_idle()
         stopped = [x for x in e.store.events() if x["event_type"] == "worker.stopped"]
@@ -175,6 +176,11 @@ class WorkforceTests(unittest.TestCase):
         self.assertTrue(reps and all(r["from"] == "model-a" and r["temporary"] for r in reps))
         self.assertTrue({r["to"] for r in reps} <= {"model-b", "model-c"})
         self.assertEqual(sorted(w["id"] for w in e.workers()), before, "every worker kept its identity")
+        self.assertEqual({w["id"]: w["name"] for w in e.workers()}, names, "an outage replaces no one")
+        self.assertFalse([w for w in e.workers() if w.get("former")])
+        cover = next(n for n in e.store.all("ceo_notice") if n["kind"] == "stand_in")
+        self.assertIn("covers for", cover["headline"])
+        self.assertIn("no one was replaced", cover["detail"])
         evals = [x for x in e.store.all("evaluation") if x["decision"] == "stand_in"]
         self.assertTrue(evals and all(x["regression_check"] for x in evals), "the stand-in passed a regression check")
         self.assertTrue(any(n["kind"] == "stand_in" for n in e.store.all("ceo_notice")), "and the CEO was told")
@@ -347,6 +353,14 @@ class WorkforceTests(unittest.TestCase):
         self.assertTrue(failed, "the failure is part of Model A's record")
         note = next(n for n in e.store.all("ceo_notice") if n["kind"] == "intelligence_replaced"
                     and n["worker_id"] == rep["worker_id"])
+        w = e.worker(rep["worker_id"])  # a new person in the seat, and the one before in its history
+        self.assertEqual((w["former"][0]["name"], w["name"]), (rep["left"], rep["joined"]))
+        self.assertNotEqual(rep["left"].split()[0], rep["joined"].split()[0])
+        self.assertEqual(w["former"][0]["model"], "model-a")
+        self.assertIn("could not do this role's work", w["former"][0]["why"] + note["detail"])
+        self.assertEqual(note["headline"], f"{rep['left']} was replaced as your AI {people.seat(w)} by {rep['joined']}")
+        self.assertIn("record stays in the history", note["detail"])
+        self.assertTrue(any(x["event_type"] == "worker.person_replaced" for x in e.store.events()))
         self.assertIn("could not do this role's work", note["detail"], "the CEO is told why")
         self.assertIsNotNone(note["usd_difference"], "and what the better AI costs against the old one")
         self.assertIn("per million tokens, against", note["detail"], "its price against the old one's")

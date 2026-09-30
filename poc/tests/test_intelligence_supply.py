@@ -202,7 +202,11 @@ class WorkforceOnTheSupplyTests(SupplyBase):
         self.assertEqual((r["did"], r["to"]), ("replaced", better))
         b = binding.current(e.store, "w_eng_a")
         self.assertEqual((b["intelligence_id"], b["history"][-1]["intelligence_id"]), (better, first))
-        self.assertEqual(e.worker("w_eng_a"), eng, "the worker's identity, role and history are untouched")
+        now = e.worker("w_eng_a")  # the seat stays; a new person takes it, and the one before is in its history
+        self.assertEqual({k: now[k] for k in ("id", "role", "title", "reports_to")},
+                         {k: eng[k] for k in ("id", "role", "title", "reports_to")})
+        self.assertNotEqual(now["name"], eng["name"])
+        self.assertEqual((now["former"][-1]["name"], now["former"][-1]["model"]), (eng["name"], first))
         ev = [x for x in e.store.events() if x["event_type"] == "worker.intelligence_bound"
               and x["aggregate_id"] == "w_eng_a"][-1]
         self.assertEqual((ev["payload"]["previous"], ev["payload"]["intelligence_id"]), (first, better))

@@ -22,7 +22,7 @@ Every approval, rejection and override is a labelled decision in the audit trail
 """
 from __future__ import annotations
 
-from . import lessons, policy, roles, seats
+from . import people, lessons, policy, roles, seats
 from .budget import dollars
 from .intelligence_layer import router
 from . import settings as project_settings
@@ -430,10 +430,26 @@ def _draft(run, req: dict, note: str, founder: dict | None = None) -> tuple[dict
     return prop, {"label": ", ".join(dict.fromkeys(labels))}
 
 
+def _name(run, prop: dict, keep: dict | None = None) -> None:
+    """The founder meets the people with the proposal: every proposed member is named, and the lean team's members
+    are the same people."""
+    people.name_all(run, prop["workers"], keep=keep)
+    names, used = {}, set()
+    for lw in prop["lean"]["workers"]:  # the same seat, else a colleague in the same role (one engineer of two)
+        same = [w for w in prop["workers"] if w["id"] == lw["id"]] or \
+               [w for w in prop["workers"] if w["role"] == lw["role"] and w.get("field") == lw.get("field")]
+        pick = next((w for w in same if w["name"] not in used), None)
+        if pick:
+            names[lw["id"]] = pick["name"]
+            used.add(pick["name"])
+    people.name_all(run, prop["lean"]["workers"], keep=names)
+
+
 def propose(run, note: str = "") -> dict:
     """Stage 2, then Stage 3's decision: the proposal goes in front of the founder, with the lean team beside it."""
     req = run.requirements()
     prop, usage = _draft(run, req, note)
+    _name(run, prop)
     n = run.count("proposal") + 1
     prop.update({"id": f"wp_{n}", "version": n, "note": note, "intelligence": usage["label"], "created_at": now(),
                  "status": "proposed", "founder": _profile(run.founder())})
@@ -500,6 +516,8 @@ def refit(run, founder: dict) -> dict:
     base = _profile(founder)
     base["leads"] = list((old.get("founder") or {}).get("leads") or [])
     prop, usage = _draft(run, req, "", founder=base)  # the founder's profile carries the instruction to fit it
+    keep = {w["id"]: w["name"] for w in run.workers() if w.get("name")}  # a seat that remains keeps its person
+    _name(run, prop, keep=keep)
     n = run.count("proposal") + 1
     prop.update({"id": f"wp_{n}", "version": n, "note": FIT_NOTE, "intelligence": usage["label"], "created_at": now(),
                  "status": "proposed", "founder": _profile(founder), "fitted_from": old["id"]})
@@ -542,10 +560,13 @@ def override(prop: dict, edited_roles, requirements: dict, allowed: bool, founde
     return edited
 
 
-def approve(run, edited_roles=None, option: str = "recommended") -> dict:
+def approve(run, edited_roles=None, option: str = "recommended", keep_names: dict | None = None) -> dict:
     """The approved proposal becomes the organization: workers with identities, roles, authority and reporting
-    lines generated from who is present. option: the recommended team, or the lean one set next to it."""
+    lines generated from who is present. option: the recommended team, or the lean one set next to it. The people
+    the founder met in the proposal keep their names; a seat the founder added gets a person now."""
     prop = current(run)
+    met = {w["id"]: w["name"] for w in prop.get("workers") or [] if w.get("name")}
+    keep_names = {**met, **(keep_names or {})}
     if option == "lean":
         ln = prop["lean"]
         prop = dict(prop, roles=ln["roles"], workers=ln["workers"], owners=ln["owners"], watchers=ln["watchers"],
@@ -570,11 +591,13 @@ def approve(run, edited_roles=None, option: str = "recommended") -> dict:
     run.store.put("organization", "org_1", org)
     run.event("organization.changed", "organization", "org_1", {"proposal": prop["id"], "worker_count": len(workers),
               "version": 1})
-    for t in workers:
-        w = dict(t)
+    hired = [dict(t) for t in workers]
+    people.name_all(run, hired, keep=keep_names)  # every member is a person, with a name
+    for w in hired:
         w.update({"company_id": run.cid,
-                  "authority_policy_id": f"{policy.POLICY_VERSION}:{t['role']}", "status": "active",
+                  "authority_policy_id": f"{policy.POLICY_VERSION}:{w['role']}", "status": "active",
                   "performance_profile": {"verified": 0, "first_pass": 0, "reworks": 0, "blockers": 0}})
-        run.store.put("worker", t["id"], w)
-        run.event("worker.hired", "worker", t["id"], {"role": t["role"], "reports_to": t["reports_to"]})
+        run.store.put("worker", w["id"], w)
+        run.event("worker.hired", "worker", w["id"], {"role": w["role"], "reports_to": w["reports_to"],
+                                                      "person": w["name"]})
     return org

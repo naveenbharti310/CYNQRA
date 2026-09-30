@@ -23,7 +23,7 @@ cd poc
 python3 -m unittest discover -s tests -t tests
 ```
 
-About 8 minutes, 313 tests. **What they prove:** the machinery works end to end, including all three demos and the
+About 8 minutes, 321 tests. **What they prove:** the machinery works end to end, including all three demos and the
 failure paths. **What they do not prove:** the quality of real AI output; that is what the real-model runs are for.
 The browser test runs only if Node and Playwright are installed; otherwise it is skipped and says so.
 `poc/TEST_REPORT.md` describes every test module.

@@ -13,8 +13,9 @@ been proven end to end on strong real AI models in its current form.
 
 | Area | Status |
 | --- | --- |
-| The seven-step journey: describe the idea, approve the plan, define yourself, approve the team and budget, watch it being built, receive the product, audit and refine | ✅ Built. Every screen follows it. 313 automated tests pass. |
+| The seven-step journey: describe the idea, approve the plan, define yourself, approve the team and budget, watch it being built, receive the product, audit and refine | ✅ Built. Every screen follows it. 321 automated tests pass. |
 | Define yourself: the organisation is constructed again around the founder's background (live mode); an area the founder leads gets no AI cofounder and reports to the founder | ✅ Built and tested with stand-in AIs; not yet tried on a real model. In a demo the founder and the organisation are part of the script. A domain expert still gets a Specialist for their own field when the platform's coverage rule needs one. |
+| Every AI team member has a real name, shown as "Name, AI seat", renamable; a replacement brings a new person into the seat, with the one before kept in the history with their record; an outage replaces no one | ✅ Built and tested. |
 | Audit and rework: every requirement of the objective checked against the delivered product; a rework plans, builds and releases only what should change | ✅ Built and tested. |
 | Demo mode (scripted words; real code, models, tests and going live) | ✅ Works end to end. It opens on Bluedip: three cofounders and the ten team members they chose (fourteen seats proposed and one cut by the independent challenge), seventeen tasks, three mistakes caught by the checks, one piece of work sent back by a cofounder, two questions settled inside the team, the founder asked twice while it is built (a rule on money, going live; the CTO settled the merge), then the audit (15 of 15 requirements met) and acceptance. Two smaller demos are in the list. |
 | Cofounders proposed from the idea, each choosing its own team, Specialists named from it | ✅ Built and tested. |

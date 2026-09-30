@@ -51,7 +51,7 @@ class JourneyTests(unittest.TestCase):
         self.assertEqual(settled["review_merge"]["risk"], "MEDIUM")
         told = [n for n in self.e.store.all("ceo_notice") if n["kind"] == "settled_by_cofounder"]
         self.assertEqual(len(told), 2, "the founder is told what was settled for them")
-        self.assertIn("by the Chief Product Officer", (self.e.paths["main"] / "docs" / "DECISIONS.md").read_text(
+        self.assertIn(", AI Chief Product Officer)", (self.e.paths["main"] / "docs" / "DECISIONS.md").read_text(
             encoding="utf-8"))
 
     def test_objective_submitted_and_decomposed(self):  # A1, Stages 0 and 1
@@ -267,11 +267,12 @@ class BluedipJourneyTests(unittest.TestCase):
     def test_the_company_pack_holds_the_foundation_all_checked(self):
         self.assertEqual(self.e.meta["phase"], "accepted")
         pack = self.e.final_report()["company_pack"]
-        authors = {d["author"] for d in pack["documents"] if d["verified"]}
+        authors = {d["author"].split(", AI ")[-1] for d in pack["documents"] if d["verified"]}
+        self.assertTrue(all(", AI " in d["author"] for d in pack["documents"]), "every author is a named AI")
         self.assertTrue({"Chief Product Officer", "Market Analyst", "Restaurant Revenue Management Specialist",
                          "Legal and Compliance Advisor", "CFO", "Senior Data Scientist", "Project Manager",
                          "Product Designer", "QA Engineer", "DevOps Engineer"} <= authors)
-        self.assertEqual([o["cofounder"] for o in pack["organization"]], ["CTO", "Chief Product Officer", "CFO"])
+        self.assertEqual([o["cofounder"].split(", AI ")[-1] for o in pack["organization"]], ["CTO", "Chief Product Officer", "CFO"])
         docs = self.e.paths["main"] / "docs"
         for name, marks in (("market_analysis.md", ["Assumption", "No market-size figure"]),
                             ("revenue_management_report.md", ["Sourced", "Confirm with a professional"]),

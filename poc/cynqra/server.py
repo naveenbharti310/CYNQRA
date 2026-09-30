@@ -8,6 +8,7 @@ POST /api/objective/guardrails      {budget_usd, time_value_per_hour, constraint
 POST /api/objective/founder         {leads, stage, hours_per_week, background}  what the founder brings
 POST /api/founder/define            {founder}  step 3: define yourself; the team and budget follow for step 4
 POST /api/rework                    {note, budget_usd}  step 7: what to change; the team plans the rework
+POST /api/worker/rename             {worker_id, name}   the founder names a team member; the seat and record stay
 POST /api/objective/submit          hand the objective over: requirements, then the proposed workforce
 GET  /api/update                    the founder's update: numbers, learned, decided, at risk, waiting for them
 POST /api/feedback                  {text}  what users said; it goes into the next cycle
@@ -367,6 +368,7 @@ def make_server(app: App, port: int = 8750) -> ThreadingHTTPServer:
                 "/api/live/check": e.check_live,
                 "/api/cycle": lambda: e.start_cycle(body.get("note", ""), body.get("budget_usd")),
                 "/api/rework": lambda: e.rework(body.get("note", ""), body.get("budget_usd")),
+                "/api/worker/rename": lambda: e.rename_worker(body.get("worker_id", ""), body.get("name", "")),
                 "/api/run/step": app.step,
                 "/api/killswitch": lambda: e.kill_switch(bool(body.get("on"))),
                 "/api/run/resume": e.resume,

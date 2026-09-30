@@ -89,6 +89,13 @@ members are structured, hashed objects (Handoff, Blocker, Review, Escalation, Ap
 **What.** The team always follows the idea. Nothing is there by default. The founder leads the company; Cynqra has no AI
 founder.
 
+**Every member is a person with a name.** Cofounders and every member of their teams get a real human name when the
+organisation is proposed at step 2, so the founder meets a team, not a list of roles: "Imani Lindqvist, AI CTO".
+The name always comes with "AI" and the seat. Names are drawn at random but fixed for the project (a demo always shows
+the same team), from many cultures and never from famous people; no two share a first name, and first names start with
+different letters while any are free. The app speaks of a person by name or by seat and never assumes a pronoun from a
+name. The founder can rename anyone; the seat and the record stay. Code: `people.py`.
+
 | Kind | Roles | Who leads them | Code |
 | --- | --- | --- | --- |
 | Cofounders | CTO, Chief Product Officer, CFO, and a Chief Compliance Officer for a regulated business (payments, lending, insurance, health, children's data). A simple tool may need two; Bluedip has three. | They report to the founder | `roles.py` |
@@ -130,13 +137,17 @@ and results are never mixed between companies.
 | --- | --- | --- | --- |
 | **The provider's side** | Outage, timeout, too many calls | The member waits and tries again; the rest of the team keeps working. If the founder named a fallback for that AI, it stands in; otherwise Cynqra asks the founder once whether a stand-in may cover the wait, with its price. The member returns to its own AI as soon as that AI answers again. | **No** |
 | **The account** | No credit left, key refused | The members on that account wait. The founder is asked to top up or fix the key; the work then continues where it stopped. | **No** |
-| **The AI itself** | Work fails its checks three times; replies keep running out of room or breaking the rules; its measured record falls too low; a new version fails its check | The AI cannot do this role's work. Cynqra picks a better one that passes a check on this kind of work first, and **tells the founder** why, which AI now does the work, and its price against the old one. If no better AI fits the budget, the founder decides. | **Yes** |
+| **The AI itself** | Work fails its checks three times; replies keep running out of room or breaking the rules; its measured record falls too low; a new version fails its check | The AI cannot do this role's work. Cynqra picks a better one that passes a check on this kind of work first, and it takes the seat as **a new person, with a new name**. The founder is **told** who left, who joined, why, and what the newcomer costs against the one before. If no better AI fits the budget, the founder decides. | **Yes: a new person in the seat** |
 
 **Why.** Replacing a capable AI for a provider's outage throws away its record; a better AI usually costs more, so
 the founder must know.
 
-**How.** The member keeps its identity, role, history and files in every case; only the AI behind it changes.
-Notices to the founder ("What Cynqra told you") are not decisions: nothing waits on them. They are on the Workforce
+**How.** The seat (its title, work, files, authority and history) stays in every case. An outage or an account
+problem replaces no one: the same person waits, or a stand-in AI covers for them and the screen says so. A real
+replacement brings a new person into the seat; the one who left stays in the history as a former holder, with the
+AI they worked on, why they were replaced and the record they left, and the newcomer's record starts empty, so the
+founder can see whether the replacement does better. A name is never used twice in a project. `people.py`
+(`replace`). Notices to the founder ("What Cynqra told you") are not decisions: nothing waits on them. They are on the Workforce
 screen and in the handover. `replacement.py` (`diagnose`, `model_failed`, `evaluate`, `inform`).
 
 ## The checks
