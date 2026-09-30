@@ -382,11 +382,11 @@ def _challenge(run, req: dict, prop: dict, founder: dict) -> dict:
         return {"seats": [], "failure_stories": [], "unreadable": str(exc)[:200]}
 
 
-def _draft(run, req: dict, note: str) -> tuple[dict, dict]:
+def _draft(run, req: dict, note: str, founder: dict | None = None) -> tuple[dict, dict]:
     """The two steps: the cofounders, then each cofounder's team. Every answer is checked and asked again once with
     the reason; the whole organization is then checked and completed by the platform, challenged, and set next to
-    the lean team."""
-    founder = run.founder()
+    the lean team. founder: the profile to build around, the founder's own by default."""
+    founder = founder or run.founder()
     limit = TEAM_LIMIT[founder["stage"]]
     cof, usage = ask(lambda feedback: run.intel.cofounders(run.objective_ctx(), req, note=note, feedback=feedback,
                                                            founder=founder),
@@ -436,7 +436,7 @@ def propose(run, note: str = "") -> dict:
     prop, usage = _draft(run, req, note)
     n = run.count("proposal") + 1
     prop.update({"id": f"wp_{n}", "version": n, "note": note, "intelligence": usage["label"], "created_at": now(),
-                 "status": "proposed"})
+                 "status": "proposed", "founder": _profile(run.founder())})
     prop["cost_by_role"] = cost_by_role(run, prop)
     prop["lean"]["cost_by_role"] = cost_by_role(run, prop["lean"])
     run.store.put("proposal", prop["id"], prop)
@@ -464,6 +464,60 @@ def propose(run, note: str = "") -> dict:
                         "missing one.",
                  source="workforce_synthesizer", extra={"proposal": prop["id"], "options": ["recommended", "lean"]})
     return prop
+
+
+def _profile(founder: dict | None) -> dict:
+    """The part of the founder's profile an organization is built around."""
+    f = founder or {}
+    return {"leads": list(f.get("leads") or []), "stage": f.get("stage"), "background": f.get("background") or ""}
+
+
+def _seats(prop: dict) -> dict[str, int]:
+    return {_title(r): r["quantity"] for r in prop.get("roles") or []}
+
+
+FIT_NOTE = ("The founder has now described themselves. Build the organization around them: no seat for a skill or "
+            "field the founder brings themselves, fewer or lighter seats where they are strong, and the capabilities "
+            "they lack.")
+
+
+def needs_refit(prop: dict | None, founder: dict) -> bool:
+    """Whether the organization was built around a different founder than the one who has just described
+    themselves. The seats the founder leads are fitted by the engine without a new draft, and a team the founder
+    edited by hand at step 2 is kept as they edited it."""
+    used = (prop or {}).get("founder")
+    now_ = _profile(founder)
+    return used is not None and not (prop or {}).get("overridden") and (used["background"], used["stage"]) != (now_["background"], now_["stage"])
+
+
+def refit(run, founder: dict) -> dict:
+    """Step 3: Cynqra understands the founder, then constructs the organization around them. The approved plan's
+    organization is drafted again with the founder's background and stage, every step checked and challenged as
+    before, and it replaces the one approved at step 2 before anyone is staffed. The seats the founder leads stay in
+    the draft and are fitted afterwards (they report to the founder). What changed is recorded, for step 4."""
+    old = current(run)
+    req = run.requirements()
+    base = _profile(founder)
+    base["leads"] = list((old.get("founder") or {}).get("leads") or [])
+    prop, usage = _draft(run, req, "", founder=base)  # the founder's profile carries the instruction to fit it
+    n = run.count("proposal") + 1
+    prop.update({"id": f"wp_{n}", "version": n, "note": FIT_NOTE, "intelligence": usage["label"], "created_at": now(),
+                 "status": "proposed", "founder": _profile(founder), "fitted_from": old["id"]})
+    prop["cost_by_role"] = cost_by_role(run, prop)
+    prop["lean"]["cost_by_role"] = cost_by_role(run, prop["lean"])
+    was, will = _seats(old), _seats(prop if old.get("chosen") != "lean" else dict(prop, roles=prop["lean"]["roles"]))
+    def seat(t: str) -> str:  # a new or gone seat by its title; a changed headcount says from what to what
+        return t if not (was.get(t) and will.get(t)) else f"{t} ({was[t]} to {will[t]})"
+    prop["fitted"] = {"added": [seat(t) for t, q in will.items() if q > was.get(t, 0)],
+                      "removed": [seat(t) for t, q in was.items() if q > will.get(t, 0)]}
+    run.store.put("proposal", prop["id"], prop)
+    run.store.put("workforce", "proposal", {"id": prop["id"]})
+    for w in run.workers():  # hired at step 2, never staffed or given work: the new organization replaces them
+        run.store.delete("worker", w["id"])
+        run.event("worker.left", "worker", w["id"], {"why": "the organization was rebuilt around the founder"})
+    run.event("workforce.fitted_to_founder", "organization", "org_1", {"proposal": prop["id"], "from": old["id"],
+              **prop["fitted"]}, actor="workforce_synthesizer")
+    return approve(run, option=old.get("chosen") or "recommended")
 
 
 def reject(run, note: str) -> dict:

@@ -239,7 +239,7 @@ function founderStep() {
     <div class="wiz-left">
       ${steps(2)}
       <h1 class="hero">Define yourself.</h1>
-      <p class="lede">Your experience, your skills, what you can contribute. Cynqra fits the team around you: an area you lead yourself gets no cofounder, and that seat reports to you.</p>
+      <p class="lede">Your experience, your skills, what you can contribute. ${demo ? "Cynqra fits the team around you" : "Cynqra builds the organisation again around what you write"}: no seat for what you bring yourself, and an area you lead gets no AI cofounder; that seat reports to you.</p>
       <label class="lbl" for="f_background">Your background</label>
       <textarea class="big" id="f_background" data-keep="yes" placeholder="For example: ten years as a backend engineer; I know restaurants from running one.">${esc(f.background || "")}</textarea>
       <div class="stack" style="gap:8px"><span class="lbl">What you lead yourself</span>
@@ -344,6 +344,16 @@ function budgetTable(f) {
     ${S.st && S.st.meta.mode === "demo" ? `<div class="small muted">In a demo the team's words come from a script, so its AI costs nothing. With real AI, every task is priced here in dollars before it starts.</div>` : ""}`;
 }
 
+/* Step 4: what changed in the organisation once the founder defined themselves. */
+function fitCard(mine) {
+  const fit = (S.st.proposal || {}).fitted, lines = [];
+  if (fit && fit.added.length) lines.push(`<li>Added for what you do not bring: ${esc(fit.added.join(", "))}</li>`);
+  if (fit && fit.removed.length) lines.push(`<li>Not needed, because you bring it: ${esc(fit.removed.join(", "))}</li>`);
+  if (fit && !lines.length) lines.push(`<li>Rebuilt around your background: the same seats still fit.</li>`);
+  mine.forEach((w) => lines.push(`<li>${esc(w.title.replace(" (you lead this area)", ""))} reports to you: you lead this area</li>`));
+  return lines.length ? `<div class="card stack" data-fit="1"><div class="caps">Fitted to you</div><ul class="small" style="margin:0;padding-left:18px">${lines.join("")}</ul></div>` : "";
+}
+
 function planStep() {
   const st = S.st, plan = st.plan || {}, f = st.forecast || {};
   const d = (st.decisions.pending || []).find((x) => x.kind === "approve_roadmap");
@@ -362,11 +372,11 @@ function planStep() {
       <div class="card stack"><div class="between"><div class="caps">Budget</div><b class="mono">${usd(f.total_usd)} of ${usd(f.cap_usd)}</b></div>
         <details><summary class="small">How it adds up</summary>${budgetTable(f)}</details></div>
       <div class="card stack"><div class="between"><div class="caps">Timeline</div><span class="small">about ${days} days</span></div>${timeline}</div>
+      ${fitCard(mine)}
       <div class="err" role="alert">${esc(S.err)}</div>
     </div>
     <div class="wiz-right"><div class="card stack">
       <h2 style="font-size:20px">Your organisation: ${(st.workers || []).length} members</h2>
-      ${mine.length ? `<p class="small" style="margin:0">You lead ${esc(mine.map((w) => w.title.replace(" (you lead this area)", "")).join(", "))}: that seat reports to you.</p>` : ""}
       ${orgChart(st.workers || [])}
       <details><summary class="small">Every task, in order (${tasks.length})</summary>
         <table class="plan-table"><thead><tr><th>Task and how it is accepted</th><th>Who</th><th>Risk</th><th>How it is checked</th></tr></thead><tbody>${ms}</tbody></table></details>

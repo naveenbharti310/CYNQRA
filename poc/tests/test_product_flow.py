@@ -4,10 +4,11 @@ Engine, the Performance Engine's signals and the gateway's output sanitizing."""
 from __future__ import annotations
 
 import json
+import os
 import types
 import unittest
 
-from helpers import M1_ROLES, SCENARIO, TempDir, approve, no_model_env, restore_env
+from helpers import M1_ROLES, SCENARIO, TempDir, approve, fake_model_cmd, no_model_env, restore_env
 
 from cynqra import budget, performance, policy, roles, seats
 from cynqra import settings as project_settings
@@ -402,6 +403,102 @@ class ScenariosAreHonestTests(unittest.TestCase):
         self.assertEqual(kinds.count("forecast"), 1)
         self.assertEqual(plan["tasks"][-1]["owner_worker_id"], "w_devops", "DevOps proposes the deploy")
         self.assertEqual(roles.planner(prop["workers"]), "w_pm")
+
+
+class FitToFounderTests(unittest.TestCase):
+    """Step 3: Cynqra understands the founder, then constructs the organization around them."""
+
+    class Fitting(ScriptedSource):
+        """Proposes the candidate tracker's team; a founder who is an engineer gets one Engineer, not two."""
+        def __init__(self, *a, fail_refit=False, **k):
+            super().__init__(*a, **k)
+            self.seen, self.fail_refit = [], fail_refit
+
+        def cofounders(self, *a, founder=None, **k):
+            self.seen.append(dict(founder or {}))
+            if self.fail_refit and len(self.seen) > 1:
+                raise IntelligenceError("the provider timed out")
+            return super().cofounders(*a, founder=founder, **k)
+
+        def build_team(self, *a, cofounder="", founder=None, **k):
+            team, usage = super().build_team(*a, cofounder=cofounder, founder=founder, **k)
+            if "engineer" in (founder or {}).get("background", "").lower():
+                team = dict(team, roles=[dict(r, quantity=1) if r["role"] == "Engineer" else r for r in team["roles"]])
+            return team, usage
+
+        def plan(self, objective, workers, *a, **k):  # the script's plan, for whichever engineers are present
+            p, usage = super().plan(objective, workers, *a, **k)
+            ids = {w["id"] for w in workers}
+            for t in p.get("tasks") or []:
+                if t.get("owner_worker_id") not in ids and t.get("owner_worker_id", "").startswith("w_eng"):
+                    t["owner_worker_id"] = next(i for i in sorted(ids) if i.startswith("w_eng"))
+            return p, usage
+
+    def setUp(self):
+        self.saved = no_model_env()
+        os.environ["CYNQRA_S1_MODEL_CMD"] = fake_model_cmd()  # live mode needs intelligence to be reachable
+        self.tmp = TempDir()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+        restore_env(self.saved)
+
+    def engine(self, mode="live", **k):
+        src = self.Fitting("candidate_tracker", **k)
+        e = Engine(self.tmp.path, intelligence=src)
+        e.create_company("Harbor Recruiting", mode)
+        e.draft_objective(SCENARIO["messy"])
+        e.submit_objective()
+        approve(e, "approve_workforce")
+        return e, src
+
+    def test_the_organization_is_built_again_around_the_founder(self):
+        e, src = self.engine()
+        self.assertEqual([r["quantity"] for r in e.proposal()["roles"] if r["role"] == "Engineer"], [2])
+        e.define_founder({"background": "Ten years as a backend engineer"})
+        self.assertEqual(src.seen[-1]["background"], "Ten years as a backend engineer", "the founder reaches the model")
+        prop = e.proposal()
+        self.assertEqual((prop["id"], prop["fitted_from"], prop["status"]), ("wp_2", "wp_1", "approved"))
+        self.assertEqual(prop["fitted"], {"added": [], "removed": ["Software Engineer (2 to 1)"]})
+        self.assertEqual(e.store.get("organization", "org_1")["proposal"], "wp_2")
+        self.assertEqual(len([w for w in e.workers() if w["role"] == "Engineer"]), 1, "the old organization is gone")
+        self.assertEqual(e.meta["phase"], "planning")
+        kinds = [x["event_type"] for x in e.store.events()]
+        self.assertIn("workforce.fitted_to_founder", kinds)
+        self.assertIn("worker.left", kinds)
+        self.assertTrue(all(e.model_of(w["id"]) for w in e.workers()), "the new organization is staffed")
+        e.close()
+
+    def test_the_model_is_told_to_fit_the_organization_to_the_founder(self):
+        from cynqra.intelligence import ModelSource
+        self.assertIn("Fit the organization to this founder", ModelSource._founder({"background": "a chef"}))
+        self.assertNotIn("Fit the organization", ModelSource._founder({}))
+
+    def test_nothing_is_drafted_again_when_the_founder_is_the_one_it_was_built_for(self):
+        e, src = self.engine()
+        e.define_founder()
+        self.assertEqual((len(src.seen), e.proposal()["id"]), (1, "wp_1"))
+        e.close()
+
+    def test_a_demo_keeps_its_scripted_organization(self):
+        e, src = self.engine(mode="demo")
+        e.define_founder({"background": "Ten years as a backend engineer"})
+        self.assertEqual((len(src.seen), e.proposal()["id"]), (1, "wp_1"))
+        e.close()
+
+    def test_a_failed_rebuild_changes_nothing_and_can_be_tried_again(self):
+        e, src = self.engine(fail_refit=True)
+        before = sorted(w["id"] for w in e.workers())
+        with self.assertRaises(IntelligenceError):
+            e.define_founder({"background": "Ten years as a backend engineer"})
+        self.assertEqual((e.meta["phase"], e.meta["failed_stage"]), ("stopped_error", "founder"))
+        self.assertEqual(sorted(w["id"] for w in e.workers()), before)
+        e.resume()
+        self.assertEqual(e.meta["phase"], "founder")
+        src.fail_refit = False
+        e.define_founder()
+        self.assertEqual(e.proposal()["fitted"]["removed"], ["Software Engineer (2 to 1)"])
+        e.close()
 
 
 if __name__ == "__main__":

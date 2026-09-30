@@ -32,7 +32,8 @@ that builds it.**
 1. **Describe the idea.** What you want to build and the outcome you want.
 2. **Approve the plan.** Cynqra shows what it will build, the capabilities it takes, the organisation it proposes,
    the timeline and an estimated budget.
-3. **Define yourself.** Your background and what you lead yourself. An area you lead gets no AI cofounder.
+3. **Define yourself.** Your background and what you lead yourself. Cynqra builds the organisation again around
+   you: no seat for what you bring, and an area you lead gets no AI cofounder.
 4. **Approve the team and budget.** The organisation fitted around you, and what it costs.
 5. **Watch it being built.** The team works in the background. You are asked only what cannot be undone, such as
    putting the product live.

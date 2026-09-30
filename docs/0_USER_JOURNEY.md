@@ -18,8 +18,8 @@ outcome.
 2. **Approve the plan.** Cynqra understands the objective and presents the proposed execution plan: the workforce,
    capabilities, technology, timeline and estimated budget it needs.
 3. **Define yourself.** The founder describes their background, skills, expertise and experience. Cynqra uses this
-   to understand the role the founder can play in the venture. A founder with a strong technology background, for
-   example, does not get a CTO as a cofounder.
+   to understand the role the founder can play in the venture, and builds the organisation again around them. A
+   founder with a strong technology background, for example, does not get a CTO as a cofounder.
 4. **Approve the team and budget.** Cynqra presents the final workforce and budget. The founder approves the team and
    the investment needed to achieve the objective.
 5. **Watch it being built.** The AI workforce works in the background, each worker in its role, with its

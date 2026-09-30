@@ -48,7 +48,7 @@ models, manage every handoff, or build the organisation before they can build th
 **Cynqra manages the organisation. The founder manages the vision.**
 
 In the background, the company works. Engineering gets done. Design gets done. Architecture gets reviewed.
-Dependencies get resolved. Tests get run. Problems get found. Work gets redone. The workforce keeps moving toward the
+Dependencies get resolved. Tests get run. Problems get identified. Work gets reworked. The workforce keeps moving toward the
 objective.
 
 ## The output is not an AI workforce

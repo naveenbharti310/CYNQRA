@@ -619,14 +619,22 @@ class Engine:
         self.event("state.changed", "company", self.cid, {"phase": "founder"})
 
     def define_founder(self, profile: dict | None = None) -> dict:
-        """Step 3: the founder says who they are and what they bring. Every cofounder seat the founder leads becomes
-        a lead reporting to the founder, since the founder is that cofounder; then the team is staffed and the
-        roadmap and budget are drawn up for step 4."""
+        """Step 3: the founder says who they are and what they bring. In live mode, when their background or stage
+        is not what the plan's organization was built around, the organization is built again around them (a demo's
+        organization is part of its script). Every cofounder seat the founder leads becomes a lead reporting to the
+        founder, since the founder is that cofounder; then the team is staffed and the roadmap and budget are drawn
+        up for step 4."""
         if profile:
             self.set_founder(profile)
         with self.lock:
             self._require("founder")
-            self._fit_founder(self.founder())
+            founder = self.founder()
+            if self.meta["mode"] != "demo" and synthesis.needs_refit(self.proposal(), founder):
+                try:
+                    synthesis.refit(self, founder)
+                except IntelligenceError as exc:
+                    self._stage_failed("founder", exc)
+            self._fit_founder(founder)
             self.event("company.founder_defined", "company", self.cid, {"leads": self.founder().get("leads", [])},
                        actor="founder", actor_type="human", authority="founder")
             self._build_team()
@@ -929,6 +937,8 @@ class Engine:
             if stage == "workforce":
                 self.set_meta(phase="workforce", failed_stage=None, notice="")
                 synthesis.propose(self, note="Retried after an intelligence error.")
+            elif stage == "founder":  # the founder defines themselves again; nothing was replaced
+                self.set_meta(phase="founder", failed_stage=None, notice="")
             elif stage == "roadmap":
                 if not any(self.model_of(w["id"]) for w in self.workers()):
                     self._staff()

@@ -521,7 +521,10 @@ class ModelSource:
         leads = ", ".join(roles.role(c)["title"] for c in f.get("leads") or []) or "none"
         return (f"The founder: stage {STAGES.get(f.get('stage'), f.get('stage') or 'not stated')}; "
                 f"{f.get('hours_per_week', 'unknown')} hours a week; leads themselves: {leads}"
-                + (f"; background: {f['background']}" if f.get("background") else "") + ".\n")
+                + (f"; background: {f['background']}" if f.get("background") else "") + ".\n"
+                + ("Fit the organization to this founder: no seat for a skill or field they bring themselves, fewer "
+                   "or lighter seats where they are strong, and the capabilities they lack.\n"
+                   if f.get("background") else ""))
 
     def cofounders(self, objective: dict, requirements: dict, note: str = "", feedback: str = "",
                    founder: dict | None = None) -> tuple[dict, dict]:
