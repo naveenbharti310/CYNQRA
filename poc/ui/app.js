@@ -177,8 +177,7 @@ function journeyStep() {
   if (ph === "workforce") return 1;
   if (ph === "founder") return 2;
   if (ph === "planning") return 3;
-  if (ph === "delivered") return 5;
-  if (ph === "accepted") return 6;
+  if (ph === "delivered" || ph === "accepted") return 6;  // received the moment it is delivered; now you audit it
   return 4;
 }
 
