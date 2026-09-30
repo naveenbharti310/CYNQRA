@@ -1,10 +1,13 @@
 # Cynqra desktop app: build the installers for Windows, macOS and Linux, then install each one on a
 # fresh GitHub machine the way a user would and check it with a real open model.
 #
-# The repository is private, so runner minutes are counted (macOS 10x, Windows 2x): a push runs only the unit
-# tests; the installers are built and checked when asked for.
+# The repository is private, so runner minutes are counted (macOS 10x, Windows 2x). A plain push runs nothing:
+# the tests are run before every push anyway. Builds are Windows only until the owner asks for macOS and Linux.
 #
-#   every push             unit tests
+#   every push             nothing
+#   "[build]" or "[release]"  unit tests, then the Windows installer: build, install, self-test, open the window,
+#                          launch like a user, uninstall and reinstall (about 20 billed minutes)
+#   "[model]" in the commit (or model ticked by hand)  also a real open model on the machine (about 2 billed hours)
 #   "[build]" in the commit, or Run workflow by hand
 #                          build; install; self-test; open the window; a real model
 #                          structures an objective and writes code that passes its tests: Qwen3.6
@@ -22,6 +25,10 @@ on:
     paths: ["poc/**", "desktop/**", ".github/workflows/cynqra-desktop.yml"]
   workflow_dispatch:
     inputs:
+      model:
+        description: Also check a real open model on the Windows machine (about 2 billed hours)
+        type: boolean
+        default: false
       e2e:
         description: Also run the whole journey with a real model (up to 6 hours)
         type: boolean
@@ -43,6 +50,9 @@ env:
 
 jobs:
   tests:
+    if: >-
+      github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[build]')
+      || contains(github.event.head_commit.message, '[e2e]') || contains(github.event.head_commit.message, '[release]')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -110,6 +120,7 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a $CYNQRA --window-test; else $CYNQRA --window-test; fi
       - name: A real open model on this machine (download, llama-server, objective, code that passes its tests)
+        if: contains(github.event.head_commit.message, '[model]') || contains(github.event.head_commit.message, '[e2e]') || inputs.model || inputs.e2e
         timeout-minutes: 75
         run: |
           set +e
