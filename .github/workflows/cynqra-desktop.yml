@@ -295,3 +295,6 @@ jobs:
             gh release create "$TAG" $files --prerelease --target "$GITHUB_SHA" \
               --title "Cynqra $VERSION (proof of concept)" --notes-file desktop/RELEASE_NOTES.md
           fi
+          # a release left as a draft is invisible on the Releases page to everyone but the owner's drafts list
+          gh release edit "$TAG" --draft=false --prerelease
+          gh release view "$TAG" --json url,isDraft,assets --jq '{url, isDraft, assets: [.assets[].name]}'
