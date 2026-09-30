@@ -314,3 +314,72 @@ tr.cof-row td{border-top:2px solid var(--line)}
   .toast{min-width:0;max-width:none;padding:8px 12px;font-size:13px}
   .toasts .toast:nth-last-child(n+2){display:none}
 }
+
+/* ---- design pass (30 Sep 2026): one type scale, full-height sidebar, bigger targets, clearer layouts ---- */
+/* the sidebar's colour runs the full height of a long page, not only the first screen */
+@media (min-width:761px){.shell{background:linear-gradient(to right,var(--nav) 0 232px,var(--line) 232px 233px,transparent 233px)}}
+/* a fold-out heading is a target, not a line of small print */
+summary{cursor:pointer;padding:8px 0;line-height:1.4}
+summary:hover{color:var(--accent-ink)}
+.nowrap{white-space:nowrap}
+/* one type scale: 12, 13, 14, 15, 17, 20, 28, 44 */
+.tbl{font-size:13px}.evt table{font-size:13px}.guide-body{font-size:15px}
+/* start: the right side previews the journey from the top */
+.start-panel{flex:1;align-self:flex-start;gap:22px;padding:28px 32px}
+ol.journey{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+ol.journey li{display:flex;align-items:center;gap:12px;padding:8px 12px;border-radius:10px;background:var(--paper);font-size:15px}
+ol.journey .jn{flex:none;width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:var(--panel);border:1px solid var(--line2);font-size:13px;font-weight:600}
+/* brief: constraints line up in one label column */
+.cons-row{display:grid;grid-template-columns:128px minmax(0,1fr);align-items:center;gap:12px}
+.cons-row input{width:100%}
+.field textarea{overflow:hidden}
+/* define yourself: each area is a row that is easy to tick */
+.lead-opt{display:flex;align-items:center;gap:12px;min-height:44px;padding:8px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:14px;cursor:pointer}
+.lead-opt:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
+.lead-opt.off{cursor:default;opacity:.8}
+.lead-opt input{width:18px;height:18px;margin:0;accent-color:var(--accent);flex:none}
+/* overview: the tiles fill the row, and the two cards keep their own heights */
+.tiles{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+.two{align-items:start}
+/* work cards: the id and risk on one line, the person on their own line, never cut */
+.tcard .who{font-size:13px;color:var(--ink2);font-weight:500;overflow-wrap:normal}
+/* decision card: cost, risk and confidence as even cells */
+.dline{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px 24px}
+.dline span{display:flex;flex-direction:column;gap:2px}
+.dline b{font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+/* team: each cofounder a column with the people it leads */
+.tree{align-items:stretch;gap:18px}
+.tree>.node{align-self:center}
+.tcols{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:18px;align-items:start}
+.tcol{display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:12px;background:var(--paper)}
+.tcol>.node{border-color:var(--blue);background:var(--blue-soft)}
+.tmembers{display:flex;flex-direction:column;gap:8px}
+.tree .node{min-width:0;width:100%;align-items:flex-start;text-align:left;padding:10px 14px}
+.tree .node.founder,.tree .node.svc{width:auto;align-items:center;text-align:center}
+/* provider form: labelled fields in a grid */
+.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px 14px}
+.fld{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--ink2);font-weight:500}
+.fld.wide{grid-column:span 2}
+.fld input,.fld select{width:100%;font-weight:400}
+/* audit: the event table scrolls sideways instead of cutting its last column */
+.evt table{min-width:958px}
+@media (max-width:760px){
+  /* phone: the menu is one scrolling strip, not a block of wrapped links */
+  nav.side{flex-wrap:nowrap;overflow-x:auto;gap:4px;padding:8px 12px;flex-direction:row;scrollbar-width:none}
+  nav.side .brand{display:none}
+  nav.side .nav-more{display:none}
+  nav.side button.nav,nav.side button.nav.minor{flex:none;min-height:44px;padding:0 14px;font-size:14px;color:var(--ink);white-space:nowrap}
+  nav.side .foot{flex:none;flex-basis:auto;flex-wrap:nowrap;padding:0 0 0 8px;gap:6px}
+  nav.side .foot .pill{display:none}
+  .btn.sm{min-height:44px}
+  summary{padding:13px 0}
+  input[type=text],input[type=number],input[type=password],select{min-height:44px}
+  .steps{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+  .steps span{flex:none}
+  .list-row>span:first-child{flex:1;min-width:0}
+  .list-row>span:last-child{text-align:right;max-width:50%;white-space:normal}
+  .wiz-right .between{flex-wrap:wrap}
+  .cons-row{grid-template-columns:1fr;gap:4px}
+  .fld.wide{grid-column:auto}
+  .tcols{grid-template-columns:1fr}
+}

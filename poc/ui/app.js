@@ -28,6 +28,8 @@ const KIND_TITLE = {
 const EVIDENCE_KINDS = ["decision", "review_merge", "deploy", "approve_workforce", "approve_roadmap"];
 const AREA_TITLE = { business: "Business", market: "Market", finance: "Finance", legal: "Legal", domain: "Domain knowledge", product: "Product", functional: "Functional", non_functional: "Non-functional", ai_ml: "AI and ML", data: "Data",
   design: "Design", security: "Security", qa: "QA", devops: "DevOps", deployment: "Deployment" };
+const ACT_TITLE = { write_file: "Write files", run_tests: "Run tests", assign_task: "Hand out work", product_rule_decision: "Decide a product rule",
+  merge_to_main: "Merge code", deploy_production: "Put the product live", external_message: "Message anyone outside the company" };
 const CONSTRAINTS = [["deadline", "Deadline"], ["geography", "Geography"], ["technology", "Technology"], ["compliance", "Compliance"], ["risk_tolerance", "Risk tolerance"]];
 const SERVICE_TITLE = { orchestrator: "Orchestrator", verification: "Verification", founder: "Founder", budget_engine: "Budget Engine",
   workforce_synthesizer: "Workforce Synthesizer", execution_planner: "Execution Planner", replacement_engine: "Replacement Engine",
@@ -189,7 +191,8 @@ function wizard() {
         <select id="scenario" data-keep="no">${(st.scenarios || []).map((x) => `<option value="${esc(x.id)}" ${x.id === S.scenario ? "selected" : ""}>${esc(x.title)}</option>`).join("")}</select>` : intelSources()}`}` : "";
   // before the brief exists, the right side says what this demo will show, so the page reads left to right
   const about = phase === "new" && S.mode === "demo" && scen ? `<div class="stack" style="max-width:640px"><span class="caps">In this demo</span><p style="margin:0;color:var(--ink2)">${esc(scen.about)}</p></div>` : "";
-  const right = obj ? objectiveCard(obj) : `<div class="card" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;padding:40px">${about}<p class="muted" style="margin:0">Your brief appears here.</p></div>`;
+  const journey = `<div class="stack" style="gap:10px"><span class="caps">What happens next</span><ol class="journey">${STEPS.map((x, i) => `<li><span class="jn">${i + 1}</span>${esc(x)}</li>`).join("")}</ol></div>`;
+  const right = obj ? objectiveCard(obj) : `<div class="card stack start-panel">${about}${journey}<p class="muted small" style="margin:0">Your brief appears here once Cynqra has read your words.</p></div>`;
   return `<div class="wiz">${top}<div class="wiz-body">
     <div class="wiz-left">
       ${steps(0)}
@@ -218,7 +221,7 @@ function objectiveCard(obj) {
       <textarea rows="2" id="f_${k}" data-field="${k}" data-keep="no" aria-label="${FIELD_LABELS[k]}">${esc(obj.structured[k])}</textarea></div>`;
   }).join("");
   const given = obj.founder_constraints || {};
-  const cons = CONSTRAINTS.map(([k, l]) => `<div class="between"><label for="c_${k}">${l}</label><input type="text" id="c_${k}" data-constraint="${k}" data-keep="no" value="${esc(given[k] || "")}" placeholder="optional" style="width:220px"></div>`).join("");
+  const cons = CONSTRAINTS.map(([k, l]) => `<div class="cons-row"><label for="c_${k}">${l}</label><input type="text" id="c_${k}" data-constraint="${k}" data-keep="no" value="${esc(given[k] || "")}" placeholder="optional"></div>`).join("");
   return `<div class="card stack" style="flex:1">
     <div class="between"><h2 style="font-size:20px">Your brief</h2><span class="small muted">Version ${obj.version} · ${esc(obj.intelligence)}</span></div>
     ${obj.notice ? `<div class="notice">${esc(obj.notice)}</div>` : ""}
@@ -246,7 +249,7 @@ function founderStep() {
       <label class="lbl" for="f_background">Your background</label>
       <textarea class="big" id="f_background" data-keep="yes" placeholder="For example: ten years as a backend engineer; I know restaurants from running one.">${esc(f.background || "")}</textarea>
       <div class="stack" style="gap:8px"><span class="lbl">What you lead yourself</span>
-        ${LEADS.map(([k, l, n]) => `<label class="small"><input type="checkbox" data-founder-lead="${k}" data-keep="no" ${off} ${leads.includes(k) ? "checked" : ""}> ${l} <span class="muted">(${n})</span></label>`).join("")}
+        ${LEADS.map(([k, l, n]) => `<label class="lead-opt ${off ? "off" : ""}"><input type="checkbox" data-founder-lead="${k}" data-keep="no" ${off} ${leads.includes(k) ? "checked" : ""}><span>${l} <span class="muted">(${n})</span></span></label>`).join("")}
         ${demo ? `<p class="small muted" style="margin:0">In a demo the founder is part of the script, so these are fixed. In live mode the team is fitted to what you choose.</p>` : ""}</div>
       <div class="between"><label for="f_hours">Your hours a week</label><input type="number" id="f_hours" data-keep="no" min="0" max="100" value="${esc(f.hours_per_week ?? 10)}" style="width:110px"></div>
       <div class="row"><button class="btn primary" id="define-founder" ${S.busy ? "disabled" : ""}>See the team and budget</button></div>
@@ -255,7 +258,7 @@ function founderStep() {
     <div class="wiz-right"><div class="card stack">
       <h2 style="font-size:20px">The cofounders the plan proposes</h2>
       <p class="small muted" style="margin:0">Tick an area you lead and its cofounder becomes a lead who reports to you.</p>
-      ${cofs.map((w) => `<div class="kv"><span><b>${esc(w.name || "")}</b> <span class="muted">AI ${esc(seatOf(w))}</span><br><span class="small muted">${esc(w.why || "")}</span></span><span class="small">${(st.workers || []).filter((x) => x.reports_to === w.id).length} in its team</span></div>`).join("") || `<p class="muted small">None.</p>`}
+      ${cofs.map((w) => `<div class="kv"><span><b>${esc(w.name || "")}</b> <span class="muted">AI ${esc(seatOf(w))}</span><br><span class="small muted">${esc(w.why || "")}</span></span><span class="small nowrap">${(st.workers || []).filter((x) => x.reports_to === w.id).length} in the team</span></div>`).join("") || `<p class="muted small">None.</p>`}
       ${orgChart(st.workers || [])}
     </div></div></div>`;
 }
@@ -382,7 +385,7 @@ function planStep() {
       <h2 style="font-size:20px">Your organisation: ${(st.workers || []).length} members</h2>
       ${orgChart(st.workers || [])}
       <details><summary class="small">Every task, in order (${tasks.length})</summary>
-        <table class="plan-table"><thead><tr><th>Task and how it is accepted</th><th>Who</th><th>Risk</th><th>How it is checked</th></tr></thead><tbody>${ms}</tbody></table></details>
+        <div class="tscroll"><table class="plan-table"><thead><tr><th>Task and how it is accepted</th><th>Who</th><th>Risk</th><th>How it is checked</th></tr></thead><tbody>${ms}</tbody></table></div></details>
       <div class="row"><button class="btn primary" id="approve-plan" data-id="${esc(d ? d.id : "")}" ${S.busy || !d ? "disabled" : ""}>Approve the team and budget</button>
         <button class="btn" id="replan" data-id="${esc(d ? d.id : "")}" ${S.busy || !d ? "disabled" : ""}>Ask for a different plan</button></div>
     </div></div></div>`;
@@ -588,7 +591,7 @@ function vOrg() {
   const busyTask = (id) => (st.tasks || []).find((t) => t.owner_worker_id === id && !["PLANNED", "VERIFIED"].includes(t.status));
   const node = (id, note) => {
     const b = busyTask(id);
-    return `<button class="node ${S.worker === id ? "sel" : ""}" data-worker="${id}"><b>${esc(ws[id] ? ws[id].name || seatOf(ws[id]) : id)}</b><small>${ws[id] && ws[id].name ? `AI ${esc(seatOf(ws[id]))}. ` : ""}${esc(note)}</small>
+    return `<button class="node ${S.worker === id ? "sel" : ""}" data-worker="${id}"><b>${esc(ws[id] ? ws[id].name || seatOf(ws[id]) : id)}</b><small>${ws[id] ? `AI ${esc(seatOf(ws[id]))}` : ""}${note ? ` · ${esc(note)}` : ""}</small>
       ${b ? `<span class="busy">${esc(b.id)}: ${esc(statusText(b))}</span>` : ""}</button>`;
   };
   if (!ws[S.worker] && (st.workers || []).length) S.worker = st.workers[st.workers.length - 1].id;
@@ -600,27 +603,29 @@ function vOrg() {
   const auth = acts.map((a) => {
     const g = matrix[a], risk = st.policy.risk[a];
     const [cls, txt] = risk === "PROHIBITED" ? ["N", "Prohibited"] : g === "execute" ? ["E", "Executes"] : g === "propose" ? ["P", "Proposes"] : ["N", "Not allowed"];
-    return `<div class="kv"><span class="mono">${a}</span><span class="auth-${cls}">${txt}</span></div>`;
+    return `<div class="kv"><span>${esc(ACT_TITLE[a] || a)}</span><span class="auth-${cls}">${txt}</span></div>`;
   }).join("");
   const ans = S.graph ? `<div class="small" id="graph-answer">${graphAnswer(S.graph)}</div>` : "";
   const kids = (id) => (st.workers || []).filter((x) => (x.reports_to || "founder") === id);
-  const branch = (id) => kids(id).length ? `<div class="vline"></div><div class="nodes">${kids(id).map((x) => `<div class="branch">${node(x.id, x.tier === "cofounder" ? "Cofounder, reports to you" : `Reports to ${ws[x.reports_to] ? ws[x.reports_to].name || "the " + seatOf(ws[x.reports_to]) : "you"}`)}${branch(x.id)}</div>`).join("")}</div>` : "";
+  // each cofounder a column with the team it leads, as on the plan: who reports to whom reads at a glance
+  const col = (c) => `<div class="tcol">${node(c.id, c.tier === "cofounder" ? "cofounder" : c.led_by_founder ? "you lead this area" : "")}<div class="tmembers">${kids(c.id).map((x) => node(x.id, "")).join("")}</div></div>`;
   return `<div class="org"><div class="card tree">
-      <div class="node founder"><b>You, the founder</b><small>Outcome, budget, the two approval gates, MEDIUM and HIGH risk</small></div>${branch("founder")}
-      <div class="nodes" style="margin-top:18px"><div class="node svc"><b>Verification Service</b><small style="color:var(--accent-ink)">Not a worker. Tests, lint, review</small></div></div>
+      <div class="node founder"><b>You, the founder</b><small>The vision, the budget, and the calls that cannot be undone</small></div>
+      <div class="tcols">${kids("founder").map(col).join("")}</div>
+      <div class="node svc"><b>Verification Service</b><small style="color:var(--accent-ink)">Not a person. Checks every piece of work: tests, lint, review</small></div>
       <div class="card stack" style="margin-top:28px;width:100%;background:var(--paper);border:0">
         <label class="lbl" for="gq">Ask the organisation graph</label>
         <div class="row"><select id="gq"><option value="approves">Who approves</option><option value="owns">Who owns</option><option value="depends">What depends on</option></select>
           <input type="text" id="gs" value="merge_to_main" aria-label="Action type or task id" style="flex:1"><button class="btn sm" id="ask">Ask</button></div>${ans}</div></div>
-    <div class="card side-panel stack"><div><span class="caps">AI ${esc(seatOf(w))} · seat ${esc(w.id)}</span><h2 style="font-size:22px">${esc(w.name || seatOf(w))}</h2></div>
+    <div class="card side-panel stack"><div><span class="caps">AI ${esc(seatOf(w))}</span><h2 style="font-size:20px">${esc(w.name || seatOf(w))}</h2></div>
       ${w.name ? `<div class="row" style="gap:8px"><input type="text" id="rn_name" data-keep="yes" value="${esc(w.name)}" style="flex:1;min-width:0" aria-label="Name"><button class="btn sm" id="rename" data-id="${esc(w.id)}" ${S.busy ? "disabled" : ""}>Rename</button></div>` : ""}
-      <div class="kv"><span>Intelligence bound by the Intelligence Router</span><span>${esc(w.model || "not yet")}${w.binding && w.binding.version ? " · version " + esc(w.binding.version) : ""}</span></div>
+      <div class="kv"><span>The AI it works on</span><span>${esc(w.model || ((wfv().workers || []).find((x) => x.id === w.id) || {}).model || "not yet")}${w.binding && w.binding.version ? " · version " + esc(w.binding.version) : ""}</span></div>
       <div class="kv"><span>Capabilities</span><span>${esc((w.capabilities || []).join(", "))}</span></div>
       <div class="kv"><span>Reports to</span><span>${esc(wt(w.reports_to))}</span></div>
       <div class="kv"><span>Current work</span><span>${esc(cur)}</span></div>
       <div class="kv"><span>Verified, first pass</span><span class="mono">${p.verified || 0}, ${p.first_pass || 0}</span></div>
-      <div class="kv"><span>Reworks, Blockers raised</span><span class="mono">${p.reworks || 0}, ${p.blockers || 0}</span></div>
-      <h3 style="font-size:15px;margin-top:6px">Authority (${esc(st.policy.version)})</h3>${auth}
+      <div class="kv"><span>Reworks, questions raised</span><span class="mono">${p.reworks || 0}, ${p.blockers || 0}</span></div>
+      <h3 style="font-size:15px;margin-top:6px">What this seat may do</h3>${auth}
       ${formerList(w)}
       <p class="small muted" style="margin:6px 0 0">The seat keeps its work, authority and history. When an AI in it cannot do the work, a new person takes the seat, with a record of their own; an outage replaces no one.</p></div></div>`;
 }
@@ -651,7 +656,7 @@ function vWorkforce() {
   const alloc = Object.values(L.allocated || {}).reduce((a, b) => a + b, 0);
   const tile = (v, l) => `<div class="tile"><b>${v}</b><span>${l}</span></div>`;
   const workers = (wf.workers || []).map((w) => `<div class="card stack">
-      <div class="between"><div style="min-width:0;overflow-wrap:anywhere"><span class="caps">AI ${esc(w.seat || w.title)} · seat ${esc(w.id)}</span><h2 style="font-size:19px">${esc(w.name || w.title)}</h2></div>
+      <div class="between"><div style="min-width:0;overflow-wrap:anywhere"><span class="caps">AI ${esc(w.seat || w.title)}</span><h2 style="font-size:20px">${esc(w.name || w.title)}</h2></div>
         <span class="pill teal">${esc(w.model)}</span></div>
       <div class="kv"><span>Budget allocated, spent</span><span class="mono">${usd(w.budget.allocated)}, ${usd(w.budget.spent)}</span></div>
       <div class="kv"><span>Verified, first pass, reworks</span><span class="mono">${w.performance.verified || 0}, ${w.performance.first_pass || 0}, ${w.performance.reworks || 0}</span></div>
@@ -674,8 +679,8 @@ function vWorkforce() {
       ${tile(usd(L.reserve), "Reserve for retries and replacements")}${tile(`$${esc(s.time_value_per_hour)}/h`, "Value of an hour")}${tile((wf.replacements || []).length, "Replacements")}</div>
     <div class="card stack"><h2 style="font-size:17px">Models in use</h2><span class="small muted">Worker is not model: one model can power many workers, and workers with the same title can run on different models.</span>${reuse}</div>
     <div class="grid2">${workers}</div>
-    <h2 style="font-size:18px;margin:10px 0 4px">What Cynqra told you</h2><p class="small muted" style="margin:0 0 6px">A worker's AI is replaced only when it cannot do the role's work. A provider's outage or an account problem is waited out or brought to you. You are told each time, with the cost.</p>${notes}
-    <h2 style="font-size:18px;margin:10px 0 4px">Replacements</h2>${reps}
+    <h2 style="font-size:17px;margin:10px 0 4px">What Cynqra told you</h2><p class="small muted" style="margin:0 0 6px">A worker's AI is replaced only when it cannot do the role's work. A provider's outage or an account problem is waited out or brought to you. You are told each time, with the cost.</p>${notes}
+    <h2 style="font-size:17px;margin:10px 0 4px">Replacements</h2>${reps}
     <div class="card"><h2 style="font-size:17px;margin-bottom:6px">Budget ledger</h2>${ledger || '<p class="muted small">Nothing allocated yet.</p>'}</div>`;
 }
 
@@ -683,7 +688,7 @@ function scorecards() {
   const cards = S.st.performance || [];
   if (!cards.length) return "";
   const n = (v) => (v === null || v === undefined ? "n/a" : v);
-  const rows = cards.map((c) => c.by_model.map((m) => `<tr><td>${esc(c.title)}</td><td>${esc(modelName(m.model_id) || "")}${m.model_id === c.model_id ? " (now)" : ""}</td>
+  const rows = cards.map((c) => c.by_model.map((m) => `<tr><td>${esc(wt(c.worker_id))}</td><td>${esc(modelName(m.model_id) || "")}${m.model_id === c.model_id ? " (now)" : ""}</td>
     <td class="mono">${pctx(m.quality.acceptance_rate)}</td><td class="mono">${n(m.quality.defect_escapes)}</td>
     <td class="mono">${pctx(m.reliability.failure_rate)} / ${n(m.reliability.protocol_violations)} / ${n(m.reliability.tool_errors)}</td>
     <td class="mono">${n(m.efficiency.latency_s)} s / ${n(m.efficiency.retries)}</td><td class="mono">${usd(m.economics.usd_per_verified)}</td>
@@ -700,7 +705,7 @@ function companyPack(f) {
   const docs = (p.documents || []).map((d) => `<div class="kv"><span>${esc(d.title)}<br><span class="small muted">${esc(d.author)}${d.types.length ? " · " + esc(d.types.join(", ")) : ""}</span></span><span style="color:${d.verified ? "var(--green)" : "var(--muted)"};font-weight:600">${d.verified ? "checked" : "not checked"}</span></div>`).join("") || `<p class="small muted">No documents in this project.</p>`;
   const said = (d) => (d.status === "approved" ? "approved" : "turned down");
   const dec = (p.ceo_decisions || []).map((d) => `<div class="kv"><span>${esc(KIND_TITLE[d.kind] || d.kind)}${d.task ? `: ${esc(d.task)}` : ""}</span><span style="color:${d.status === "approved" ? "var(--green)" : "var(--red)"};font-weight:600">${said(d)}</span></div>`).join("") || `<p class="small muted">None.</p>`;
-  const settled = (p.settled_for_you || []).map((d) => `<div class="kv"><span>${esc(KIND_TITLE[d.kind] || d.kind)}${d.task ? `: ${esc(d.task)}` : ""}</span><span style="color:var(--green);font-weight:600">${said(d)} by the ${esc(d.by)}</span></div>`).join("");
+  const settled = (p.settled_for_you || []).map((d) => `<div class="kv"><span>${esc(KIND_TITLE[d.kind] || d.kind)}${d.task ? `: ${esc(d.task)}` : ""}</span><span style="color:var(--green);font-weight:600">${said(d)} by ${esc(d.by)}</span></div>`).join("");
   return `<div class="stack">
     <div class="pack-sec" data-pack="documents"><h3>Documents</h3>${docs}</div>
     <div class="pack-sec" data-pack="decisions"><h3>Your decisions</h3>${dec}</div>
@@ -739,7 +744,7 @@ function connCard(c) {
   const cr = c.credential || {}, offered = regModels().filter((m) => m.connection_id === c.id && m.status !== "retired");
   const auth = cr.method === "env" ? `key in the environment variable ${cr.env_var}` : cr.method === "secret" ? "key kept in Cynqra's secrets file" : "no key";
   return `<div class="card stack mcard">
-    <div class="between"><div><span class="caps">${esc(PTYPE[c.type] || c.type)}${c.server ? " · " + esc(c.server) : ""}</span><h2 style="font-size:18px">${esc(c.name)}</h2></div>
+    <div class="between"><div><span class="caps">${esc(PTYPE[c.type] || c.type)}${c.server ? " · " + esc(c.server) : ""}</span><h2 style="font-size:17px">${esc(c.name)}</h2></div>
       <span class="pill ${c.status === "connected" ? "teal" : "warn"}">${esc(c.status)}</span></div>
     ${c.endpoint ? `<div class="kv"><span>Endpoint</span><span class="mono small">${esc(c.endpoint)}</span></div>` : ""}
     <div class="kv"><span>Credential</span><span>${cr.method === "none" ? "none needed" : `${esc(auth)}: ${cr.present ? "present" : esc(cr.status || "missing")}`}</span></div>
@@ -755,7 +760,7 @@ function intelCard(m) {
   const pr = S.probes[m.id] || {}, o = m.performance.overall, f = m.fault || {};
   const others = regModels().filter((x) => x.id !== m.id && x.status !== "retired");
   return `<div class="card stack mcard">
-    <div class="between"><div><span class="caps">${esc(connName(m.connection_id))}</span><h2 style="font-size:19px">${esc(m.name)}</h2></div>
+    <div class="between"><div><span class="caps">${esc(connName(m.connection_id))}</span><h2 style="font-size:20px">${esc(m.name)}</h2></div>
       <span class="pill ${m.available ? "teal" : "warn"}">${m.available ? "Available" : esc(m.availability)}</span></div>
     <div class="kv"><span>Serves</span><span class="mono small">${esc(m.ref)}${m.version ? " · version " + esc(m.version) : ""}</span></div>
     <div class="kv"><span>Provider, licence</span><span>${esc(m.provider || "n/a")}, ${esc(m.license || "n/a")}</span></div>
@@ -780,25 +785,25 @@ function vIntelligence() {
   const types = (S.sup && S.sup.provider_types) || [];
   const models = regModels().filter((m) => m.status !== "retired");
   const opts = types.map((t) => `<option value="${esc(t.type)}" ${t.implemented ? "" : "disabled"}>${esc(t.title)}${t.implemented ? "" : " (planned)"}</option>`).join("");
-  return `<div class="card stack"><h2 style="font-size:18px">Connect a provider</h2>
+  return `<div class="card stack"><h2 style="font-size:17px">Connect a provider</h2>
       <p class="small muted" style="margin:0">Connect a source of intelligence once. Cynqra discovers the models it offers, measures them on its own work, and the Intelligence Router picks which one powers each worker. A worker never holds a key: the connection keeps a reference to its credential, and only the Intelligence Gateway reads it, for one call at a time. Name an environment variable, or keep the key in Cynqra's secrets file on this computer.</p>
-      <div class="row wrap" style="gap:8px">
-        <select id="c_type" aria-label="Provider type">${opts}</select>
-        <input type="text" id="c_name" placeholder="Name" style="width:160px" aria-label="Connection name">
-        <input type="text" id="c_endpoint" placeholder="Endpoint URL (blank: the provider's own)" style="flex:1;min-width:240px" aria-label="Endpoint">
-        <select id="c_server" aria-label="Local server"><option value="">Local server: n/a</option><option value="ollama">Ollama</option><option value="endpoint">A server at the endpoint</option><option value="llama">This computer</option></select></div>
-      <div class="row wrap" style="gap:8px">
-        <select id="c_auth" aria-label="Authentication"><option value="env">Key in an environment variable</option><option value="secret">Key kept in Cynqra's secrets file</option><option value="none">No key</option></select>
-        <input type="text" id="c_env" placeholder="variable name, e.g. OPENAI_API_KEY" style="width:230px" aria-label="Environment variable">
-        <input type="password" id="c_secret" placeholder="key (secrets file only)" style="width:190px" aria-label="Key" autocomplete="off">
-        <input type="text" id="c_models" placeholder="models to offer (blank: all it lists)" style="flex:1;min-width:200px" aria-label="Models">
-        <input type="number" id="c_in" step="0.01" placeholder="$ in / M" style="width:95px" aria-label="Price in">
-        <input type="number" id="c_out" step="0.01" placeholder="$ out / M" style="width:95px" aria-label="Price out">
-        <input type="number" id="c_rpm" placeholder="calls / min" style="width:95px" aria-label="Rate limit">
-        <button class="btn primary sm" id="connect">Connect</button></div></div>
-    <h2 style="font-size:18px;margin:6px 0 0">Provider connections</h2>
+      <div class="form-grid">
+        <label class="fld"><span>Provider</span><select id="c_type">${opts}</select></label>
+        <label class="fld"><span>Name</span><input type="text" id="c_name" placeholder="e.g. My OpenAI account"></label>
+        <label class="fld wide"><span>Endpoint URL</span><input type="text" id="c_endpoint" placeholder="blank: the provider's own"></label>
+        <label class="fld"><span>Local server</span><select id="c_server"><option value="">Not a local server</option><option value="ollama">Ollama</option><option value="endpoint">A server at the endpoint</option><option value="llama">This computer</option></select></label>
+        <label class="fld"><span>Key</span><select id="c_auth"><option value="env">In an environment variable</option><option value="secret">In Cynqra's secrets file</option><option value="none">No key</option></select></label>
+        <label class="fld"><span>Environment variable</span><input type="text" id="c_env" placeholder="e.g. OPENAI_API_KEY"></label>
+        <label class="fld"><span>Key (secrets file only)</span><input type="password" id="c_secret" autocomplete="off"></label>
+        <label class="fld wide"><span>Models to offer</span><input type="text" id="c_models" placeholder="blank: every model it lists"></label>
+        <label class="fld"><span>Price in, $ per million tokens</span><input type="number" id="c_in" step="0.01"></label>
+        <label class="fld"><span>Price out, $ per million tokens</span><input type="number" id="c_out" step="0.01"></label>
+        <label class="fld"><span>Calls per minute</span><input type="number" id="c_rpm"></label>
+      </div>
+      <div class="row"><button class="btn primary" id="connect">Connect</button></div></div>
+    <h2 style="font-size:17px;margin:6px 0 0">Provider connections</h2>
     <div class="grid2">${supConns().map(connCard).join("") || '<p class="muted">No provider connected yet.</p>'}</div>
-    <h2 style="font-size:18px;margin:6px 0 0">Intelligence Registry</h2>
+    <h2 style="font-size:17px;margin:6px 0 0">Intelligence Registry</h2>
     <p class="small muted" style="margin:0">What each connection offers, with the facts its provider gives and what Cynqra has measured. Nothing here is a hand-made score.</p>
     <div class="grid2">${models.map(intelCard).join("") || '<p class="muted">No intelligence registered yet.</p>'}</div>`;
 }
@@ -832,7 +837,7 @@ function vWork() {
     return `<span class="small muted">${esc(statusText(t))}</span>`;
   };
   const colHtml = cols.map(([name, sts]) => `<div class="col"><span class="caps" style="font-weight:600">${name}</span>
-    ${ts.filter((t) => sts.includes(t.status)).map((t) => `<div class="tcard ${active === t.id ? "active" : ""} ${fresh("t:" + t.id + ":" + t.status)}" data-task="${esc(t.id)}"><span class="meta" title="${esc(wt(t.owner_worker_id))}">${esc(t.id)} · ${esc(((S.st.workers || []).find((x) => x.id === t.owner_worker_id) || {}).name || t.owner_worker_id)} · ${esc(t.risk_tier)}</span>
+    ${ts.filter((t) => sts.includes(t.status)).map((t) => `<div class="tcard ${active === t.id ? "active" : ""} ${fresh("t:" + t.id + ":" + t.status)}" data-task="${esc(t.id)}"><span class="meta">${esc(t.id)} · ${esc(t.risk_tier)}</span><span class="who">${esc(((S.st.workers || []).find((x) => x.id === t.owner_worker_id) || {}).name || t.owner_worker_id)}</span>
       <span class="ttl">${esc(t.title)}</span>${note(t)}</div>`).join("")}</div>`).join("");
   const tape = (st.protocols || []).slice().reverse().map((p) => `<div class="pobj ${esc(p.kind)} ${fresh("p:" + p.id)}" data-task="${esc(p.task_id)}"><span class="h">${esc(p.kind)} · ${esc(wt(p.sender))} to ${esc(wt(p.to))} · ${esc(p.task_id)}</span>
     <span class="small">${esc(p.summary)}</span>${p.artifacts && p.artifacts.length ? `<span class="small muted mono">${esc(p.artifacts.join(", "))}</span>` : ""}</div>`).join("");
@@ -892,7 +897,7 @@ function vAudit() {
   const st = S.st, evs = (st.events || []).slice().reverse();
   const last = evs.length ? evs[0].seq : 0;
   const rows = evs.map((e) => `<tr class="${e.seq > last - 3 ? "new" : ""}"><td>${e.seq}</td><td>${esc(e.created_at.slice(11, 19))}</td><td>${esc(e.event_type)}</td>
-    <td title="${esc(e.aggregate_id)}">${esc(e.correlation_id)}</td><td>${esc(e.actor_id)}</td><td class="pd-${esc(e.policy_decision)}">${esc(e.policy_decision)}</td>
+    <td title="${esc(e.aggregate_id)}">${esc(e.correlation_id)}</td><td>${esc(((S.st.workers || []).find((x) => x.id === e.actor_id) || {}).name || e.actor_id)}</td><td class="pd-${esc(e.policy_decision)}">${esc(e.policy_decision)}</td>
     <td>${e.protocol_hash ? esc(e.protocol_hash.slice(0, 8)) : ""}${e.test_ids && e.test_ids.length ? ` ${e.test_ids.length} tests` : ""}</td></tr>`).join("");
   const r = S.replay;
   const opts = (st.tasks || []).map((t) => `<option value="${t.id}" ${t.id === S.replayTask ? "selected" : ""}>${esc(t.id)} ${esc(t.title)}</option>`).join("");
@@ -904,7 +909,7 @@ function vAudit() {
   const banner = r && r.facts ? (r.complete ? `<div class="ok-banner">Replay complete: 8 of 8 facts present, ${r.events} events, ${r.test_ids.length} test ids</div>`
     : `<div class="bad-banner">Replay incomplete: missing ${esc(r.missing.join(", "))}</div>`) : "";
   return `<p class="small muted" style="margin:0">Events are append only; the database refuses updates and deletes. A correction is a new event. Payloads carry ids and hashes and no personal data (D-22).</p>
-    <div class="audit"><div class="card evt"><table><colgroup><col style="width:46px"><col style="width:86px"><col style="width:204px"><col><col style="width:110px"><col style="width:150px"><col style="width:96px"></colgroup><thead><tr><th>Seq</th><th>Time</th><th>Event</th><th title="Correlation id">Correlation</th><th>Actor</th><th>Policy</th><th>Refs</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="audit"><div class="card evt"><div class="tscroll"><table><colgroup><col style="width:52px"><col style="width:86px"><col style="width:210px"><col style="width:190px"><col style="width:160px"><col style="width:150px"><col style="width:110px"></colgroup><thead><tr><th>Seq</th><th>Time</th><th>Event</th><th title="Correlation id">Correlation</th><th>Actor</th><th>Policy</th><th>Refs</th></tr></thead><tbody>${rows}</tbody></table></div></div>
     <div class="card replay stack"><h2 style="font-size:17px">Replay a task</h2><select id="replay-task" aria-label="Task to replay">${opts}</select>
       <span class="small muted">Rebuilt from events and stored protocol objects only.</span>${facts}${banner}</div></div>`;
 }
@@ -945,6 +950,9 @@ function vDelivery() {
 
 /* ---------- events ---------- */
 function bind() {
+  // the brief's answers are shown whole: each box grows to its text instead of cutting it off
+  const fit = (t) => { t.style.height = "auto"; t.style.height = t.scrollHeight + 2 + "px"; };
+  $$(".field textarea").forEach((t) => { fit(t); t.addEventListener("input", () => fit(t)); });
   $$("[data-view]").forEach((b) => b.onclick = () => { S.view = b.dataset.view; S.err = ""; if (S.view === "audit") loadReplay().then(() => paint(true)); paint(true); });
   $$(".mode input").forEach((r) => r.onchange = () => { if (r.checked) S.mode = r.value; paint(true); });
   const sc = $("#scenario");

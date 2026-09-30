@@ -16,7 +16,7 @@ main>*{min-width:0}
 .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px}
 .muted{color:var(--muted);font-size:13px}
 .chart{display:flex;align-items:flex-end;gap:6px;height:150px;padding-top:6px}
-.bar{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;font-size:11px;color:var(--muted);white-space:nowrap}
+.bar{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;font-size:12px;color:var(--muted);white-space:nowrap}
 .bar i{display:block;width:100%;background:var(--blue);border-radius:5px 5px 0 0}
 .bar.quiet i{background:var(--quiet)}
 .meals{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
@@ -28,7 +28,7 @@ label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--mute
 input,select{font:inherit;padding:7px 10px;border:1px solid #c6cfdf;border-radius:8px;background:#fff;color:var(--ink);min-height:38px;width:110px}
 input[type=date]{width:170px}
 .tscroll{overflow-x:auto}
-@media (max-width:560px){header,main{padding-left:16px;padding-right:16px}.chart{gap:3px}.bar{font-size:10px}.bar:nth-child(even) span{visibility:hidden}input{width:96px}}
+@media (max-width:560px){header,main{padding-left:16px;padding-right:16px}.chart{gap:3px}.bar{font-size:12px}.bar:nth-child(even) span{visibility:hidden}input{width:96px}input,button{min-height:44px}}
 button{font:inherit;font-weight:600;padding:7px 14px;border-radius:8px;border:1px solid var(--blue);background:var(--blue);color:#fff;min-height:38px;cursor:pointer}
 button.ghost{background:#fff;color:var(--blue)}
 .est{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:12px}
