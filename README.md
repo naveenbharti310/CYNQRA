@@ -1,66 +1,70 @@
 # Cynqra
 
-**Describe what you want to build. Cynqra turns it into a working result, in weeks instead of months, within your
-budget, without you coordinating the work.**
+**You bring the vision. Cynqra creates the organisation that can build it.**
 
 ## The story
 
-Say you want to start a company. In real life you would first find cofounders: someone to lead the technology,
-someone to lead the product, maybe someone to look after the money. Each cofounder would then hire their own
-people. As CEO you would not write the code or check every spreadsheet. You would make the big calls.
+The world has made intelligence cheap. Building a company is still expensive.
 
-Cynqra works the same way, with AI experts in place of people. What you buy is the result: your idea working in the
-real world, in weeks instead of months, within your budget, without you coordinating anyone. The team is how Cynqra
-gets there.
+Anyone can ask one AI to design a product, another to write the code and another to test it. But someone still has
+to work out what needs to be done, who should do it, which intelligence should do it and how they should work
+together. Today that person is the founder, and that is where company building breaks down.
 
-1. **You describe your idea** in your own words.
-2. **Cynqra suggests your cofounders** and tells you why each one is needed.
-3. **Each cofounder picks a team** for their area. A CTO might pick engineers and a tester; a CFO might pick a legal
-   advisor. Then an independent check tries to make the team smaller: every seat must own something no one else
-   covers, or it goes. You see who asked for each seat and what would be left undone without it, and a lean team
-   next to the recommended one.
-4. **You see the whole organization chart and approve it once.** Then you approve the plan and the budget.
-5. **The team gets to work.** Cofounders hand out the tasks, answer their team's questions and review every piece of
-   work. Cynqra also checks each piece on its own, for example by running the code's tests.
-6. **You are asked only what a CEO should decide:** the choices that cannot be undone, such as money, law and going
-   live. What can be undone, like merging finished code, is settled by the cofounder in charge, and you are told.
-7. **At the end you get the Company Pack:** the working product, how you will know it worked, the business numbers
-   checked by the platform, the founding documents, every decision and what it all cost.
-8. **Then it keeps going.** Tell Cynqra what users said, and the same team builds the next version.
+Cynqra starts from the founder's vision, not a prompt. It understands the product and what it takes to build it.
+Then it understands the founder: their experience, their skills, what they can contribute. It asks one question:
+**what organisation does this founder need around them to make this company possible?** A technical founder may not
+need a CTO. A product founder may need engineering leadership. A domain expert may need product and technical
+capabilities around them.
 
-## Why it matters
+Cynqra builds that organisation, gives each role the right intelligence and runs the work. **Cynqra manages the
+organisation. The founder manages the vision.** What the founder gets at the end is not an AI workforce. It is the
+working product they came to build.
 
-Building software with AI has become cheap. The hard part is knowing which experts a real company needs, and trusting
-work you cannot check yourself. With a single AI chat you have to know what to ask and check every answer yourself.
-With Cynqra the team asks the right questions, and every piece of work is checked before it counts.
+| Today | With Cynqra |
+| --- | --- |
+| Idea → find people → convince them → form team → coordinate team → choose technology → manage execution → build product | Idea → understand founder → construct organisation → orchestrate intelligence → build product |
+
+**Anyone with a strong enough idea should be able to build a real company without first having to build the company
+that builds it.**
+
+## The journey, in seven steps
+
+1. **Describe the idea.** What you want to build and the outcome you want.
+2. **Approve the plan.** Cynqra shows what it will build, the capabilities it takes, the organisation it proposes,
+   the timeline and an estimated budget.
+3. **Define yourself.** Your background and what you lead yourself. An area you lead gets no AI cofounder.
+4. **Approve the team and budget.** The organisation fitted around you, and what it costs.
+5. **Watch it being built.** The team works in the background. You are asked only what cannot be undone, such as
+   putting the product live.
+6. **Receive the working product.** Open it and use it, or download everything.
+7. **Audit and refine.** Every requirement is checked against your original objective. Say what should change and
+   Cynqra reworks it, until it meets the objective.
+
+The founder should not have to become an AI workforce manager. Cynqra handles the complexity. The founder gets the
+outcome. Cynqra is responsible for delivering that outcome within the budget; whether the business succeeds stays
+with the founder. The full journey is in [docs/0_USER_JOURNEY.md](docs/0_USER_JOURNEY.md).
 
 ## See it: the Bluedip demo
 
-Here is the story above with a real example. A founder describes **Bluedip**: an app that tells a restaurant owner
-how many customers and how much money to expect each hour, and what a discount would really do before trying it.
+A founder describes **Bluedip**: an app that tells a restaurant owner how many customers and how much money to expect
+each hour, and what an offer would really do before trying it.
 
-Cynqra suggests three cofounders, and each picks a team:
-
-| Cofounder | Their team |
-| --- | --- |
-| CTO | a Data Scientist, a Backend Engineer, a Frontend Engineer, a DevOps Engineer and a QA Engineer |
-| Chief Product Officer | a Project Manager, a Designer, a Market Analyst and a Restaurant Revenue Management Specialist |
-| CFO | a Legal and Compliance Advisor |
-
-The CTO also asked for a Security Expert, but it owned nothing: release 1 takes no payments and keeps no diner data.
-The independent check cut it before the founder saw the team. Together the rest write the company's founding
-documents, build and check the app, and put it live.
+Cynqra proposes three AI cofounders, a CTO, a Chief Product Officer and a CFO, and each picks the team for its own
+area: engineers, a data scientist and a tester; a project manager, a designer and a restaurant revenue specialist; a
+legal and compliance advisor. A Security Expert the CTO asked for is cut before the founder sees the team, because
+release 1 takes no payments and keeps no diner data. The team builds and checks the app and puts it live. The founder
+is asked twice while it is built: one rule about money, and going live.
 
 Then the owner tries their own idea in the live app: 50% off for up to 15 customers between 1 pm and 4 pm. Bluedip
 shows that this brings in more sales but **loses money once food cost is counted**, because customers who would have
-come anyway also pay half. It suggests 20% off instead, which **makes money**. A single AI chat would not have told
-the founder this. It took the right experts and numbers anyone can check.
+come anyway also pay half. It suggests 20% off instead, which **makes money**.
 
 ## Read these, in order
 
 | # | Document | What it answers | Time |
 | --- | --- | --- | --- |
-| 1 | [docs/1_VISION.md](docs/1_VISION.md) | What Cynqra is, why it exists, how it works, for whom | 5 min |
+| 0 | [docs/0_USER_JOURNEY.md](docs/0_USER_JOURNEY.md) | The seven steps every screen follows | 2 min |
+| 1 | [docs/1_VISION.md](docs/1_VISION.md) | What Cynqra is, why it exists, the thesis, for whom | 5 min |
 | 2 | [docs/2_HOW_IT_WORKS.md](docs/2_HOW_IT_WORKS.md) | How a project runs, step by step, why it is built that way, and where each step is in the code | 10 min |
 | 3 | [docs/3_STATUS_AND_ROADMAP.md](docs/3_STATUS_AND_ROADMAP.md) | What works today, what is proven, what comes next and why in that order | 5 min |
 | 4 | [docs/4_RUN_AND_TEST.md](docs/4_RUN_AND_TEST.md) | How to run it, test it and build it, and what each run proves | 5 min |
@@ -81,6 +85,6 @@ the founder this. It took the right experts and numbers anyone can check.
 python3 poc/run_poc.py
 ```
 
-A browser opens. Choose **Demo** and press **Make it a brief**: the Bluedip project runs from the founder's words to a
-live app, with nothing to install or pay for. The guide at the bottom of the screen says what is happening at each
-step, and why.
+A browser opens. Choose **Demo** and press **Make it a brief**: the Bluedip project runs through all seven steps, from
+the founder's words to a live app, with nothing to install or pay for. The guide at the bottom of the screen says
+what is happening at each step, and why.

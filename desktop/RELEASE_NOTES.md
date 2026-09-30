@@ -1,14 +1,13 @@
-**Describe what you want to build. Cynqra turns it into a working result, in weeks instead of months,
-within your budget, without you coordinating the work.**
+**You bring the vision. Cynqra creates the organisation that can build it.**
 
 **What this is:** Cynqra as a desktop app, a proof of concept. **Why try it:** to see an idea become a
-working result, with the right team worked out for you and every piece of work checked. **How:**
+working product in seven steps, with the organisation it needs built around you and every piece of work checked.
+**How:**
 
 1. **Start with the free demo.** A founder describes Bluedip, an app that predicts a restaurant's
-   footfall and revenue hour by hour and estimates what an offer will really do. Cynqra builds the team
-   the idea needs (a Data Scientist, a Restaurant Revenue Management Specialist, a CFO, a Market
-   Analyst, a Legal and Compliance Advisor and more); the checks catch two mistakes; the app goes live
-   and the founder receives the Company Pack. Nothing to download or connect for the demo.
+   footfall and revenue hour by hour and estimates what an offer will really do. You approve the plan,
+   define yourself, approve the team and budget, watch it being built, open the live app, and audit it
+   against the original objective before accepting it. Nothing to download or connect for the demo.
 2. **Then run your own idea** with an online AI provider, or with an open model on this computer: no
    account, no key, and after the one-time model download nothing leaves the machine.
 

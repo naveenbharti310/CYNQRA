@@ -5,11 +5,11 @@ works after it. **How:** `cd poc && python3 -m unittest discover -s tests -t tes
 the quality of real AI output; the tests use stand-in AIs and the demos' prepared scripts, and real-model runs are
 reported in docs/3_STATUS_AND_ROADMAP.md.
 
-Run on 29 September 2026. Linux, Python 3.11.15, Node 22 with Playwright and Chromium.
+Run on 30 September 2026. Linux, Python 3.11.15, Node 22 with Playwright and Chromium.
 
 ## Result
 
-308 tests, 308 passed, 0 failed, 0 skipped. Run module by module, about 10 minutes in all.
+308 tests, 308 passed, 0 failed, 0 skipped. About 8 minutes in all.
 
 | Module | Tests | What it proves |
 | --- | --- | --- |
@@ -32,7 +32,7 @@ Run on 29 September 2026. Linux, Python 3.11.15, Node 22 with Playwright and Chr
 | test_right_thing | 14 | The business numbers recomputed like code: every claim from its inputs, a wrong lifetime value caught with the right figure, figures that are not numbers (NaN, infinity) or make no sense (negative churn, a zero price) refused, every input marked assumption, measured or sourced, months to profit and whether the money lasts, Bluedip's model holding up; foundation documents marking assumptions and listing sources; the guesses an idea rests on ranked riskiest first, measures of success kept, a company that must earn money getting a way to reach customers, a high-risk guess tested late said plainly; a guess keeping its link when the model numbers requirements its own way; an internal tool never given someone to sell it; Bluedip end to end with the CFO's wrong figure caught and fixed, and a guess only the founder can test never called proven by desk work |
 | test_keeps_running | 13 | Decisions that can be undone (a merge, a product rule) settled by the accountable cofounder and the founder told; a rule on money, one whose subject is unclear, one the CFO proposes, one its cofounder did not approve, and going live kept for the founder; a member who left never asked for help; governance sending everything to the founder; the next cycle on the live product from what users said, with its own budget, the CTO merging and the founder only putting it live and accepting it, release 1.1 live; a demo with no script for a cycle stopping plainly; a cycle whose plan failed retried with the same ask; the cycle's work replaying; a rejected delivery fixed in a cycle; the founder's update; the Company Pack separating the founder's decisions from what was settled for them; the foundations checklist with what prepared each item; the next similar project getting a track record |
 | test_security | 5 | What the security audit found, kept fixed: a key never follows a redirect (all five kinds) to another server; a key only over https to another computer, and a provider's address only a web address (a file is refused); a key quoted in an error never written to the database; a hung test, and a passing one, leave nothing they started running |
-| test_server | 8 | HTTP API: other websites refused (DNS rebinding, another site's page, a non-JSON command, a link or image from another site); Cynqra's pages refuse to be framed or embedded and run only Cynqra's scripts; commands over 2 MB refused; provider connections (connect, update, fault, remove, a key never shown, Bedrock refused); the UI served, path traversal blocked, the full journey over HTTP, bad requests are 400, auto run and archive; and the browser test, the whole journey clicked through the real UI in Chromium |
+| test_server | 8 | HTTP API: other websites refused (DNS rebinding, another site's page, a non-JSON command, a link or image from another site); Cynqra's pages refuse to be framed or embedded and run only Cynqra's scripts; commands over 2 MB refused; provider connections (connect, update, fault, remove, a key never shown, Bedrock refused); the UI served, path traversal blocked, the full journey over HTTP, bad requests are 400, auto run and archive; and the browser test, the seven steps clicked through the real UI in Chromium: the founder defining themselves, the audit on the Product screen and acceptance there |
 
 ## Coverage
 

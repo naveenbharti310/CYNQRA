@@ -1,5 +1,7 @@
 # 0. The Cynqra user journey
 
+**You bring the vision. Cynqra creates the organisation that can build it.**
+
 This is the core flow of the product. Every screen, feature and decision follows it. It was set by the founder on
 29 September 2026.
 

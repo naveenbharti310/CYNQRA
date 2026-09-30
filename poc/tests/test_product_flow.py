@@ -250,6 +250,7 @@ class GateTests(unittest.TestCase):
         self.assertIn("add one of", str(ctx.exception), "a founder's edit is refused, not completed behind them")
         d = approve(self.e, "approve_workforce", edited=self.EDIT)
         self.assertEqual(d["outcome_label"], "approved_edited")
+        self.e.define_founder()
         self.assertEqual(next(w for w in self.e.proposal()["workers"] if w["id"] == "w_qa")["reports_to"], "w_cto",
                          "QA reports to the CTO")
         self.assertTrue(self.e.proposal()["overridden"])
@@ -263,6 +264,9 @@ class GateTests(unittest.TestCase):
 
     def test_the_roadmap_is_a_separate_gate_and_can_be_rejected(self):
         approve(self.e, "approve_workforce")
+        self.assertEqual(self.e.meta["phase"], "founder", "step 3: the founder defines themselves before the team")
+        self.assertEqual(self.e.pending_decisions(), [])
+        self.e.define_founder()
         self.assertEqual(self.e.meta["phase"], "planning")
         self.assertTrue(all(self.e.model_of(w["id"]) for w in self.e.workers()), "every worker staffed before the roadmap gate")
         approve(self.e, "approve_roadmap", "reject", note="Split the web app task")
@@ -274,6 +278,7 @@ class GateTests(unittest.TestCase):
 
     def test_the_budget_is_built_in_layers_against_the_cap(self):
         approve(self.e, "approve_workforce")
+        self.e.define_founder()
         f = self.e.store.get("forecast", "current")
         self.assertEqual(f["cap_usd"], 3.0)
         self.assertEqual(f["reserve_usd"], 3.0, "scripted and an unpriced machine: the whole cap is reserve")

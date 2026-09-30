@@ -1,162 +1,144 @@
 # 1. Vision
 
-**Describe what you want to build. Cynqra turns it into a working result, in weeks instead of months, within your
-budget, without you coordinating the work.**
+**You bring the vision. Cynqra creates the organisation that can build it.**
 
-## What Cynqra is
+## The world has made intelligence cheap. Building a company is still expensive.
 
-A founder has a dream idea and wants to see it working in the real world. Instead of spending months working out the
-right people, skills, AI models, technology, plan and budget, and then coordinating all of it, they come to Cynqra.
-Cynqra understands the objective, builds the right team and plan around it, and takes the idea from concept to a
-working result in weeks instead of months, within the budget the founder set, without the founder spending hours
-coordinating the work.
+Today, anyone can access extraordinary AI intelligence. You can ask one model to design a product, another to write
+the code, another to generate the interface, and another to test it.
 
-**Cynqra sells the outcome. The team is how it gets there.** The founder is the CEO: Cynqra proposes the cofounders
-the company needs, each cofounder chooses the team for its own area, every seat has to earn its place, and each
-member gets the best AI for its job. The founder decides only what a CEO should, and receives the result as the
-Company Pack.
+But there is still one problem. **Who figures out what needs to be done, who should do it, which intelligence should
+do it, how all of them should work together, and whether the right team even exists in the first place?**
 
-## Why it exists
+Today, that person is still the founder. And that is where company building breaks down.
 
-Building a product has become cheap. Knowing what a real company needs has not.
+A person may have a brilliant idea and the conviction to pursue it, but turning that idea into a company usually
+requires finding cofounders, assembling expertise, dividing responsibilities, making technical decisions,
+coordinating execution, managing people, and repeatedly solving problems that have little to do with the original
+vision. For a solo founder, it is even harder. You can have the idea, the ambition, even access to the best AI models
+in the world. But you still need a company around you.
 
-- **Which expertise does this idea need?** A founder with an idea outside their own field does not know what a
-  data scientist, a CFO or an expert in that field would ask, check or build.
-- **What must a real company have?** A product, and around it a market, a financial model, legal and compliance,
-  and the field's own rules. A non-expert does not know the list, or what good looks like.
-- **Can I trust what I get?** A polished answer from an AI reads the same whether it is right or wrong, and a
-  non-expert cannot tell the difference.
-- **Who keeps the work on track?** With a single AI chat, the founder must steer minute by minute: re-explain,
-  correct, check, push it forward. Their attention becomes the bottleneck.
+## Cynqra is built to create that company
 
-Hiring that expertise takes months and money. Cynqra gives it on demand, and checks it.
+You tell Cynqra what you want to build. Not a prompt. A vision.
 
-## How it works
+Cynqra understands the product, the complexity behind it, the capabilities required to build it, and the outcome you
+are trying to achieve. Then it understands you: your experience, your technical ability, your domain expertise, what
+you can contribute.
 
-1. **You are the CEO.** You describe what you want in your own words: the product, a budget, any limits, and if you
-   like, what you bring yourself (an area you lead, your stage, your time). You do not name the team.
-2. **Cynqra turns it into what must be true when it is done:** the outcomes, the requirements and the risks that
-   must not happen. The team is built from this list and from nothing else.
-3. **Cynqra proposes your cofounders, and each cofounder builds its team.** As a founder would, Cynqra first
-   proposes the leaders the company needs, each with its reason: a CTO for a product that is software, a Chief
-   Product Officer for who it is for and what it must do, a CFO when the value is money, a Chief Compliance Officer
-   for a regulated business. A simple idea may need two. Then each cofounder chooses the team for its own area, with
-   the reason for every hire. Expertise particular to the idea becomes a Specialist named from it.
-4. **Every seat has to earn its place.** Every requirement has exactly one owner and every risk someone watching it.
-   Each seat shows who asked for it, what it owns and what would be left undone without it. An independent check,
-   whose only job is to make the team smaller, tries to cut every seat; a seat that leaves nothing undone goes, and
-   a seat the check wanted gone but that is the only one on something stays, with the reason. The lean team sits
-   next to the recommended one. You see it all as one org chart and approve it once. After planning, anyone with no
-   work leaves before anything starts, and each member joins with its first task. None of this asks anything more
-   of you.
-5. **The riskiest guesses are tested first, and the numbers are checked like code.** Cynqra lists the guesses the
-   idea rests on (people want it, it makes money, it can be built), riskiest first, and the plan tests them before
-   money goes into what depends on them. A guess only a person can test, such as showing the app to five customers,
-   becomes a prepared next step for you; desk work never counts as proof of it. The financial model carries its
-   inputs, each marked as an assumption, measured or sourced, and the platform recomputes every figure that follows
-   from them. You also get two or three measures of how you will know it worked, each with a line below which to
-   rethink.
-6. **Each team member gets the best AI for its job**, chosen from measured results. When a member
-   stops, Cynqra first finds out why; only an AI that cannot do the work is replaced, and you are told what the
-   better one costs.
-7. **Cofounders run their areas, like in a real company.** Each cofounder hands out its team's work, answers its
-   team's doubts, reviews its team's work before it counts, and brings you only the decisions a CEO should make.
-   Everyone works at the same time on their own part. You are left out of the rest.
-8. **Every piece of work is checked before it counts.** Code must pass its tests; a prediction model must beat a
-   simple baseline on data it has not seen; foundation documents must say what is sourced, what is assumed, and
-   what a professional must confirm. Then the cofounder who leads that area reviews it as an owner would.
-9. **You decide only what a CEO should:** the team, the plan and budget, and the few choices that cannot be undone,
-   such as a rule on money or law, or putting the product live. A choice that can be undone, such as merging
-   finished code or a product rule, is settled by the cofounder accountable for it, and you are told.
-10. **You receive the Company Pack**, and a plain update whenever you look: what is done, what it cost, what was
-    settled for you, what is at risk and what is waiting for you.
-11. **After launch, the company keeps running.** Cynqra checks the live product; you tell it what users said or what
-    to change, and the same team plans the next cycle. You approve its plan and budget once; it is built, checked and
-    released, with the release before it kept as the way back. Cynqra remembers how earlier projects went, and a new
-    team proposal shows that track record.
+Then it asks a fundamentally different question: **what organisation does this founder need around them to make this
+company possible?**
+
+It does not start with a fixed list of AI agents. It starts with the objective. It looks at the founder. It
+identifies the missing capabilities. It constructs the founding team and execution workforce around those gaps.
+
+A technical founder may not need a CTO. A product founder may need engineering leadership. A domain expert may need
+product and technical capabilities around them. The organisation changes because the founder changes and the company
+changes.
+
+## Then the company starts working
+
+Cynqra assigns the right intelligence to each role. One worker may need exceptional coding capability, another deep
+reasoning, another product thinking, another design, another testing and validation. Cynqra determines how these
+workers should collaborate and orchestrates their work against the same company objective.
+
+The founder does not spend their day prompting five different models. They do not have to become an expert in AI
+models, manage every handoff, or build the organisation before they can build the product.
+
+**Cynqra manages the organisation. The founder manages the vision.**
+
+In the background, the company works. Engineering gets done. Design gets done. Architecture gets reviewed.
+Dependencies get resolved. Tests get run. Problems get found. Work gets redone. The workforce keeps moving toward the
+objective.
+
+## The output is not an AI workforce
+
+The founder does not come to Cynqra because they want ten AI agents. They come because they want to build something:
+a product, a platform, an application, a game, a company.
+
+When Cynqra finishes, the founder gets something tangible: **the working product they came to build.** They can audit
+it, ask for changes, have it reworked and refined, and keep going until the product meets the original objective.
+
+Cynqra is responsible for that outcome, within the budget the founder approved. Whether the business succeeds is the
+founder's to own.
+
+## The thesis
+
+| | How a company gets built |
+| --- | --- |
+| Today | Idea → find people → convince them → form team → coordinate team → choose technology → manage execution → build product |
+| Cynqra | Idea → understand founder → construct organisation → orchestrate intelligence → build product |
+
+The radical idea is not that AI can write code. We already know it can. The radical idea is:
+
+> **What if the company itself could be assembled around the founder's vision, automatically?**
+
+What if a person did not need a network of cofounders to start? What if they did not need months to discover which
+capabilities they were missing? What if the cost of building a company was no longer dominated by assembling and
+coordinating the people required to build it?
+
+**Cynqra is the company-building layer for the AI era.** It makes the founding team itself programmable.
+
+> **Anyone with a strong enough idea should be able to build a real company without first having to build the
+> company that builds it.**
+
+## The journey
+
+Every screen follows the same seven steps ([0_USER_JOURNEY.md](0_USER_JOURNEY.md)):
+
+1. Describe the idea.
+2. Approve the plan: what will be built, the capabilities it takes, the proposed organisation, the timeline and an
+   estimated budget.
+3. Define yourself: your background and what you lead yourself.
+4. Approve the team and budget.
+5. Watch it being built.
+6. Receive the working product.
+7. Audit, rework and refine until it meets the objective.
 
 ## The example: Bluedip
 
 A founder describes Bluedip: an app that helps restaurant owners fill their quiet hours. It predicts footfall and
-revenue for every hour and meal, recommends offers for breakfast, lunch and dinner, and lets an owner create a
-limited-time offer, such as 50% off for at most 15 customers between 1 pm and 4 pm, and see what it will do before
-it runs.
+revenue for every hour and meal, recommends offers, and lets an owner try an offer, such as 50% off for at most 15
+customers between 1 pm and 4 pm, and see what it will do before it runs.
 
-- **Three cofounders.** A CTO, because Bluedip is an app built on prediction models; a Chief Product Officer,
-  because restaurant owners must find it useful; a CFO, because the whole value is money: does an offer earn or
-  lose. No Chief Compliance Officer: release 1 takes no payments and holds no diner data.
-- **Each cofounder builds its team.** The CTO chooses a Data Scientist, a Backend Engineer, a Frontend Engineer,
-  DevOps, QA and a Security Expert. The Chief Product Officer chooses a Project Manager, a Designer, a Market Analyst
-  and a Restaurant Revenue Management Specialist, because whether a discount earns money is Bluedip's field. The CFO
-  chooses a Legal and Compliance Advisor.
-- **The team is challenged before the founder sees it.** The Security Expert owns nothing: release 1 takes no
-  payments and keeps no diner data, and the CTO already watches the one security risk. It is cut. The challenger
-  also wants the Designer merged into the Frontend Engineer, but the Designer is the only one on the owner's screen,
-  so it stays, and the founder sees why. That leaves 13, with confidence "high"; the lean team of 10 is shown
-  beside it.
-- **The work is checked, then reviewed.** The platform tests the footfall forecast on days it has not seen; the
-  first version loses to last week's numbers and goes back. The CFO's first financial model says a restaurant is
-  worth ₹49,975; the platform recomputes it from the model's own inputs, finds ₹43,725 (the price was used where the
-  margin belongs), and sends it back. The Backend Engineer's first version shows more
-  customers than the owner's cap allows; the tests catch it. The Designer's first screen passes its checks, but the
-  Chief Product Officer sends it back: it led with revenue and hid the money an offer loses.
-- **Doubts go to the right person.** No restaurant has entered its food cost yet, so the Backend Engineer asks the
-  Specialist what to use; the Frontend Engineer asks the CTO what a new restaurant sees before it has any history.
-  The founder is not interrupted.
-- **Proposals reach you through their cofounder.** DevOps proposes putting Bluedip live; the CTO endorses it first.
-- **The founder decides one real rule**, proposed by the CFO: how far an offer may go, because it is about money.
-  The merge is settled by the CTO, because it can be undone, and the founder is told.
-- **The result is worth having.** In the live app, the owner's own 50% idea raises revenue and loses money after
-  food cost, because customers who would have come anyway pay half too. Bluedip recommends 20% off, which earns
-  money.
-
-## What you get: the Company Pack
-
-- **What you set out to get, and how you will know it worked:** the outcomes and the measures, each with a target
-  and a line below which to rethink.
-- **The guesses it rests on**, riskiest first, and which ones the work has tested.
-- **The business numbers, recomputed by the platform:** margin per customer, months to earn back what a customer
-  cost, what a customer is worth, the month the company stops losing money, the money needed to get there, and
-  whether it reaches profit before the money runs out.
-- **The next steps only you can take**, prepared: the tests that need a person.
-- **The company's foundations:** registering the company, owning the code and brand, privacy, terms for customers,
-  security and tax, each marked as prepared by the team's checked work or still to do, with a professional to
-  review it.
-- **The foundation documents**, each written by the right expert and checked: in Bluedip's case the business
-  brief, the market analysis and launch plan, the financial model, the compliance register, the revenue management
-  report, and how the models work.
-- **The product**, built, tested and live.
-- **Your decisions**, and the questions the team settled without you.
-- **What it cost**, in dollars, per team member and per task.
-
-**The measure of success: the founder gets the working result they set out to build, within their budget, with as
-little of their time as possible, and every piece of it checked.**
+- **The organisation.** Cynqra proposes a CTO, because Bluedip is an app built on prediction models; a Chief Product
+  Officer, because restaurant owners must find it useful; and a CFO, because the whole value is whether an offer
+  earns or loses money. Each cofounder picks the team for its own area. A Security Expert is cut before the founder
+  sees the team, because release 1 takes no payments and keeps no diner data.
+- **The founder.** In the demo the founder ran a restaurant and is not technical, so every cofounder seat stays. A
+  technical founder who leads the technology would get no CTO; that area would report to them.
+- **The work is checked.** The platform tests the footfall forecast on days it has not seen, and the first version
+  goes back because it loses to last week's numbers. The first estimate shows more customers than the owner's cap
+  allows, and the tests catch it.
+- **The founder is asked twice while it is built:** one rule about money, and putting it live.
+- **The product is worth having.** In the live app, the owner's own 50% idea raises revenue and loses money after food
+  cost, because customers who would have come anyway pay half too. Bluedip recommends 20% off, which earns money.
 
 ## Who it is for
 
-- **First (to be tested):** first-time founders with an idea outside their own field, who cannot yet hire the
-  experts it needs.
+- **First (to be tested):** solo and first-time founders with a strong idea and without the team to build it.
 - **The alternative first buyer, tested in the same founder conversations:** startup studios and accelerators, who
   judge many ideas and have budgets.
 - **Later:** investors assessing ideas, and innovation teams inside larger companies.
 
 ## What makes it different
 
-Others build what you describe. **Cynqra works out what your idea needs, checks the work, and asks you only the
-CEO's questions.**
+Others give you intelligence, or build what you describe. **Cynqra builds the organisation around you, then delivers
+the working product.**
 
 | | What it is built for | What Cynqra adds |
 | --- | --- | --- |
-| A single AI chat (ChatGPT, Claude, Gemini) | Answering what you ask | You do not need to know what to ask |
-| App builders (Lovable, Bolt, Replit Agent) | Turning your description into an app | The company around the product: market, money, legal, the field's own expertise |
-| AI software teams (MGX, from MetaGPT) | A team of AI roles building the software you describe | A team chosen from your idea, business experts and field specialists included |
-| General agents (Manus, ChatGPT agent) | Carrying out a task you describe | A whole company's work, split, handed over and checked |
-| Agent managers (Paperclip) | Running AI agents in an organisation you design | Cynqra designs the organisation from your idea |
+| A single AI chat (ChatGPT, Claude, Gemini) | Answering what you ask | You do not need to know what to ask, or who should answer |
+| App builders (Lovable, Bolt, Replit Agent) | Turning your description into an app | An organisation fitted to your idea and to you, with every piece of work checked |
+| AI software teams (MGX, from MetaGPT) | A fixed team of AI roles building the software you describe | A team built from the gaps between your idea and what you bring |
+| General agents (Manus, ChatGPT agent) | Carrying out a task you describe | A whole product's work, split, handed over, checked and delivered |
+| Agent managers (Paperclip) | Running AI agents in an organisation you design | Cynqra designs and runs the organisation; you manage the vision |
 
 ## What Cynqra is not
 
-- **Not a promise to run a whole company without people.** Registering a company, opening a bank account, signing
-  customers and hiring are real-world actions. Cynqra prepares them; the CEO does them.
-- **Not a document generator.** Polished documents nobody checked are worse than none, because a non-expert cannot
-  tell. Trust is the product: sources, stated assumptions, and clear "confirm with a professional" flags.
+- **Not an AI workforce you have to manage.** The team is how the product gets built. You approve the plan, the team
+  and the budget, answer what cannot be undone, and receive the product.
+- **Not a promise that the business succeeds.** Cynqra delivers the product you asked for, within the budget. The
+  business, its customers and its real-world steps, such as registering a company or signing customers, stay with
+  the founder.
 - **Not a single-model product.** It uses whichever AI is best for each job, from any provider.

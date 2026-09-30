@@ -138,6 +138,10 @@ def run(objective: str, max_usd: float, data_dir: Path, log=print, allow_cmd: bo
             phase = e.meta["phase"]
             if phase in ("accepted", "stopped", "stopped_error"):
                 break
+            if phase == "founder":  # step 3: the founder as set before the run; the team is fitted around them
+                e.define_founder()
+                decisions.append({"kind": "define_founder", "action": "define"})
+                continue
             r = e.step()
             if r["did"] not in ("idle",):
                 steps.append(r)

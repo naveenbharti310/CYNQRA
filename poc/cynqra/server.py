@@ -6,6 +6,8 @@ POST /api/objective/draft           {messy}
 POST /api/objective/fields          {fields}
 POST /api/objective/guardrails      {budget_usd, time_value_per_hour, constraints, governance}
 POST /api/objective/founder         {leads, stage, hours_per_week, background}  what the founder brings
+POST /api/founder/define            {founder}  step 3: define yourself; the team and budget follow for step 4
+POST /api/rework                    {note, budget_usd}  step 7: what to change; the team plans the rework
 POST /api/objective/submit          hand the objective over: requirements, then the proposed workforce
 GET  /api/update                    the founder's update: numbers, learned, decided, at risk, waiting for them
 POST /api/feedback                  {text}  what users said; it goes into the next cycle
@@ -360,9 +362,11 @@ def make_server(app: App, port: int = 8750) -> ThreadingHTTPServer:
                 "/api/intelligence": lambda: app.supply_call("register", None, body),
                 "/api/objective/submit": e.submit_objective,
                 "/api/objective/founder": lambda: e.set_founder(body.get("founder") or {}),
+                "/api/founder/define": lambda: e.define_founder(body.get("founder") or {}),
                 "/api/feedback": lambda: e.feedback(body.get("text", "")),
                 "/api/live/check": e.check_live,
                 "/api/cycle": lambda: e.start_cycle(body.get("note", ""), body.get("budget_usd")),
+                "/api/rework": lambda: e.rework(body.get("note", ""), body.get("budget_usd")),
                 "/api/run/step": app.step,
                 "/api/killswitch": lambda: e.kill_switch(bool(body.get("on"))),
                 "/api/run/resume": e.resume,

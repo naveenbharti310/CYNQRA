@@ -204,6 +204,7 @@ class PromptContentTests(unittest.TestCase):
         e.draft_objective(SCENARIO["messy"])
         e.submit_objective()
         approve(e, "approve_workforce")
+        e.define_founder()
         e.close()
         self.assertEqual(seen.get("product"), SCENARIO["objective"]["product"])
         self.assertTrue(all(seen.get(k) for k in ("target_customer", "success_criteria", "constraints")))
@@ -253,8 +254,9 @@ class OutageTests(unittest.TestCase):
         e.create_company("Harbor Recruiting")
         e.draft_objective(SCENARIO["messy"])
         e.submit_objective()
+        approve(e, "approve_workforce")
         with self.assertRaises(IntelligenceError):
-            approve(e, "approve_workforce")
+            e.define_founder()
         self.assertEqual(e.meta["phase"], "stopped_error")
         self.assertIn("The roadmap failed", e.meta["notice"])
         NoPlan.ok = True
@@ -352,6 +354,7 @@ class ServerTests(unittest.TestCase):
         wf = self.app.engine.pending_decisions()[0]["id"]
         self.post(f"/api/decisions/{wf}", {"action": "approve"})
         self.assertEqual(self.app.state()["last_step"], {"did": "approved", "decision": wf, "kind": "approve_workforce"})
+        self.post("/api/founder/define", {"founder": {}})
         plan = self.app.engine.pending_decisions()[0]["id"]
         self.post(f"/api/decisions/{plan}", {"action": "reject", "note": "Split it"})
         self.assertEqual(self.app.state()["last_step"]["did"], "rejected_with_reason")

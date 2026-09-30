@@ -486,21 +486,22 @@ class Engine:
             return {"company": company, "settings": s}
 
     def set_founder(self, profile: dict) -> dict:
-        """Stage 0: what the founder brings. The seats they lead themselves get no cofounder, and the stage sets how
-        many seats each cofounder may hire."""
+        """What the founder brings: their background and the seats they lead themselves. Given before the objective is
+        submitted, those seats get no cofounder in the proposal; given at step 3 (define_founder), a cofounder seat
+        the founder leads becomes a lead that reports to the founder. The stage sets how many seats each cofounder
+        may hire."""
         with self.lock:
-            self._require("objective")
-            try:
-                clean = objective.founder_profile(profile)
-            except objective.ObjectiveError as exc:
-                raise EngineError(str(exc)) from exc
-            if "CTO" in clean["leads"]:
-                raise EngineError("In this version the CTO's seat reviews, merges and releases the code, which only a "
-                                  "team member can do. You can lead product, money or compliance yourself.")
+            self._require("objective", "founder")
             company = self.store.get("company", self.cid)
             fixed = company.get("founder") or {}
-            if not (profile or {}).get("background") and fixed.get("background"):
-                clean["background"] = fixed["background"]  # a form that does not show it keeps it
+            given = {k: v for k, v in (profile or {}).items() if v is not None and v != ""}
+            try:  # what the form does not send is kept as it was
+                clean = objective.founder_profile({**fixed, **given})
+            except objective.ObjectiveError as exc:
+                raise EngineError(str(exc)) from exc
+            if "CTO" in clean["leads"] and self.meta["phase"] == "objective":
+                raise EngineError("In this version the CTO's seat reviews, merges and releases the code, which only a "
+                                  "team member can do. You can lead product, money or compliance yourself.")
             if self.meta["mode"] == "demo" and (clean["leads"], clean["stage"]) != (fixed.get("leads"), fixed.get("stage")):
                 raise EngineError("A demo's founder is part of its script: its team was written for that founder. "
                                   "In live mode Cynqra builds the team around what you bring.")
@@ -604,6 +605,8 @@ class Engine:
                 raise EngineError(f"the new budget must be above the {budget.dollars(spent)} already spent")
 
     def _after_workforce(self, d: dict, action: str) -> None:
+        """Step 2, the plan, approved: the founder defines themselves next (step 3), and the team and budget are drawn
+        up around them (step 4)."""
         if action != "approve":
             try:
                 synthesis.reject(self, d.get("note") or "")
@@ -612,6 +615,40 @@ class Engine:
             return
         edited = d.get("edited") or {}
         synthesis.approve(self, edited.get("roles"), edited.get("option") or "recommended")
+        self.set_meta(phase="founder", notice="")
+        self.event("state.changed", "company", self.cid, {"phase": "founder"})
+
+    def define_founder(self, profile: dict | None = None) -> dict:
+        """Step 3: the founder says who they are and what they bring. Every cofounder seat the founder leads becomes
+        a lead reporting to the founder, since the founder is that cofounder; then the team is staffed and the
+        roadmap and budget are drawn up for step 4."""
+        if profile:
+            self.set_founder(profile)
+        with self.lock:
+            self._require("founder")
+            self._fit_founder(self.founder())
+            self.event("company.founder_defined", "company", self.cid, {"leads": self.founder().get("leads", [])},
+                       actor="founder", actor_type="human", authority="founder")
+            self._build_team()
+            return self.founder()
+
+    def _fit_founder(self, founder: dict) -> None:
+        """A cofounder seat the founder leads is theirs: its worker stays to do the work, as a lead reporting to the
+        founder, and what a cofounder settles on its own comes to the founder instead."""
+        org = self.store.get("organization", "org_1")
+        leads = set((founder or {}).get("leads") or [])
+        for w in self.workers():
+            if w.get("tier") != "cofounder" or w["role"] not in leads:
+                continue
+            w.update({"tier": "team", "reports_to": "founder", "led_by_founder": True,
+                      "title": f"{w['title']} (you lead this area)"})
+            self.store.put("worker", w["id"], w)
+            org["cofounders"] = [x for x in org["cofounders"] if x != w["id"]]
+            org["reports_to"][w["id"]] = "founder"
+            self.event("worker.reports_to_founder", "worker", w["id"], {"role": w["role"]})
+        self.store.put("organization", "org_1", org)
+
+    def _build_team(self) -> None:
         try:
             self._staff()
         except IntelligenceError as exc:
@@ -992,6 +1029,35 @@ class Engine:
             self._roadmap(note=full)
             return self.meta
 
+    def audit(self) -> dict:
+        """Step 7: the delivered product against the original objective. Every requirement, the work that answers
+        it and whether that work passed its checks; the tests in the live release; whether it is up."""
+        req = self.requirements() or {}
+        tasks = self.tasks()
+        rows = []
+        for r in req.get("requirements", []):
+            mine = [t for t in tasks if r["id"] in (t.get("requirement_ids") or [])]
+            rows.append({"id": r["id"], "text": r["text"], "area": r.get("area"),
+                         "work": [{"id": t["id"], "title": t["title"], "verified": t["status"] == "VERIFIED"} for t in mine],
+                         "met": bool(mine) and all(t["status"] == "VERIFIED" for t in mine)})
+        dep = (self.store.all("deployment") or [{}])[-1]
+        live = self.store.all("live_check")
+        return {"objective": (self.objective() or {}).get("structured", {}).get("success_criteria", ""),
+                "requirements": rows, "met": sum(x["met"] for x in rows), "total": len(rows),
+                "tests": len(dep.get("test_ids") or []), "live": bool(self.live_url()),
+                "up": live[-1]["ok"] if live else None}
+
+    def rework(self, note: str, budget_usd: float | None = None) -> dict:
+        """Step 7: what the founder wants changed. A delivery not yet accepted is turned down with the note on record;
+        then the same team plans the rework, and the founder approves its plan and budget as in step 4."""
+        note = (note or "").strip()
+        if not note:
+            raise EngineError("say what needs to change")
+        pend = [d for d in self.pending_decisions() if d["kind"] == "accept_delivery"]
+        if pend:
+            self.decide(pend[0]["id"], "reject", note=note)
+        return self.start_cycle(note, budget_usd)
+
     @staticmethod
     def _caught(v: dict) -> str:
         """What one failed check found, in a line."""
@@ -1122,6 +1188,7 @@ class Engine:
             "deployments": self.store.all("deployment"),
             "transition": self.store.get("transition", f"tr_{self.cycle()}") or self.store.get("transition", "tr_1"),
             "update": self.update() if company and self.meta["phase"] not in ("new", "objective") else None,
+            "audit": self.audit() if self.meta["phase"] in ("delivered", "accepted") else None,
             "feedback": self.store.all("feedback"), "live_checks": self.store.all("live_check")[-10:],
             "budget": {"settings": project_settings.get(self.store), "ledger": budget.ledger(self.store)},
             "forecast": forecast,

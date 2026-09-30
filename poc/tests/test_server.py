@@ -121,6 +121,9 @@ class ApiTests(unittest.TestCase):
             st = self.call("/api/state")[1]
             if st["meta"]["phase"] == "accepted":
                 break
+            if st["meta"]["phase"] == "founder":
+                self.assertEqual(self.call("/api/founder/define", {"founder": {"background": "Ran recruiting"}})[0], 200)
+                continue
             pend = st["decisions"]["pending"]
             if pend:
                 self.assertEqual(self.call(f"/api/decisions/{pend[0]['id']}", {"action": "approve"})[0], 200)
@@ -190,6 +193,7 @@ class ApiTests(unittest.TestCase):
         self.call("/api/objective/submit", {})
         pend = self.call("/api/state")[1]["decisions"]["pending"][0]
         self.call(f"/api/decisions/{pend['id']}", {"action": "approve"})
+        self.call("/api/founder/define", {})
         self.assertTrue(self.call("/api/run/auto", {"on": True, "delay": 0})[1]["on"])
         deadline = time.time() + 30
         while time.time() < deadline:
@@ -232,8 +236,9 @@ class BrowserEndToEnd(unittest.TestCase):  # A16
             res = json.loads(line)
             self.assertTrue(res["ok"], res)
             self.assertEqual(res["phase"], "accepted")
-            self.assertEqual(len([s for s in res["steps"] if s.startswith("founder approved")]), 3,
-                             "the rule on money, going live and acceptance; the CTO settled the merge")
+            self.assertEqual(len([s for s in res["steps"] if s.startswith("founder approved")]), 2,
+                             "the rule on money and going live; the CTO settled the merge")
+            self.assertIn("founder accepted the product", res["steps"], "acceptance happens on the Product screen")
         finally:
             proc.terminate()
             proc.wait(timeout=10)

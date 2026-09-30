@@ -399,7 +399,7 @@ class WholeRunTests(DesktopBase):
         self.assertTrue(rep["product_tests"]["passed"])
         self.assertEqual(rep["health"]["status"], 200)
         kinds = [d["kind"] for d in rep["decisions"]]
-        self.assertEqual(kinds[:3], ["submit_objective", "approve_workforce", "approve_roadmap"])
+        self.assertEqual(kinds[:4], ["submit_objective", "approve_workforce", "define_founder", "approve_roadmap"])
         self.assertIn("accept_delivery", kinds)
         self.assertTrue(Path(rep["product_copy"], "app.py").exists())
         self.assertGreater(len(rep["calls"]), 5)

@@ -1,6 +1,6 @@
 # 3. Status and roadmap
 
-Last updated: 29 September 2026.
+Last updated: 30 September 2026.
 
 **What** this covers: what works today, what is proven, and what comes next. **Why** it matters: the vision is only
 as good as the proof behind it. **How** to read it: the status table first, then what real AI models have done so
@@ -13,18 +13,20 @@ been proven end to end on strong real AI models in its current form.
 
 | Area | Status |
 | --- | --- |
-| The full flow (idea → team → plan → parallel work → checks → delivery) | ✅ Built. 308 automated tests pass. |
-| Demo mode (scripted words; real code, models, tests and going live) | ✅ Works end to end. It opens on Bluedip: three cofounders and the ten team members they chose (fourteen seats proposed and one cut by the independent challenge), seventeen tasks, three mistakes caught by the checks, one piece of work sent back by a cofounder, two questions settled inside the team, three CEO decisions after the two approvals (a rule on money, going live, acceptance; the CTO settled the merge), the Company Pack. Two smaller demos are in the list. |
+| The seven-step journey: describe the idea, approve the plan, define yourself, approve the team and budget, watch it being built, receive the product, audit and refine | ✅ Built. Every screen follows it. 308 automated tests pass. |
+| Define yourself: an area the founder leads gets no AI cofounder; that seat reports to the founder | ✅ Built and tested. In a demo the founder is part of the script and fixed. |
+| Audit and rework: every requirement of the objective checked against the delivered product; a rework plans, builds and releases only what should change | ✅ Built and tested. |
+| Demo mode (scripted words; real code, models, tests and going live) | ✅ Works end to end. It opens on Bluedip: three cofounders and the ten team members they chose (fourteen seats proposed and one cut by the independent challenge), seventeen tasks, three mistakes caught by the checks, one piece of work sent back by a cofounder, two questions settled inside the team, the founder asked twice while it is built (a rule on money, going live; the CTO settled the merge), then the audit (15 of 15 requirements met) and acceptance. Two smaller demos are in the list. |
 | Cofounders proposed from the idea, each choosing its own team, Specialists named from it | ✅ Built and tested. |
 | Every seat earns its place: one owner per requirement, who asked for each seat, an independent challenge, the lean team beside the recommended one, members with no work removed | ✅ Built and tested. Asks the founder nothing more. |
-| The guesses an idea rests on, riskiest first and tested early; measures of success | ✅ Built and tested. |
+| The guesses an idea rests on, riskiest first and tested early; measures of success | ✅ Built and tested. Kept in the record; the screens leave them out, since Cynqra is responsible for the product, not the business. |
 | The financial model's numbers recomputed by the platform | ✅ Built and tested. |
-| Decisions that can be undone settled by the accountable cofounder; the CEO told | ✅ Built and tested. |
-| After launch: the CEO's update, live checks, what users said, the next cycle on the live product, the foundations checklist, the track record across projects | ✅ Built and tested. The demos script a second cycle for the candidate tracker only. |
-| Cofounders run their areas: hand out, answer doubts, review before work counts, endorse proposals to the CEO | ✅ Built and tested. |
+| Decisions that can be undone settled by the accountable cofounder; the founder told | ✅ Built and tested. |
+| After launch: live checks, the next cycle on the live product, the foundations checklist, the track record across projects | ✅ Built and tested. The demos script a second cycle for the candidate tracker only. |
+| Cofounders run their areas: hand out, answer doubts, review before work counts, endorse proposals to the founder | ✅ Built and tested. |
 | Team works in parallel | ✅ Built and tested. |
 | Best AI per member, measured | ✅ Built and tested. |
-| When a member stops: finds out why first; replaces only an AI that cannot do the work, and tells the CEO the cost | ✅ Built and tested. |
+| When a member stops: finds out why first; replaces only an AI that cannot do the work, and tells the founder the cost | ✅ Built and tested. |
 | Prediction models checked on data they have not seen | ✅ Built and tested (a backtest against last week's numbers). |
 | Connections to OpenAI-compatible, Anthropic, local models, Hugging Face | ✅ Built. Bedrock planned. |
 | Installable desktop app (Windows, macOS, Linux) | ✅ Builds and installs; version 0.1.2. |
@@ -60,7 +62,7 @@ Hugging Face PRO. Nothing in it is scripted: it is the test of whether real AI m
 | 6 | **Kickoff agreements:** before parallel work starts, the team agrees on how the parts connect and the key facts | Parallel work must fit together. |
 | 7 | **Company memory:** a shared knowledge base; a CEO change updates every affected document | The team must stay consistent over time. |
 | 8 | **Field playbooks:** what companies in a field usually need, as a starting point the idea adjusts | Better teams, faster. |
-| 9 | **CEO experience:** plain decision cards, grouped decisions, phone notifications | Less of the CEO's time; a pitch that shows the product. |
+| 9 | **CEO experience:** plain decision cards, grouped decisions, phone notifications | Less of the founder's time; a pitch that shows the product. |
 | 10 | **Hosted web product:** accounts, separate data per customer, secrets manager, AI included in the price, billing | To sell it. |
 | 11 | **Security:** AI-written code run in a sandbox; content from the web or colleagues treated as data to read, with no power to give orders | Before any launch. |
 

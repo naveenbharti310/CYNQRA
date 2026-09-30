@@ -8,7 +8,7 @@ runs on Python 3.10 or newer, with the standard library only; nothing to install
 
 | To... | Do this | What it shows |
 | --- | --- | --- |
-| **Watch the demo** (free, scripted words; real code, models, tests and going live) | `python3 poc/run_poc.py`, choose **Demo**, press **Make it a brief** | The Bluedip project from the founder's words to a live app and the Company Pack. Two smaller demos are in the list. |
+| **Watch the demo** (free, scripted words; real code, models, tests and going live) | `python3 poc/run_poc.py`, choose **Demo**, press **Make it a brief** | The Bluedip project through all seven steps, from the founder's words to a live app, audited and accepted. Two smaller demos are in the list. |
 | **Run your own idea with an online AI** | Start as above, choose **Live**, click **Connect a provider** (OpenAI-compatible such as Hugging Face or OpenAI, or Anthropic), and name the key's environment variable or paste it into Cynqra's secrets file. Or set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` before starting. | What real AI models do with your idea |
 | **Run with a model on your own computer** | Install the desktop app (below) and open **This computer** to download a model. No key needed. | The same, privately, more slowly |
 | **Install the desktop app** | Download it from the repository's **Releases** page (Windows, macOS, Linux), or run `python3 poc/desktop.py` | Cynqra in its own window |

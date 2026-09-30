@@ -43,6 +43,7 @@ function loadPlaywright() {
     await shot("01_objective");
     await page.fill("#f_priorities", "Honest estimates first, then recommendations, then growth");
     await page.fill("#usd", "7.5");
+    await page.evaluate(() => { const d = document.querySelector("#c_deadline").closest("details"); if (d) d.open = true; });
     await page.fill("#c_deadline", "two weeks");
     await page.click("#submit");
     await page.waitForSelector("#approve-workforce");
@@ -60,14 +61,33 @@ function loadPlaywright() {
     steps.push("3 cofounders and the 10 team members they chose, as an org chart");
     await shot("02_workforce");
     await page.click("#approve-workforce");
+    await page.waitForSelector("#define-founder");
+    steps.push("step 3: the founder defines themselves");
+    await page.fill("#f_background", "Ran a restaurant for eight years; not technical");
+    await shot("03_founder");
+    await page.click("#define-founder");
     await page.waitForSelector("#approve-plan");
-    steps.push("roadmap and budget proposed");
-    await shot("03_roadmap");
+    const bg = await page.evaluate(async () => (((await (await fetch("/api/state")).json()).company || {}).founder || {}).background);
+    if (!/restaurant/.test(bg || "")) errors.push(`the founder's background was lost: ${bg}`);
+    steps.push("team and budget proposed");
+    await shot("03_team_budget");
     await page.click("#approve-plan");
     for (let i = 0; i < 8; i++) {
       await page.waitForFunction(() => /Waiting on you|Delivered/.test(document.querySelector("header.top")?.textContent || ""), null, { timeout: 90000 });
       const head = await page.textContent("header.top");
       if (/Delivered and accepted/.test(head)) break;
+      const kinds = await page.evaluate(async () => ((await (await fetch("/api/state")).json()).decisions.pending || []).map((d) => d.kind));
+      if (kinds.includes("accept_delivery")) {
+        await page.click('button[data-view="delivery"]');
+        await page.waitForSelector('[data-step="refine"] button[data-decide="approve"]');
+        const met = await page.textContent('[data-step="refine"] .pill');
+        steps.push("audit on the Product screen: " + met.trim());
+        await shot(`04_decision_${i}`);
+        await page.click('[data-step="refine"] button[data-decide="approve"]');
+        steps.push("founder accepted the product");
+        await page.waitForTimeout(600);
+        continue;
+      }
       await page.click('button[data-view="decisions"]');
       await page.waitForSelector('button[data-decide="approve"]');
       const title = await page.textContent(".dcard h2");
@@ -114,7 +134,7 @@ function loadPlaywright() {
     const phase = await page.evaluate(async () => (await (await fetch("/api/state")).json()).meta.phase);
     await page.waitForTimeout(900);
     const guide = await page.textContent(".guide-bar .guide-title").catch(() => "");
-    if (guide !== "Delivered and accepted") errors.push(`guide says "${guide}" at the end`);
+    if (guide !== "Accepted") errors.push(`guide says "${guide}" at the end`);
     steps.push("guide: " + guide);
     const ok = phase === "accepted" && rows >= 1 && /Replay complete/.test(replay) && errors.length === 0;
     console.log(JSON.stringify({ ok, phase, errors, steps }));

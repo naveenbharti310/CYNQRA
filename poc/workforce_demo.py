@@ -132,6 +132,7 @@ def run(args) -> int:
         gate = [x for x in st["decisions"]["pending"] if x["kind"] == "approve_workforce"][0]
         api(f"/api/decisions/{gate['id']}", {"action": "approve"})
         rep["decisions"].append({"kind": "approve_workforce"})
+        api("/api/founder/define", {})  # step 3: the founder keeps the profile they have
         # 4. staffing
         st = api("/api/state")
         wf = st["workforce"]

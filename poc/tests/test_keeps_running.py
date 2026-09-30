@@ -68,6 +68,7 @@ class DoorTests(unittest.TestCase):
                   {"role": "PM", "quantity": 1, "why": "x"}, {"role": "Engineer", "quantity": 2, "why": "x"},
                   {"role": "Designer", "quantity": 1, "why": "answers design questions"}]
         approve(e, "approve_workforce", edited={"roles": roles_})
+        e.define_founder()
         self.assertIsNone(e.worker("w_design"), "no work in the plan: it left before anything started")
         self.assertFalse([t["id"] for t in e.tasks() if "w_design" in t["blockers_to"]])
         self.assertNotIn("w_design", e.store.get("plan", "plan_1")["coordination"]["answers_blockers"])

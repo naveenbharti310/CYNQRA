@@ -275,9 +275,11 @@ def scripted_journey(d: Path) -> str:
         e.create_company("Self test", "demo", DEFAULT_SCENARIO)
         e.draft_objective(next(x["messy"] for x in scenarios() if x["id"] == DEFAULT_SCENARIO))
         e.submit_objective()
-        for gate in ("approve_workforce", "approve_roadmap"):  # the founder's two approvals of the canonical flow
+        for gate in ("approve_workforce", "approve_roadmap"):  # step 2, the plan; step 4, the team and budget
             d = [x for x in e.pending_decisions() if x["kind"] == gate][0]
             e.decide(d["id"], "approve")
+            if e.meta["phase"] == "founder":
+                e.define_founder()  # step 3: the founder keeps the profile they have
         for _ in range(300):
             if e.meta["phase"] in ("accepted", "stopped", "stopped_error"):
                 break
@@ -533,6 +535,10 @@ def e2e(args) -> int:
                 if len(report["resumes"]) > args.max_resumes:
                     break
                 api("/api/run/resume", {})
+                continue
+            if phase == "founder":  # step 3: the founder as given; the team and budget are fitted around them
+                report["decisions"].append({"kind": "define_founder", "action": "define"})
+                api("/api/founder/define", {})
                 continue
             pend = [x for x in st["decisions"]["pending"] if not x.get("in_digest")] or st["decisions"]["pending"]
             if pend:

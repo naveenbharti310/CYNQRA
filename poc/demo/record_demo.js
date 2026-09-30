@@ -1,5 +1,5 @@
-// Records the product demo video from the real running POC: the Bluedip demo, from the founder's idea to a live
-// product and the next cycle, told as the founder sees it.
+// Records the product demo video from the real running POC: the Bluedip demo through the seven steps of the journey,
+// from the founder's idea to an audited, accepted live product, told as the founder sees it.
 // Usage: node record_demo.js <base_url> <out_dir>
 // Writes JPEG frames with timestamps to <out_dir>/frames and <out_dir>/frames.json, and a log of every caption and
 // highlight to <out_dir>/beats.json so each one can be checked frame by frame.
@@ -265,16 +265,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.evaluate(() => document.fonts.ready);
   await hideGuide();
   await D("card", `<div class="dc-wrap"><span class="dc-word in">Cynqra</span><span class="dc-bar"></span>
-    <span class="dc-line in" style="animation-delay:.5s">Describe what you want to build.</span>
-    <span class="dc-line in" style="animation-delay:1.1s">Get it <i>working in the real world</i>, within your budget,</span>
-    <span class="dc-line in" style="animation-delay:1.7s">without coordinating anyone.</span>
-    <span class="dc-foot in" style="animation-delay:2.6s">Proof of concept, recorded from the real running software. Demo mode: the team's words come from a script. The code, the checks, the numbers and the deploy are real.</span></div>`);
+    <span class="dc-line in" style="animation-delay:.5s">You bring the vision.</span>
+    <span class="dc-line in" style="animation-delay:1.2s">Cynqra creates <i>the organisation that can build it</i>.</span>
+    <span class="dc-foot in" style="animation-delay:2.4s">Proof of concept, recorded from the real running software. Demo mode: the team's words come from a script. The code, the checks, the numbers and the deploy are real.</span></div>`);
   await cdp.send("Page.startScreencast", { format: "jpeg", quality: 92, maxWidth: 1920, maxHeight: 1080, everyNthFrame: 1 });
-  await sleep(8200);
+  await sleep(7600);
 
-  // ---------- 01 the idea ----------
+  // ---------- 1 describe the idea ----------
   const messy = (await state()).scenarios.find((x) => x.id === "bluedip").messy;
-  await chapter("01", "Your idea", "A founder, a dream idea and a budget.", async () => { await page.fill("#messy", ""); await page.evaluate(() => window.scrollTo(0, 0)); });
+  await chapter("STEP 1 OF 7", "Describe the idea", "Not a prompt. A vision.", async () => { await page.fill("#messy", ""); await page.evaluate(() => window.scrollTo(0, 0)); });
   await sleep(600);
   await click("#messy");
   await D("caption", "A restaurant owner's idea, in their own words: fill the quiet hours with offers that earn money.", "Founder", "bottom");
@@ -292,68 +291,68 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await say("Cynqra turns it into a brief and marks the two things it guessed, so you check exactly those.", "Brief");
   await spot(".field:has(#usd)");
   await say("A hard budget, in dollars. Nothing is spent past it.", "Budget");
-  await spot(".field:has(#f_stage)");
-  await say("What you bring. Cynqra proposes cofounders only for what you don't do yourself.", "You");
   await unsay();
   await clear();
   await click("#submit");
-  await D("caption", "You hand it over. You don't name a team.", "You decide", "bottom");
+  await D("caption", "You hand over the vision. You don't name a team.", "You", "bottom");
   await page.waitForSelector("#approve-workforce");
-  await sleep(2600);
+  await sleep(2400);
 
-  // ---------- 02 what you'll get, and who delivers it ----------
-  await chapter("02", "What you'll get", "And the team that delivers it, every seat checked.", async () => { await hideGuide(); await page.evaluate(() => window.scrollTo(0, 0)); });
+  // ---------- 2 approve the plan ----------
+  await chapter("STEP 2 OF 7", "Approve the plan", "What it takes to build it, and the organisation that can.", async () => { await hideGuide(); await page.evaluate(() => window.scrollTo(0, 0)); });
   await sleep(900);
   await spot(".wiz-left .card >> nth=0");
-  await say("Three outcomes, five risks that must not happen, and the guesses the idea rests on, riskiest first. The team is built from this list and nothing else.", "Outcome");
-  const ctoBlockEnd = async () => (await page.locator(".wiz-right .tbl tbody tr.cof-row").nth(1).elementHandle()).evaluateHandle((e) => e.previousElementSibling);
-  await spot([".wiz-right .tbl thead", ctoBlockEnd], "", { merge: true });
-  await say("Three cofounders, each choosing its own team. Every seat says who asked for it, what it owns, and what would be left undone without it.", "Team");
+  await say("What you'll get, and the capabilities it takes to build it.", "Plan");
+  await spot(".wiz-right .ochart");
+  await say("The organisation it proposes: three AI cofounders, each with the team for its own area. A seat that owned nothing was cut before you saw it.", "Organisation");
   await spot(".wiz-left .card >> nth=1");
-  await say("Why this team: every requirement has exactly one owner, and every risk has someone watching it. The confidence comes from these checks.", "Why");
-  await spot(".wiz-right details");
-  await say("An independent check tried to cut every seat. It cut a Security Expert that owned nothing, and kept the Designer: the only one on the owner's screen.", "Challenge");
+  await say("And an estimated budget. Nothing is spent yet.", "Budget");
   await unsay();
   await clear();
-  await click('[data-team-option="lean"]');
-  await sleep(500);
-  const leanNote = page.locator(".wiz-right div.small", { has: page.locator("b", { hasText: "What the recommended team adds" }) }).first();
-  await spot([".wiz-right [role=radiogroup]", leanNote], "", { merge: true });
-  await say("Beside it, the lean team: ten seats instead of thirteen, with fewer specialists. In live mode you can choose it.", "Lean");
-  await unsay();
-  await clear();
-  await click('[data-team-option="recommended"]');
-  await sleep(400);
   await click("#approve-workforce");
-  await D("caption", "You approve the team once.", "You decide", "bottom");
-  await page.waitForSelector("#approve-plan");
-  await sleep(1400);
-  await veil(true);
-  await hideGuide();
-  await page.evaluate(() => window.scrollTo(0, 0));
-  await sleep(200);
-  await veil(false);
+  await D("caption", "You approve the plan.", "You decide", "bottom");
+  await page.waitForSelector("#define-founder");
+  await sleep(1600);
+
+  // ---------- 3 define yourself ----------
+  await chapter("STEP 3 OF 7", "Define yourself", "The organisation is fitted around what you bring.", async () => { await hideGuide(); await page.fill("#f_background", ""); await page.evaluate(() => window.scrollTo(0, 0)); });
+  await sleep(700);
+  await click("#f_background");
+  await page.locator("#f_background").pressSequentially("I have run a restaurant for eight years. I am not technical.", { delay: 28 });
   await sleep(600);
-  await spot(page.locator(".wiz-left .card", { has: page.locator(".caps", { hasText: "When each member starts" }) }));
-  await say("Each member joins with its first task. Anyone with no work would leave before anything starts.", "Plan");
-  await spot(page.locator(".wiz-left .card", { has: page.locator(".caps", { hasText: "Budget" }) }));
-  await say("Every task is priced against your budget before work starts. The demo's scripted team costs nothing; real AI is priced in dollars.", "Budget");
+  await spot(page.locator(".wiz-left .stack", { has: page.locator("[data-founder-lead]") }).first());
+  await say("An area you lead yourself gets no AI cofounder. A technical founder would not get a CTO; that area would report to them.", "You");
+  await say("This founder runs restaurants and is not technical, so all three cofounders stay.", "You");
+  await unsay();
+  await clear();
+  await click("#define-founder");
+  await page.waitForSelector("#approve-plan");
+  await sleep(900);
+
+  // ---------- 4 approve the team and budget ----------
+  await chapter("STEP 4 OF 7", "Approve the team and budget", "Who does what, by when, and what it costs.", async () => { await hideGuide(); await page.evaluate(() => window.scrollTo(0, 0)); });
+  await sleep(700);
+  await spot(".wiz-left .card >> nth=0");
+  await say("The budget, priced before any work starts. The demo's scripted team costs nothing; real AI is priced in dollars.", "Budget");
+  await spot(".wiz-left .card >> nth=1");
+  await say("The timeline, milestone by milestone.", "Timeline");
+  await spot(".wiz-right .ochart");
+  await say("Your organisation, with each member given the AI best suited to its work.", "Team");
   await unsay();
   await clear();
   await click("#approve-plan");
   await waitFor((st) => st.auto.on, "the run to start");
   await work(false);
   await D("veil", true);
-  await D("caption", "You approve the plan and the budget once. From here the team runs itself.", "You decide", "bottom");
+  await D("caption", "You approve the team and budget. From here Cynqra runs the organisation.", "You decide", "bottom");
   await page.waitForSelector("header.top");
-  await sleep(4200);
+  await sleep(3800);
 
-  // ---------- 03 the team at work ----------
-  expect((st) => reworked(st, "t_06"), (st) => reworked(st, "t_07"), (st) => pending(st, "decision"),
-    (st) => Number(task(st, "t_10").review_rounds || 0) > 0, (st) => (task(st, "t_11").answers || []).length > 0,
-    (st) => reworked(st, "t_11"), (st) => ((st.workforce || {}).ceo_notices || []).some((n) => n.kind === "settled_by_cofounder"),
+  // ---------- 5 watch it being built ----------
+  expect((st) => reworked(st, "t_06"), (st) => pending(st, "decision"), (st) => reworked(st, "t_11"),
+    (st) => ((st.workforce || {}).ceo_notices || []).some((n) => n.kind === "settled_by_cofounder"),
     (st) => pending(st, "deploy"));
-  await chapter("03", "The team at work", "Cofounders run their areas. Every piece of work is checked before it counts.", async () => {
+  await chapter("STEP 5 OF 7", "Watch it being built", "Cynqra manages the organisation. You manage the vision.", async () => {
     await hideGuide();
     await page.click('button.nav[data-view="work"]');
     await page.waitForSelector(".tape");
@@ -362,17 +361,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await work(true);
   });
   await sleep(500);
-  await D("caption", "Everyone works at the same time. Cofounders hand out the work, answer their team's questions and review it before it counts.", "Work", "bottom");
+  await D("caption", "Everyone works at the same time. Cofounders hand out the work and review it before it counts.", "Work", "bottom");
   beats.push({ label: "Work", text: "board overview", wall: Date.now() / 1000, spots: [] });
   for (let i = 0; i < 4; i++) { await moveTo(page.locator(".col > .caps").nth(i), 900); await sleep(900); }
   await moveTo(".tape", 900);
-  await sleep(1800);
+  await sleep(1600);
   await unsay();
   await moment(0, "the forecast sent back", '.tcard[data-task="t_06"]',
-    "The footfall forecast loses to last week's numbers on days it has not seen. The platform sends it back.", "Checked", { tone: "red" });
-  await moment(1, "the financial model sent back", '.tcard[data-task="t_07"]',
-    "The CFO's model says a restaurant is worth ₹49,975. The platform recomputes it from the model's own figures: ₹43,725. Back it goes.", "Numbers", { tone: "red" });
-  await caught(2, "the rule on money");
+    "Every piece of work is checked. The footfall forecast loses to last week's numbers on days it has not seen, so it goes back.", "Checked", { tone: "red" });
+  await caught(1, "the rule on money");
   await nav("decisions");
   await page.waitForSelector(".dcard");
   await spot([".dcard > .between", ".dcard .dline"], "amber", { merge: true });
@@ -380,27 +377,20 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await unsay();
   await clear();
   await click('.dcard button[data-decide="approve"]');
-  await D("caption", "Approved. The rule goes into the company's memory.", "You decide", "bottom");
-  await sleep(2600);
+  await D("caption", "Approved. The team carries on.", "You decide", "bottom");
+  await sleep(2200);
   await nav("work");
-  await goOn(2);
-  await moment(3, "the screen sent back", ['.tcard[data-task="t_10"]'],
-    "The Chief Product Officer sends the Designer's screen back: it hid the money an offer loses.", "Reviewed", { tone: "amber" });
-  await moment(4, "a question answered",
-    ['.pobj.Blocker[data-task="t_11"]'],
-    "When a member is unsure, it asks instead of guessing. The Backend Engineer asks which food cost to use; the Revenue Specialist answers. You are not interrupted.", "Questions");
-  await moment(5, "the cap caught", '.tcard[data-task="t_11"]',
+  await goOn(1);
+  await moment(2, "the cap caught", '.tcard[data-task="t_11"]',
     "A test catches an estimate that ignored the owner's cap of 15 customers. Fixed before it counts.", "Checked", { tone: "red" });
-  await moment(6, "the merge settled",
+  await moment(3, "the merge settled",
     '.tcard[data-task="t_16"]', "Merging the finished code can be undone, so the CTO settles it, and you are told instead of asked.", "Settled");
-  await caught(7, "going live");
+  await caught(4, "going live");
   watching(false);
   await nav("decisions");
   await page.waitForSelector(".dcard");
   await spot([".dcard > .between", ".dcard .dline"], "red", { merge: true });
   await say("Going live cannot be undone. It waits for you.", "You decide");
-  await spot(".dcard .deny", "red");
-  await say("The team also wanted to email the pilot restaurants. The rules stopped it: no team member sends messages outside the company.", "Stopped");
   await unsay();
   await clear();
   await click('.dcard button[data-decide="approve"]');
@@ -408,18 +398,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await D("caption", "Approved. Build, test, preview, health and smoke checks, then live.", "You decide", "bottom");
   const live = await waitFor((st) => st.live_url && pending(st, "accept_delivery"), "delivery");
   await work(false);
-  await sleep(2200);
+  await sleep(2000);
 
-  // ---------- 04 live ----------
-  await chapter("04", "It's live", "The working product, and everything you need to run it.", async () => {
+  // ---------- 6 receive the working product ----------
+  await chapter("STEP 6 OF 7", "Receive the working product", "Not an AI workforce. The product you came to build.", async () => {
     await page.click('button.nav[data-view="delivery"]');
     await page.waitForSelector(".stepper .live");
     await hideGuide();
     await page.evaluate(() => window.scrollTo(0, 0));
   });
   await sleep(500);
-  await spot(".stepper");
-  await say("All ten stages ran for real on this machine: build, test, preview, checks, and live.", "Live");
+  await spot('[data-step="product"]');
+  await say("Built, tested and live on this machine. Open it and use it, or download everything.", "Product");
   await clear();
   await moveTo("#live-link");
   await D("ripple");
@@ -428,8 +418,6 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sleep(700);
   await spot(".card:has(#chart)");
   await say("Bluedip, live, as the owner sees it: footfall and revenue for the day, hour by hour.", "Bluedip");
-  await spot("#meals");
-  await say("A recommended offer, or none, for breakfast, lunch and dinner.", "Bluedip");
   await unsay();
   await clear();
   await click("#preview");
@@ -447,66 +435,45 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sleep(1000);
   await spot("#estimate");
   await say("At 20% off, the same window earns money. Numbers the owner can check.", "Bluedip");
+
+  // ---------- 7 audit and refine ----------
   await openPage(base + "/", "header.top", async () => {
     await page.click('button.nav[data-view="delivery"]');
-    await page.waitForSelector('[data-pack="measures"]');
+    await page.waitForSelector('[data-step="refine"]');
+    await page.evaluate(() => window.scrollTo(0, 0));
+  });
+  await chapter("STEP 7 OF 7", "Audit and refine", "Until it meets the objective you started with.", async () => {
+    await page.evaluate(() => { const d = document.querySelector('[data-step="refine"] details'); if (d) d.open = true; });
     await page.evaluate(() => window.scrollTo(0, 0));
   });
   await sleep(500);
-  await spot('[data-pack="measures"]');
-  await say("The Company Pack: how you'll know it worked, with a target and a line below which to rethink.", "Company Pack");
-  await spot('[data-pack="numbers"]');
-  await say("The business numbers, recomputed by the platform: margin, payback, the month Bluedip stops losing money, and the funding it needs.", "Company Pack");
-  await spot('[data-pack="steps"]');
-  await say("And the next steps only you can take, such as showing the app to five owners.", "Company Pack");
+  await spot('[data-step="refine"] > .between');
+  await say("The audit: every requirement of your original objective, the work that answers it, and whether that work passed its checks.", "Audit");
+  await spot(['[data-step="refine"] label[for="rw_note"]', "#rw_note", "#rework"], "", { merge: true });
+  await say("Anything not right? Say what should change, and the same team reworks it, priced and approved like the first time.", "Refine");
   await unsay();
   await clear();
-  await click('.view button[data-decide="approve"]');
-  await D("caption", "You accept delivery.", "You decide", "bottom");
+  await click('[data-step="refine"] button[data-decide="approve"]');
+  await D("caption", "It meets the objective. You accept the product.", "You decide", "bottom");
   await waitFor((st) => st.meta.phase === "accepted", "accepted");
   await sleep(2600);
-
-  // ---------- 05 it keeps going ----------
-  await chapter("05", "It keeps going", "Tell Cynqra what users said. The same team builds the next version.", async () => {
-    await page.click('button.nav[data-view="company"]');
-    await page.waitForSelector("#fb_text");
-    await page.evaluate(() => window.scrollTo(0, 0));
-  });
-  await sleep(500);
-  await spot(page.locator(".card", { has: page.locator("h2", { hasText: "Your update" }) }));
-  await say("Your update, built from the record: what's done, what it cost, what was settled for you, and what the checks caught.", "Update");
-  await unsay();
-  await clear();
-  await click("#fb_text");
-  await page.locator("#fb_text").pressSequentially("Owners want yesterday's real covers next to the forecast.", { delay: 30 });
-  await sleep(500);
-  await click("#fb-save");
-  await sleep(900);
-  await spot(page.locator(".card", { has: page.locator("h2", { hasText: "What's next for your product" }) }));
-  await say("What users said goes into the next cycle. You approve its plan and budget once; the release before it stays as the way back.", "Next cycle");
-  await unsay();
-  await clear();
 
   // ---------- end card ----------
   const st = await state();
   const m = st.metrics;
   const dep = (st.deployments || []).slice(-1)[0] || {};
-  const settled = ((st.workforce || {}).ceo_notices || []).filter((n) => n.kind === "settled_by_cofounder").length;
-  const cut = (((st.proposal || {}).challenge || {}).removed || []).length;
+  const au = st.audit || {};
   const tiles = [
-    [m.founder_interventions, "times you were needed, idea to live"],
-    [m.tasks_verified, `of ${m.tasks_total} pieces of work checked`],
+    [m.founder_interventions, "times you were needed, idea to accepted"],
+    [au.met || 0, `of ${au.total || 0} requirements met`],
     [m.defects_caught_before_verified, "mistakes caught before they counted"],
-    [cut, "seat cut before you saw the team"],
-    [m.blockers_cleared_without_founder, "questions settled inside the team"],
-    [settled, "decision settled for you, and told"],
     [(dep.test_ids || []).length, "tests passing in the live release"],
-    [10, "deployment stages, health and smoke checked"],
   ].map(([v, l], i) => `<div class="dc-tile in" style="animation-delay:${0.4 + i * 0.12}s"><b data-to="${v}">0</b><span>${l}</span></div>`).join("");
   await D("card", `<div class="dc-wrap" style="width:1240px"><span class="dc-word in" style="font-size:72px">Cynqra</span>
-    <span class="dc-line in" style="animation-delay:.2s">From an idea to a <i>working, checked, live product</i>, within budget.</span>
+    <span class="dc-line in" style="animation-delay:.2s">You bring the vision. Cynqra creates <i>the organisation that can build it</i>.</span>
     <div class="dc-tiles">${tiles}</div>
-    <span class="dc-foot in" style="animation-delay:1.6s">Proof of concept in demo mode. The run on real AI models is next. Run it yourself: see README.md.</span></div>`, true);
+    <span class="dc-foot in" style="animation-delay:1.6s">Anyone with a strong enough idea should be able to build a real company without first having to build the company that builds it.</span>
+    <span class="dc-foot in" style="animation-delay:2s;margin-top:0">Proof of concept in demo mode. Run it yourself: see README.md.</span></div>`, true);
   await sleep(400);
   await D("countUp");
   await sleep(9000);

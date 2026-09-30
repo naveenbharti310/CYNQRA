@@ -82,8 +82,10 @@ def approve(e: Engine, kind: str, action: str = "approve", **kw) -> dict:
 
 
 def engine_to_gates(e: Engine) -> Engine:
-    """The founder's two approvals of the canonical flow: the synthesized workforce, then the roadmap and budget."""
+    """The founder's steps 2 to 4: approve the plan, define themselves (keeping the profile they have), then approve
+    the team and the budget."""
     approve(e, "approve_workforce")
+    e.define_founder()
     approve(e, "approve_roadmap")
     return e
 
@@ -112,6 +114,8 @@ def run_journey(e: Engine, answer: str = "approve", max_rounds: int = 20) -> lis
         d = pend[0]
         answered.append(d)
         e.decide(d["id"], answer)
+        if e.meta["phase"] == "founder":  # step 3: the founder defines themselves, then the team and budget follow
+            e.define_founder()
         if e.meta["phase"] == "accepted":
             break
     return answered
