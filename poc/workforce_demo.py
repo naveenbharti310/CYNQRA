@@ -36,7 +36,7 @@ LOCAL = [("qwen3.5-4b", "Qwen3.5 4B"), ("qwen3.5-9b", "Qwen3.5 9B"), ("gpt-oss-2
 # exact model is used is read from the live catalogue: a family no provider serves today is skipped and reported.
 HOSTED_FAMILIES = [
     ("Kimi K3", ["moonshotai/Kimi-K3", "moonshotai/Kimi-K2.6", "moonshotai/Kimi-K2.5"]),
-    ("GLM-5", ["zai-org/GLM-5.2", "zai-org/GLM-5.1", "zai-org/GLM-5", "zai-org/GLM-4.7"]),
+    ("GLM-5", ["zai-org/GLM-5.3", "zai-org/GLM-5.2", "zai-org/GLM-5.1", "zai-org/GLM-5", "zai-org/GLM-4.7"]),
     ("DeepSeek V4", ["deepseek-ai/DeepSeek-V4.1-Flash", "deepseek-ai/DeepSeek-V4-Flash", "deepseek-ai/DeepSeek-V4"]),
     ("Qwen3.8", ["Qwen/Qwen3.8-Flash-Next", "Qwen/Qwen3.8", "Qwen/Qwen3.6-35B-A3B"]),
     ("Qwen3.5-35B-A3B (small, for contrast)", ["Qwen/Qwen3.5-35B-A3B"]),
