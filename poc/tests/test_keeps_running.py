@@ -30,6 +30,21 @@ class DoorTests(unittest.TestCase):
                          "a rule on money and going live are the founder's; a merge can be undone")
         e.close()
 
+    def test_a_demo_rework_its_script_cannot_build_changes_nothing(self):
+        e = engine_to_running(self.tmp.path, scenario="bluedip")
+        for _ in range(20):
+            e.run_until_idle()
+            pend = e.pending_decisions()
+            if any(d["kind"] == "accept_delivery" for d in pend):
+                break
+            e.decide(pend[0]["id"], "approve")
+        self.assertFalse(e.snapshot()["rework_available"], "the Product screen says so before you press it")
+        with self.assertRaises(EngineError):
+            e.rework("Show yesterday's real covers.")
+        self.assertEqual(e.meta["phase"], "delivered")
+        self.assertTrue(any(d["kind"] == "accept_delivery" for d in e.pending_decisions()), "still yours to accept")
+        e.close()
+
     def test_governance_can_send_every_decision_to_the_founder(self):
         e = engine_to_running(self.tmp.path, governance={"cofounders_settle_reversible": False})
         answered = run_journey(e)
@@ -127,10 +142,13 @@ class CycleTests(unittest.TestCase):
         self.e.start_cycle("Days in stage.")
         approve(self.e, "approve_roadmap")
         run_journey(self.e)
-        with self.assertRaises(IntelligenceError):
-            self.e.start_cycle("Something else.")
-        self.assertEqual(self.e.meta["phase"], "stopped_error")
-        self.assertIn("no plan for cycle 3", self.e.meta["notice"])
+        cap = self.e.store.get("settings", "project")["budget_usd"]
+        self.assertFalse(self.e.snapshot()["rework_available"])
+        with self.assertRaises(EngineError) as ctx:
+            self.e.rework("Something else.", budget_usd=2)
+        self.assertIn("covers the first release only", str(ctx.exception))
+        self.assertEqual(self.e.meta["phase"], "accepted", "refused before anything changed")
+        self.assertEqual(self.e.store.get("settings", "project")["budget_usd"], cap, "and no budget was added")
 
     def test_a_cycle_whose_plan_failed_is_retried_with_the_same_ask(self):
         run_journey(self.e)

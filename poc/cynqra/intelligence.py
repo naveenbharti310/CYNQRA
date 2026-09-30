@@ -319,6 +319,11 @@ class ScriptedSource:
         return (self._copy("challenge") if "challenge" in self.data else {"seats": [], "failure_stories": []}), \
             self._usage()
 
+    def plans_cycle(self, cycle: int) -> bool:
+        """Whether the demo's script holds a plan for this cycle: a rework the script cannot build is refused
+        before anything changes."""
+        return cycle <= 1 or bool((self.data.get("cycles") or {}).get(str(cycle)))
+
     def plan(self, objective: dict, workers: list[dict], requirements: dict, note: str = "", feedback: str = "",
              planner: str = "system", persona: str = "", cycle: int = 1, **_) -> tuple[dict, dict]:
         if cycle > 1:

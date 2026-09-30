@@ -1023,6 +1023,7 @@ class Engine:
         checks and releases it, and the release before it stays as the way back."""
         with self.lock:
             self._require("accepted", "delivered")
+            self._can_plan_cycle(self.cycle() + 1)
             unused = [f for f in self.store.all("feedback") if not f.get("used_in")]
             ask = ((note or "").strip() or "; ".join(f["text"] for f in unused))[:2000]
             if not ask:
@@ -1065,12 +1066,26 @@ class Engine:
                 "tests": len(dep.get("test_ids") or []), "live": bool(self.live_url()),
                 "up": live[-1]["ok"] if live else None}
 
+    NO_DEMO_CYCLE = ("This demo's script covers the first release only, so it cannot build a rework. In live mode "
+                     "the same team plans, builds and releases what you ask for. Nothing was changed.")
+
+    def rework_available(self) -> bool:
+        plans = getattr(self.intel, "plans_cycle", None)
+        return not (self.meta.get("mode") == "demo" and plans and not plans(self.cycle() + 1))
+
+    def _can_plan_cycle(self, n: int) -> None:
+        """A demo without a scripted plan for the next cycle says so plainly, and nothing changes."""
+        plans = getattr(self.intel, "plans_cycle", None)
+        if self.meta.get("mode") == "demo" and plans and not plans(n):
+            raise EngineError(self.NO_DEMO_CYCLE)
+
     def rework(self, note: str, budget_usd: float | None = None) -> dict:
         """Step 7: what the founder wants changed. A delivery not yet accepted is turned down with the note on record;
         then the same team plans the rework, and the founder approves its plan and budget as in step 4."""
         note = (note or "").strip()
         if not note:
             raise EngineError("say what needs to change")
+        self._can_plan_cycle(self.cycle() + 1)  # refused before the delivery is turned down
         pend = [d for d in self.pending_decisions() if d["kind"] == "accept_delivery"]
         if pend:
             self.decide(pend[0]["id"], "reject", note=note)
@@ -1208,6 +1223,7 @@ class Engine:
             "transition": self.store.get("transition", f"tr_{self.cycle()}") or self.store.get("transition", "tr_1"),
             "update": self.update() if company and self.meta["phase"] not in ("new", "objective") else None,
             "audit": self.audit() if self.meta["phase"] in ("delivered", "accepted") else None,
+            "rework_available": self.rework_available() if self.meta["phase"] in ("delivered", "accepted") else None,
             "feedback": self.store.all("feedback"), "live_checks": self.store.all("live_check")[-10:],
             "budget": {"settings": project_settings.get(self.store), "ledger": budget.ledger(self.store)},
             "forecast": forecast,

@@ -61,10 +61,15 @@ async function api(path, body) {
 }
 
 /* act() repaints before fn runs, so handlers read every input they need first, then call act(). */
+// A refusal is shown next to the button that caused it, so it is seen wherever the page is scrolled.
+document.addEventListener("click", (e) => { const b = e.target.closest && e.target.closest("button[id]"); S.lastClick = b ? b.id : ""; }, true);
+// A technical failure is said plainly: what happened, that nothing was made up, and what to do.
+const plainError = (m) => { const k = /^[A-Z]\w*(Error|Exception): /; return k.test(m || "") ? `The AI could not answer (${m.replace(k, "")}). Nothing was invented. Check the AI on the Intelligence screen, then try again.` : m; };
 async function act(fn) {
   if (S.busy) return;
-  S.busy = true; S.err = ""; paint(true);
-  try { await fn(); } catch (e) { S.err = e.message; }
+  const from = S.lastClick || "";
+  S.busy = true; S.err = ""; S.errAt = ""; paint(true);
+  try { await fn(); } catch (e) { S.err = plainError(e.message); S.errAt = from; }
   S.busy = false;
   await refresh(true);
 }
@@ -108,6 +113,11 @@ function paint(force) {
   Object.entries(keep).forEach(([id, v]) => { const el = document.getElementById(id); if (el && el.dataset.keep !== "no") el.value = v; });
   $$("#app details").forEach((el) => { if (opened.has(said(el))) el.open = opened.get(said(el)); });
   if (focus) { const el = document.getElementById(focus); if (el) el.focus(); }
+  if (S.err && S.errAt) {
+    const b = document.getElementById(S.errAt);
+    if (b) (b.closest(".row") || b).insertAdjacentHTML("afterend", `<div class="err err-inline" role="alert">${esc(S.err)}</div>`);
+    else { S.errAt = ""; paint(true); return; }  // the screen changed: the message goes back to the top
+  }
   bind();
 }
 
@@ -175,14 +185,14 @@ function journeyStep() {
 function wizard() {
   const st = S.st, phase = st.meta.phase, obj = st.objective;
   const top = `<div class="wiz-top"><div class="row"><span class="wordmark">Cynqra</span><span class="muted small">${esc(st.company ? st.company.name : "New project")}</span></div>
-    <div class="row"><button class="btn sm" data-reg-open="1">Intelligence (${regModels().filter((m) => m.available).length})</button>${guideToggle()}${modePill()}</div></div>`;
+    <div class="row"><button class="btn sm" data-reg-open="1">Intelligence${(() => { const n = regModels().filter((m) => m.available && m.provider !== "demo").length || ((S.sup && S.sup.environment) || []).length; return n ? ` (${n})` : ""; })()}</button>${guideToggle()}${modePill()}</div></div>`;
   if (phase === "workforce") return `<div class="wiz">${top}${workforceStep()}</div>`;
   if (phase === "founder") return `<div class="wiz">${top}${founderStep()}</div>`;
   if (phase === "planning") return `<div class="wiz">${top}${planStep()}</div>`;
   const scen = scenario();
   const modeChoice = phase === "new" ? `
       <label class="lbl" for="coname">Project name</label>
-      <input type="text" id="coname" value="${esc(scen ? scen.title : "My project")}">
+      <input type="text" id="coname" value="${esc(scen && S.mode === "demo" ? scen.title : "My project")}">
       ${`<div class="modes" role="radiogroup" aria-label="Intelligence">
         <label class="mode ${S.mode === "demo" ? "on" : ""}" id="m-demo"><input type="radio" name="mode" value="demo" ${S.mode === "demo" ? "checked" : ""}>Demo: scripted workers</label>
         <label class="mode ${S.mode === "live" ? "on" : ""}" id="m-live"><input type="radio" name="mode" value="live" ${S.mode === "live" ? "checked" : ""}>Live: real models</label>
@@ -200,10 +210,10 @@ function wizard() {
       <p class="lede">Not a prompt: a vision. Say what you want to build and the outcome you want. Cynqra works out what it takes, and the organisation that can build it around you.</p>
       ${modeChoice}
       <label class="lbl" for="messy">What you want to build, in your own words</label>
-      <textarea class="big" id="messy">${esc(obj ? obj.statement : scen ? scen.messy : "")}</textarea>
+      <textarea class="big" id="messy" placeholder="For example: an app that helps independent gyms fill their empty classes.">${esc(obj ? obj.statement : scen && S.mode === "demo" ? scen.messy : "")}</textarea>
       <div class="row"><button class="btn primary" id="structure" ${S.busy ? "disabled" : ""}>${obj ? "Make the brief again" : "Make it a brief"}</button></div>
-      <div class="err" role="alert">${esc(S.err)}</div>
-      <p class="small muted" style="margin:0">${S.mode === "demo" && phase === "new" || st.meta.mode === "demo"
+      <div class="err" role="alert">${S.errAt ? "" : esc(S.err)}</div>
+      <p class="small muted" style="margin:0">${(phase === "new" ? S.mode === "demo" : st.meta.mode === "demo")
         ? "Demo mode: the words the workers write come from a prepared script, and every screen says so. Code is still written, tested, backtested and deployed for real. Nothing to download or connect."
         : `Live mode: every worker is bound to an intelligence from the ones available, chosen from measured evidence.${isDesktop() ? " A model on this computer takes minutes per step; the Work view shows what it is doing." : ""}`}</p>
     </div>
@@ -253,7 +263,7 @@ function founderStep() {
         ${demo ? `<p class="small muted" style="margin:0">In a demo the founder is part of the script, so these are fixed. In live mode the team is fitted to what you choose.</p>` : ""}</div>
       <div class="between"><label for="f_hours">Your hours a week</label><input type="number" id="f_hours" data-keep="no" min="0" max="100" value="${esc(f.hours_per_week ?? 10)}" style="width:110px"></div>
       <div class="row"><button class="btn primary" id="define-founder" ${S.busy ? "disabled" : ""}>See the team and budget</button></div>
-      <div class="err" role="alert">${esc(S.err)}</div>
+      <div class="err" role="alert">${S.errAt ? "" : esc(S.err)}</div>
     </div>
     <div class="wiz-right"><div class="card stack">
       <h2 style="font-size:20px">The cofounders the plan proposes</h2>
@@ -322,7 +332,7 @@ function workforceStep() {
         <span class="small muted">${demo ? "In a demo the team's words come from a script, so its AI costs nothing." : `The team's AI work is estimated at ${usd(total)} of it.`} The final budget comes with the team, after you define yourself.</span></div>
       <details class="card"><summary><b>How this team was checked</b> <span class="pill ${w.confidence === "high" ? "green" : w.confidence === "low" ? "red" : "amber"}">Confidence: ${esc(w.confidence || "medium")}</span></summary>
         <ul class="small" style="margin:8px 0 0;padding-left:18px">${(w.lines || []).map((l) => `<li>${esc(l)}</li>`).join("")}${cut}${kept}</ul></details>
-      <div class="err" role="alert">${esc(S.err)}</div>
+      <div class="err" role="alert">${S.errAt ? "" : esc(S.err)}</div>
     </div>
     <div class="wiz-right"><div class="card stack">
       <div class="between"><h2 style="font-size:20px">The proposed organisation: ${nSeats(rows)} seats</h2>
@@ -373,20 +383,21 @@ function planStep() {
   return `<div class="wiz-body">
     <div class="wiz-left">
       ${steps(3)}
-      <h1 class="hero">Your team and budget.</h1>
-      <p class="lede">The organisation fitted around you, what it will deliver and when, and what it costs. Nothing starts until you approve. After that, you are asked only what cannot be undone.</p>
+      ${(st.meta.cycle || 1) > 1 ? `<h1 class="hero">Your rework: plan and budget.</h1>
+      <p class="lede">What you asked to change: “${esc((st.meta.cycle_note || "").split("\n")[0])}” The same team plans only this work, priced against your budget. Nothing starts until you approve, and the release you have stays as the way back.</p>` : `<h1 class="hero">Your team and budget.</h1>
+      <p class="lede">The organisation fitted around you, what it will deliver and when, and what it costs. Nothing starts until you approve. After that, you are asked only what cannot be undone.</p>`}
       <div class="card stack"><div class="between"><div class="caps">Budget</div><b class="mono">${usd(f.total_usd)} of ${usd(f.cap_usd)}</b></div>
         <details><summary class="small">How it adds up</summary>${budgetTable(f)}</details></div>
       <div class="card stack"><div class="between"><div class="caps">Timeline</div><span class="small">about ${days} days</span></div>${timeline}</div>
       ${fitCard(mine)}
-      <div class="err" role="alert">${esc(S.err)}</div>
+      <div class="err" role="alert">${S.errAt ? "" : esc(S.err)}</div>
     </div>
     <div class="wiz-right"><div class="card stack">
       <h2 style="font-size:20px">Your organisation: ${(st.workers || []).length} members</h2>
       ${orgChart(st.workers || [])}
       <details><summary class="small">Every task, in order (${tasks.length})</summary>
         <div class="tscroll"><table class="plan-table"><thead><tr><th>Task and how it is accepted</th><th>Who</th><th>Risk</th><th>How it is checked</th></tr></thead><tbody>${ms}</tbody></table></div></details>
-      <div class="row"><button class="btn primary" id="approve-plan" data-id="${esc(d ? d.id : "")}" ${S.busy || !d ? "disabled" : ""}>Approve the team and budget</button>
+      <div class="row"><button class="btn primary" id="approve-plan" data-id="${esc(d ? d.id : "")}" ${S.busy || !d ? "disabled" : ""}>${(st.meta.cycle || 1) > 1 ? "Approve the rework plan" : "Approve the team and budget"}</button>
         <button class="btn" id="replan" data-id="${esc(d ? d.id : "")}" ${S.busy || !d ? "disabled" : ""}>Ask for a different plan</button></div>
     </div></div></div>`;
 }
@@ -428,9 +439,12 @@ function modelBanner() {
 /* Where a live run's intelligence comes from, on the first screen. */
 function intelSources() {
   const avail = regModels().filter((m) => m.available), conns = supConns().filter((c) => c.origin !== "demo");
-  return `<div class="card stack" style="padding:14px 16px"><div class="between"><b>Intelligence available</b><span class="pill ${avail.length ? "teal" : "warn"}">${avail.length} model${avail.length === 1 ? "" : "s"}</span></div>
+  const env = ((S.sup && S.sup.environment) || []).filter((n) => !conns.some((c) => c.name === n));
+  const n = avail.length || env.length;
+  return `<div class="card stack" style="padding:14px 16px"><div class="between"><b>Intelligence available</b><span class="pill ${n ? "teal" : "amber"}">${avail.length ? `${avail.length} model${avail.length === 1 ? "" : "s"}` : env.length ? `${env.length} source${env.length === 1 ? "" : "s"}` : "None yet"}</span></div>
     <span class="small muted">${avail.length ? `From ${esc(conns.filter((c) => avail.some((m) => m.connection_id === c.id)).map((c) => c.name).join(", "))}. Cynqra picks which one powers each worker from measured evidence.`
-      : "None yet. Download an open model to this computer, or connect a provider such as Hugging Face, OpenAI or Anthropic."}</span>
+      : env.length ? `From this computer's settings: ${esc(env.join(", "))}. Connected when you start; Cynqra picks which model powers each worker from measured evidence.`
+      : "Download an open model to this computer, or connect a provider such as Hugging Face, OpenAI or Anthropic."}</span>
     <div class="row wrap" style="gap:8px">${isDesktop() ? `<button class="btn sm" data-model-open="1">Models on this computer</button>` : ""}<button class="btn sm" data-reg-open="1">Connect a provider</button></div></div>`;
 }
 
@@ -491,7 +505,7 @@ function modelScreen() {
         <div class="kv"><span>Memory</span><span>${r.ram_gb ? `${r.ram_gb} GB` : "unknown"}</span></div>
         <div class="kv"><span>Model server</span><span>llama.cpp, ${esc((r.servers || []).join(", ") || "missing")}</span></div>${accel}</div>
       ${modelStatus()}
-      <div class="err" role="alert">${esc(S.err)}</div>
+      <div class="err" role="alert">${S.errAt ? "" : esc(S.err)}</div>
     </div><div class="wiz-right"><div class="stack">${cards}</div>
       <p class="small muted">Models come from their publishers on Hugging Face (Unsloth quantizations of Alibaba's Qwen models, Apache 2.0). Which model suits which computer comes from Cynqra's September 2026 research.</p></div></div></div>`;
 }
@@ -500,8 +514,8 @@ function modelScreen() {
 function modePill() {
   const st = S.st;
   if (st.meta.mode === "live" || (st.meta.phase === "new" && S.mode === "live")) {
-    const n = regModels().filter((m) => m.available).length;
-    return `<span class="pill blue">Live mode: ${n} intelligence source${n === 1 ? "" : "s"} available</span>`;
+    const n = regModels().filter((m) => m.available).length || ((S.sup && S.sup.environment) || []).length;
+    return `<span class="pill blue">Live mode: ${n ? `${n} intelligence source${n === 1 ? "" : "s"} available` : "no AI connected yet"}</span>`;
   }
   return `<span class="pill amber">Demo mode: scripted workers</span>`;
 }
@@ -544,7 +558,7 @@ function shell() {
           <button class="btn sm" id="step" ${!running || st.auto.on || S.busy ? "disabled" : ""}>Step</button>
           <button class="btn sm ${st.auto.on ? "" : "primary"}" id="auto" ${!running ? "disabled" : ""}>${st.auto.on ? "Pause" : "Run"}</button>
         </div></header>
-      <div class="view">${modelBanner()}${S.err ? `<div class="err" role="alert">${esc(S.err)}</div>` : ""}${st.meta.notice ? `<div class="notice">${esc(st.meta.notice)}${st.meta.phase === "stopped_error" ? ` <button class="btn sm primary" id="resume" ${S.busy ? "disabled" : ""}>Try the same step again</button>` : ""}</div>` : ""}${views[S.view]()}</div>
+      <div class="view">${modelBanner()}${S.err && !S.errAt && !(st.meta.notice || "").includes(S.err) ? `<div class="err" role="alert">${esc(S.err)}</div>` : ""}${st.meta.notice ? `<div class="notice ${st.meta.phase === "stopped_error" || st.meta.frozen ? "warn" : ""}">${esc(st.meta.notice)}${st.meta.phase === "stopped_error" ? ` <button class="btn sm primary" id="resume" ${S.busy ? "disabled" : ""}>Try the same step again</button>` : ""}</div>` : ""}${views[S.view]()}</div>
     </main></div>`;
 }
 
@@ -811,7 +825,7 @@ function vIntelligence() {
 function regScreen() {
   return `<div class="wiz"><div class="wiz-top"><div class="row"><span class="wordmark">Cynqra</span><span class="muted small">Intelligence</span></div>
     <div class="row"><button class="btn sm primary" data-reg-close="1">Done</button></div></div>
-    <div class="view">${S.err ? `<div class="err" role="alert">${esc(S.err)}</div>` : ""}${vIntelligence()}</div></div>`;
+    <div class="view">${S.err && !S.errAt ? `<div class="err" role="alert">${esc(S.err)}</div>` : ""}${vIntelligence()}</div></div>`;
 }
 
 function graphAnswer(g) {
@@ -941,7 +955,8 @@ function vDelivery() {
     <details ${a.met === a.total ? "" : "open"}><summary class="small">Every requirement</summary>${a.requirements.map((r) => `<div class="kv"><span>${esc(r.text)}</span><span style="color:${r.met ? "var(--green)" : "var(--amber-ink)"};font-weight:600">${r.met ? "met" : "open"}</span></div>`).join("")}</details>
     <label class="lbl" for="rw_note">What needs to change?</label><textarea class="note" id="rw_note" data-keep="yes" placeholder="Say what is not right, or what the product should do differently."></textarea>
     <div class="between"><label for="rw_usd">Add to the budget for the rework, US dollars</label><input type="number" id="rw_usd" data-keep="yes" min="0" step="0.5" value="1" style="width:110px"></div>
-    <div class="row"><button class="btn" id="rework" ${S.busy ? "disabled" : ""}>Rework it</button>
+    ${st.rework_available === false ? `<p class="small muted" style="margin:0">This demo's script covers the first release only, so it cannot build a rework. In live mode the same team plans, builds and releases what you ask for.</p>` : ""}
+    <div class="row"><button class="btn" id="rework" ${S.busy || st.rework_available === false ? "disabled" : ""}>Rework it</button>
       ${acc ? `<button class="btn primary" data-decide="approve" data-id="${acc.id}" ${S.busy ? "disabled" : ""}>Accept the product</button>` : st.meta.phase === "accepted" ? `<span class="pill green">Accepted</span>` : ""}</div></div>` : "";
   const handed = ready && st.final ? `<details class="card"><summary><b>Everything handed over</b> <span class="small muted">documents, decisions, costs</span></summary>
     <div class="stack" style="margin-top:10px">${companyPack(st.final)}${finalReport()}</div></details>` : "";
@@ -954,7 +969,16 @@ function bind() {
   const fit = (t) => { t.style.height = "auto"; t.style.height = t.scrollHeight + 2 + "px"; };
   $$(".field textarea").forEach((t) => { fit(t); t.addEventListener("input", () => fit(t)); });
   $$("[data-view]").forEach((b) => b.onclick = () => { S.view = b.dataset.view; S.err = ""; if (S.view === "audit") loadReplay().then(() => paint(true)); paint(true); });
-  $$(".mode input").forEach((r) => r.onchange = () => { if (r.checked) S.mode = r.value; paint(true); });
+  $$(".mode input").forEach((r) => r.onchange = () => {
+    if (!r.checked) return;
+    S.mode = r.value;
+    const x = scenario(), m = $("#messy"), c = $("#coname");  // live mode starts from your idea, not the demo's
+    if (x && m && c) {
+      if (r.value === "live" && m.value === x.messy) { m.value = ""; if (c.value === x.title) c.value = "My project"; }
+      if (r.value === "demo" && !m.value.trim()) { m.value = x.messy; c.value = x.title; }
+    }
+    paint(true);
+  });
   const sc = $("#scenario");
   if (sc) sc.onchange = () => { S.scenario = sc.value; const x = scenario(); if (x) { $("#messy").value = x.messy; $("#coname").value = x.title; } paint(true); };
   const on = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };

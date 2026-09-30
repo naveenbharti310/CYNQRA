@@ -89,6 +89,7 @@ textarea.big{height:150px;font-size:17px;line-height:1.5;resize:none;padding:16p
 .tag.stated{color:var(--green)}
 .tag.inferred{color:var(--amber-ink)}
 .notice{padding:12px 14px;border-radius:10px;background:var(--blue-soft);color:var(--blue);font-size:14px}
+.notice.warn{background:var(--amber-bg);color:var(--amber-ink);border:1px solid var(--amber-line)}
 .err{color:var(--red);min-height:1.4em;font-size:14px}
 .plan-table{width:100%;border-collapse:collapse;font-size:14px}
 .plan-table th{text-align:left;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;padding:8px 10px;border-bottom:1px solid var(--line)}
@@ -383,3 +384,37 @@ ol.journey .jn{flex:none;width:26px;height:26px;border-radius:50%;display:inline
   .fld.wide{grid-column:auto}
   .tcols{grid-template-columns:1fr}
 }
+
+/* ---- re-audit (30 Sep 2026): tablets, small phones, long words, the sidebar under the guide ---- */
+.grid2{grid-template-columns:repeat(auto-fit,minmax(min(340px,100%),1fr))}
+.dgrid p,.kv span,.tcard,.needs span{overflow-wrap:anywhere}
+.guide-body{max-width:80ch}
+.view p,.card p{max-width:80ch}
+.view .ok-banner,.view .notice,.view .err{max-width:none}
+/* the sidebar scrolls within itself, so its last buttons never sit under the guide bar */
+@media (min-width:901px){nav.side{overflow-y:auto}}
+@media (max-width:1180px){
+  .stepper{grid-template-columns:repeat(5,minmax(0,1fr))}
+  .cols{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .list-row>span:first-child{flex:1;min-width:0}
+  .list-row>span:last-child{text-align:right;max-width:55%;white-space:normal}
+  nav.side button.nav.minor{min-height:40px}
+  .btn.sm{min-height:40px}
+}
+/* tablet: the menu moves to a strip at the top, as on a phone, so the page keeps its full width */
+@media (max-width:900px){
+  .shell{flex-direction:column;background:none}
+  nav.side{width:100%;height:auto!important;position:static;flex-direction:row;flex-wrap:nowrap;overflow-x:auto;align-items:center;gap:4px;padding:8px 12px;border-right:0;border-bottom:1px solid var(--line);scrollbar-width:none}
+  nav.side .brand,nav.side .nav-more,nav.side .foot .pill{display:none}
+  nav.side button.nav,nav.side button.nav.minor{flex:none;min-height:44px;padding:0 14px;font-size:14px;color:var(--ink);white-space:nowrap}
+  nav.side .foot{margin-top:0;flex:none;flex-direction:row;flex-wrap:nowrap;padding:0 0 0 8px;gap:6px}
+  #app.with-guide nav.side{height:auto}
+  .two{grid-template-columns:1fr}
+  .btn.sm{min-height:44px}
+  summary{padding:13px 0}
+  input[type=text],input[type=number],input[type=password],select{min-height:44px}
+}
+.err-inline{padding:8px 12px;border-radius:8px;background:var(--red-soft);min-height:0;overflow-wrap:anywhere}
+@media (max-width:900px){summary{min-height:44px}}
+.wiz-body>.card{flex:1 1 0;min-width:0}
+.wiz-right>.start-panel{flex:none;align-self:stretch}

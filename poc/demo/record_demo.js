@@ -473,7 +473,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await spot('[data-step="refine"] > .between');
   await say("The audit: every requirement of your original objective, the work that answers it, and whether that work passed its checks.", "Audit");
   await spot(['[data-step="refine"] label[for="rw_note"]', "#rw_note", "#rework"], "", { merge: true });
-  await say("Anything not right? Say what should change, and the same team reworks it, priced and approved like the first time.", "Refine");
+  await say("Anything not right? Say what should change, and the same team reworks it, priced and approved like the first time. This demo's script covers the first release; live mode builds the rework.", "Refine");
   await unsay();
   await clear();
   await click('[data-step="refine"] button[data-decide="approve"]');

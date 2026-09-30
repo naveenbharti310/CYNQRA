@@ -115,8 +115,12 @@ class IntelligenceSupply:
         return self.adapters[conn["type"]].reachable(conn, entry)
 
     def snapshot(self) -> dict:
+        try:  # what this computer's settings name, connected when a live project starts
+            env = [s["name"] for s in self.adapters.environment_specs()]
+        except Exception:  # noqa: BLE001 - a setting that cannot be read names nothing
+            env = []
         return {"connections": [self.connections.public(c["id"]) for c in self.connections.all()],
-                "intelligence": self.registry.snapshot(), "provider_types": adapter_types()}
+                "intelligence": self.registry.snapshot(), "provider_types": adapter_types(), "environment": env}
 
     def close(self) -> None:
         self.store.close()
