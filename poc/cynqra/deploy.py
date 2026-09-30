@@ -203,7 +203,7 @@ def build_to_verify(main: Path, releases: Path, release_id: str, smoke_checks: l
 
 def deploy_live(folder: Path, data_dir: Path, smoke_checks: list[dict], previous: subprocess.Popen | None) -> dict:
     """DEPLOY to LIVE, run only after the founder approved. Rolls back on failure."""
-    log = [{"stage": "APPROVAL", "ok": True, "note": "founder approved (D-21)"}]
+    log = [{"stage": "APPROVAL", "ok": True, "note": "approved by you (D-21)"}]
     port = free_port()
     data_dir.mkdir(parents=True, exist_ok=True)
     proc = start(Path(folder), port, data_dir / "data.json", data_dir / "app.log")

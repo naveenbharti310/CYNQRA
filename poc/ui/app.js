@@ -5,7 +5,7 @@
 const S = {
   teamOption: "recommended",
   st: null, view: "company", worker: null, replayTask: null, replay: null, replayKey: "",
-  seen: -1, sig: "", err: "", busy: false, graph: null, browse: {}, answers: {}, budgetGiven: false, mode: "live", shown: new Set(), guide: true, modelOpen: false,
+  seen: -1, sig: "", err: "", busy: false, graph: null, browse: {}, inv: {}, answers: {}, budgetGiven: false, mode: "live", shown: new Set(), guide: true, modelOpen: false,
   regOpen: false, probes: {}, sup: null, scenario: "bluedip",
 };
 /* Cards animate in only the first time they appear; a repaint must not replay it for every card. */
@@ -31,7 +31,7 @@ const AREA_TITLE = { business: "Business", market: "Market", finance: "Finance",
 const ACT_TITLE = { write_file: "Write files", run_tests: "Run tests", assign_task: "Hand out work", product_rule_decision: "Decide a product rule",
   merge_to_main: "Merge code", deploy_production: "Put the product live", external_message: "Message anyone outside the company" };
 const CONSTRAINTS = [["deadline", "Deadline"], ["geography", "Geography"], ["technology", "Technology"], ["compliance", "Compliance"], ["risk_tolerance", "Risk tolerance"]];
-const SERVICE_TITLE = { orchestrator: "Orchestrator", verification: "Verification", founder: "Founder", budget_engine: "Budget Engine",
+const SERVICE_TITLE = { orchestrator: "Orchestrator", verification: "Verification", founder: "You", budget_engine: "Budget Engine",
   workforce_synthesizer: "Workforce Synthesizer", execution_planner: "Execution Planner", replacement_engine: "Replacement Engine",
   objective_intelligence: "Objective Intelligence", intelligence_router: "Intelligence Router" };
 // the founder's views first; the machinery behind them after "More"
@@ -234,7 +234,7 @@ function parseIdea(text) {
 }
 function ideaInputs(obj, scen, phase) {
   const demo = phase === "new" ? S.mode === "demo" : S.st.meta.mode === "demo";
-  if (demo) return `<label class="lbl" for="messy">What the founder in this demo wants, in their own words</label>
+  if (demo) return `<label class="lbl" for="messy">What the person in this demo wants, in their own words</label>
       <textarea class="big" id="messy">${esc(obj ? obj.statement : scen ? scen.messy : "")}</textarea>`;
   const a = Object.keys(S.answers).length > 1 ? S.answers : { ...parseIdea(obj ? obj.statement : ""), ...S.answers };
   return QUESTIONS.map(([k, q, ph, req]) => `<label class="lbl" for="q_${k}">${esc(q)}</label>
@@ -283,7 +283,7 @@ function founderStep() {
       <textarea class="big" id="f_background" data-keep="yes" placeholder="For example: ten years as a backend engineer; I know the customers because I was one.">${esc(f.background || "")}</textarea>
       <div class="stack" style="gap:8px"><span class="lbl">What you lead yourself</span>
         ${LEADS.map(([k, l, n]) => `<label class="lead-opt ${off ? "off" : ""}"><input type="checkbox" data-founder-lead="${k}" data-keep="no" ${off} ${leads.includes(k) ? "checked" : ""}><span>${l} <span class="muted">(${n})</span></span></label>`).join("")}
-        ${demo ? `<p class="small muted" style="margin:0">In a demo the founder is part of the script, so these are fixed. In live mode the team is fitted to what you choose.</p>` : ""}</div>
+        ${demo ? `<p class="small muted" style="margin:0">In a demo your part is scripted, so these are fixed. In live mode the team is fitted to what you choose.</p>` : ""}</div>
       <div class="between"><label for="f_hours">Your hours a week</label><input type="number" id="f_hours" data-keep="no" min="0" max="100" value="${esc(f.hours_per_week ?? 10)}" style="width:110px"></div>
       <div class="row"><button class="btn primary" id="define-founder" ${S.busy ? "disabled" : ""}>See the team and budget</button></div>
       <div class="err" role="alert">${S.errAt ? "" : esc(S.err)}</div>
@@ -299,7 +299,7 @@ function founderStep() {
 function orgChart(workers) {
   const kids = (id) => workers.filter((w) => (w.reports_to || "founder") === id);
   const node = (w) => `<li><div class="onode${w.tier === "cofounder" ? " cofounder" : ""}"><b>${esc(w.name || seatOf(w))}</b><small>${esc([w.name ? `AI ${seatOf(w)}` : "", w.tier === "cofounder" ? "cofounder" : w.led_by_founder ? "reports to you: you lead this area" : "", w.model || ""].filter(Boolean).join(" · "))}</small></div>${kids(w.id).length ? `<ul>${kids(w.id).map(node).join("")}</ul>` : ""}</li>`;
-  return `<div class="ochart"><div class="onode founder"><b>You, the founder</b><small>the vision and the calls that cannot be undone</small></div><ul class="otop">${kids("founder").map(node).join("")}</ul></div>`;
+  return `<div class="ochart"><div class="onode founder"><b>You</b><small>the vision and the calls that cannot be undone</small></div><ul class="otop">${kids("founder").map(node).join("")}</ul></div>`;
 }
 
 function reqList(req) {
@@ -647,7 +647,7 @@ function vOrg() {
   // each cofounder a column with the team it leads, as on the plan: who reports to whom reads at a glance
   const col = (c) => `<div class="tcol">${node(c.id, c.tier === "cofounder" ? "cofounder" : c.led_by_founder ? "you lead this area" : "")}<div class="tmembers">${kids(c.id).map((x) => node(x.id, "")).join("")}</div></div>`;
   return `<div class="org"><div class="card tree">
-      <div class="node founder"><b>You, the founder</b><small>The vision, the budget, and the calls that cannot be undone</small></div>
+      <div class="node founder"><b>You</b><small>The vision, the budget, and the calls that cannot be undone</small></div>
       <div class="tcols">${kids("founder").map(col).join("")}</div>
       <div class="node svc"><b>Verification Service</b><small style="color:var(--accent-ink)">Not a person. Checks every piece of work: tests, lint, review</small></div>
       <div class="card stack" style="margin-top:28px;width:100%;background:var(--paper);border:0">
@@ -766,60 +766,38 @@ function finalReport() {
       Every worker's scorecard is in <button class="btn sm" data-view="performance">Performance</button>.</div></div>`;
 }
 
-function modelName(id) { const m = regModels().find((x) => x.id === id); return m ? m.name : id; }
+function modelName(x) { const m = x && typeof x === "object" ? x : regModels().find((r) => r.id === x); return m ? (m.display_name || m.name || "") : (x || ""); }
 
 function perfRows(perf) {
   const row = (label, s) => `<tr><td>${esc(label)}</td><td class="mono">${s.attempts}</td><td class="mono">${pctx(s.success_rate)}</td><td class="mono">${pctx(s.first_pass_rate)}</td>
     <td class="mono">${usd(s.usd_per_attempt)}</td><td class="mono">${s.seconds_per_attempt === null ? "n/a" : (s.seconds_per_attempt / 60).toFixed(1) + " min"}</td></tr>`;
   const kinds = Object.entries(perf.by_task_kind || {});
-  if (!perf.overall.attempts) return `<p class="small muted">No measured work yet. Probe it, or let it work: every verification it gets is recorded here.</p>`;
+  if (!perf.overall.attempts) return `<p class="small muted">No measured work yet. Evaluate it, or let it work: every check of its work is recorded here.</p>`;
   return `<div class="tscroll"><table class="tbl"><thead><tr><th>Work</th><th>Attempts</th><th>Verified</th><th>First pass</th><th>Cost/attempt</th><th>Time/attempt</th></tr></thead><tbody>
     ${row("All", perf.overall)}${kinds.map(([k, s]) => row(k, s)).join("")}</tbody></table></div>`;
 }
 
+// An access provider: how intelligence is reached. Customer words only; the key itself is never shown.
 function connCard(c) {
   const cr = c.credential || {}, offered = regModels().filter((m) => m.connection_id === c.id && m.status !== "retired");
-  const auth = cr.method === "env" ? `key in the environment variable ${cr.env_var}` : cr.method === "secret" ? "key kept in Cynqra's secrets file" : "no key";
+  const cred = cr.method === "none" ? "Not needed" : !cr.present ? "Missing: connect again with your key"
+    : cr.method === "env" ? "Read from this computer's settings" : "Securely stored";
+  const by = c.origin === "environment" ? "From this computer's settings" : c.origin === "app" ? "Built into Cynqra" : c.origin === "demo" ? "Part of the demo" : "Connected by you";
+  const ok = c.status === "connected";
+  const evaluating = offered.filter((m) => ["queued", "running"].includes((S.probes[m.id] || {}).state)).length;
   return `<div class="card stack mcard">
-    <div class="between"><div><span class="caps">${esc(PTYPE[c.type] || c.type)}${c.server ? " · " + esc(c.server) : ""}</span><h2 style="font-size:17px">${esc(c.name)}</h2></div>
-      <span class="pill ${c.status === "connected" ? "teal" : "warn"}">${esc(c.status)}</span></div>
-    ${c.endpoint ? `<div class="kv"><span>Endpoint</span><span class="mono small">${esc(c.endpoint)}</span></div>` : ""}
-    <div class="kv"><span>Credential</span><span>${cr.method === "none" ? "none needed" : `${esc(auth)}: ${cr.present ? "present" : esc(cr.status || "missing")}`}</span></div>
-    <div class="kv"><span>Offers</span><span>${offered.length ? esc(offered.slice(0, 6).map((m) => m.name).join(", ")) + (offered.length > 6 ? ` and ${offered.length - 6} more` : "") : "nothing yet"}</span></div>
-    ${c.rate_limits && c.rate_limits.calls_per_minute ? `<div class="kv"><span>Rate limit</span><span>${esc(c.rate_limits.calls_per_minute)} calls per minute</span></div>` : ""}
-    <div class="kv"><span>Added</span><span>${esc(c.permission)}</span></div>
-    ${c.status_note ? `<p class="small muted" style="margin:0">${esc(c.status_note)}</p>` : ""}
-    ${(() => { const ids = offered.map((m) => m.id), q = ids.filter((i) => ["queued", "running"].includes((S.probes[i] || {}).state)).length;
-      return q ? `<div class="notice small">Evaluating ${q} of ${ids.length} model${ids.length === 1 ? "" : "s"} on Cynqra's own work. Nothing is assigned on a name or a default.</div>` : ""; })()}
+    <div class="between"><div><span class="caps">Access provider</span><h2 style="font-size:17px">${esc(c.name)}</h2></div>
+      <span class="pill ${ok ? "teal" : "warn"}">${ok ? "Connected" : "Needs attention"}</span></div>
+    <div class="kv"><span>Credential</span><span>${esc(cred)}</span></div>
+    <div class="kv"><span>Intelligence available</span><span>${offered.length}${evaluating ? `, ${evaluating} being evaluated` : ""}</span></div>
+    <div class="kv"><span>Rate limit</span><span>${c.rate_limits && c.rate_limits.calls_per_minute ? `${esc(c.rate_limits.calls_per_minute)} calls per minute` : "Not set"}</span></div>
+    <div class="kv"><span>Added</span><span>${esc(by)}</span></div>
+    ${!ok && c.status_note ? `<div class="notice warn small">${esc(c.status_note)}</div>` : ""}
     ${browser(c)}
-    <div class="row wrap" style="gap:8px">${c.origin === "demo" || c.type === "local" ? "" : `<button class="btn sm" data-browse="${esc(c.id)}">${S.browse[c.id] ? "Close the model list" : "Search and choose models"}</button>`}<button class="btn sm" data-discover="${esc(c.id)}">Discover again</button>
-      ${c.origin === "demo" ? "" : `<button class="btn sm" data-disconnect="${esc(c.id)}">Remove</button>`}</div></div>`;
-}
-
-function intelCard(m) {
-  const pr = S.probes[m.id] || {}, o = m.performance.overall, f = m.fault || {};
-  const others = regModels().filter((x) => x.id !== m.id && x.status !== "retired");
-  return `<div class="card stack mcard">
-    <div class="between"><div><span class="caps">${esc(connName(m.connection_id))}</span><h2 style="font-size:20px">${esc(m.name)}</h2></div>
-      <span class="pill ${m.available ? "teal" : "warn"}">${m.available ? "Available" : esc(m.availability)}</span></div>
-    <div class="kv"><span>Serves</span><span class="mono small">${esc(m.ref)}${m.version ? " · version " + esc(m.version) : ""}</span></div>
-    <div class="kv"><span>Provider, licence</span><span>${esc(m.provider || "n/a")}, ${esc(m.license || "n/a")}</span></div>
-    <div class="kv"><span>Context, hardware</span><span>${esc(m.context || "n/a")} tokens, ${esc(m.hardware || "n/a")}</span></div>
-    <div class="kv"><span>Price</span><span class="mono">${m.local ? `$${m.compute_usd_per_hour}/h of this computer` : `$${m.price_in} in, $${m.price_out} out per M tokens`}</span></div>
-    <div class="kv"><span>Regression check</span><span>${esc((m.regression || {}).status || "n/a")}</span></div>
-    <div class="kv"><span>Calls, errors, speed</span><span class="mono">${o.calls}, ${o.call_errors}, ${o.write_tps ? o.write_tps + " tokens/s" : "n/a"}</span></div>
-    ${evalLine(m, pr)}
-    <h3 style="font-size:14px;margin-top:4px">Measured on Cynqra's work</h3>${perfRows(m.performance)}
-    ${Object.keys(f).length ? `<div class="notice small">Fault set: ${f.offline ? "offline" : ""}${f.offline && f.max_reply ? ", " : ""}${f.max_reply ? `replies capped at ${f.max_reply} tokens` : ""}</div>` : ""}
-    <div class="row wrap" style="gap:8px">
-      <button class="btn sm" data-probe="${esc(m.id)}" ${["running", "queued"].includes(pr.state) ? "disabled" : ""}>${pr.state === "running" ? "Evaluating..." : pr.state === "queued" ? "Waiting to be evaluated" : o.calls ? "Evaluate again" : "Evaluate it"}</button>
-      <button class="btn sm" data-fault-off="${esc(m.id)}" data-on="${f.offline ? "0" : "1"}">${f.offline ? "Bring back online" : "Take offline"}</button>
-      <input type="number" id="cap_${esc(m.id)}" min="0" step="10" placeholder="reply cap" value="${esc(f.max_reply || "")}" style="width:100px" aria-label="Reply cap in tokens">
-      <button class="btn sm" data-fault-cap="${esc(m.id)}">Set reply cap</button>
-      <select id="fb_${esc(m.id)}" aria-label="Fallback"><option value="">No fallback</option>${others.map((x) => `<option value="${esc(x.id)}" ${x.id === m.fallback_id ? "selected" : ""}>Fallback: ${esc(x.name)}</option>`).join("")}</select>
-      <button class="btn sm" data-fallback="${esc(m.id)}">Set fallback</button>
-      <button class="btn sm" data-retire="${esc(m.id)}">Retire</button></div>
-    ${pr.log && pr.log.length ? `<pre class="log">${esc(pr.log.join("\n"))}${pr.error ? "\n" + esc(pr.error) : ""}</pre>` : ""}</div>`;
+    <div class="row wrap" style="gap:8px">${c.origin === "demo" || c.type === "local" ? "" : `<button class="btn sm" data-browse="${esc(c.id)}">${S.browse[c.id] ? "Close" : "Add or remove models"}</button>`}<button class="btn sm" data-discover="${esc(c.id)}">Check for new models</button>
+      ${c.origin === "demo" ? "" : `<button class="btn sm" data-disconnect="${esc(c.id)}">Disconnect</button>`}</div>
+    <details class="small muted"><summary>Technical details</summary><div class="kv"><span>Type</span><span>${esc(PTYPE[c.type] || c.type)}${c.server ? " · " + esc(c.server) : ""}</span></div>
+      ${c.endpoint ? `<div class="kv"><span>Endpoint</span><span class="mono small">${esc(c.endpoint)}</span></div>` : ""}</details></div>`;
 }
 
 // Cynqra evaluates every connected model on its own work before relying on it: planning a founder's words into a
@@ -853,32 +831,127 @@ function browser(c) {
       <button class="btn sm primary" data-mb-save="${esc(c.id)}" ${S.busy ? "disabled" : ""}>Use the chosen models</button></div></div>`;
 }
 
+/* ---------- Intelligence: what Cynqra can put to work ----------
+   Every row is an entry of the Intelligence Registry, discovered through a connected access provider and normalized:
+   the model, its publisher and the access provider it is reached through are separate facts. Nothing here comes from
+   a list written into Cynqra, and there is no default: Cynqra evaluates what is connected and assigns it. */
+const TYPE_OF = (m) => m.type || (m.local ? "On this computer" : "General");
+function statusOf(m) {
+  const pr = S.probes[m.id] || {}, o = m.performance.overall;
+  if (!m.available) return ["warn", m.availability === "offline" ? "Offline" : "Unavailable"];
+  if (pr.state === "running") return ["", "Being evaluated"];
+  if (pr.state === "queued") return ["", "Waiting for evaluation"];
+  if (o.attempts) return ["teal", `Evaluated · ${pctx(o.success_rate)} verified`];
+  return ["teal", "Connected"];
+}
+function hay(m) {
+  const caps = m.capabilities || [];
+  return [modelName(m), m.ref, m.publisher_name, m.publisher, m.access_provider, TYPE_OF(m), caps.join(" "),
+    caps.includes("document reading") ? "ocr documents pdf" : "", caps.includes("coding") ? "code coder" : "",
+    (m.input_modalities || []).join(" "), m.speed === "fast" ? "fast quick low latency" : "", m.description, statusOf(m)[1]]
+    .join(" ").toLowerCase();
+}
+const INV_FILTERS = [
+  ["provider", "Access provider", (m) => [m.access_provider || connName(m.connection_id)]],
+  ["publisher", "Publisher", (m) => [m.publisher_name || "Unknown"]],
+  ["cap", "Capability", (m) => m.capabilities || []],
+  ["speed", "Speed", (m) => [m.speed === "fast" || (m.performance.overall.write_tps || 0) >= 40 ? "Fast" : "Standard"]],
+  ["cost", "Cost", (m) => [m.local ? "On this computer" : (m.price_in || m.price_out) ? "Paid per token" : "Free with your key"]],
+  ["context", "Context", (m) => m.context >= 1000000 ? ["1M tokens or more", "128K or more"] : m.context >= 128000 ? ["128K or more"] : [m.context ? "Under 128K" : "Unknown"]],
+  ["modality", "Input", (m) => m.input_modalities || m.modalities || ["text"]]];
+function invModels() {
+  return regModels().filter((m) => m.status !== "retired" && m.runtime !== "scripted");
+}
+function invRows() {
+  const q = (S.inv.q || "").toLowerCase().split(/\s+/).filter(Boolean);
+  return invModels().filter((m) => INV_FILTERS.every(([k, , f]) => !S.inv[k] || f(m).includes(S.inv[k])) && q.every((t) => hay(m).includes(t)))
+    .sort((x, y) => (y.released || 0) - (x.released || 0) || modelName(x).localeCompare(modelName(y)));
+}
+function inventory() {
+  const all = invModels();
+  if (!all.length) return `<div class="card stack"><span class="caps">Cynqra intelligence</span><h2 style="font-size:22px">No intelligence yet</h2>
+    <p class="muted" style="margin:0">Connect an AI provider below. Cynqra discovers the models it offers, evaluates them on its own work, and chooses which one powers each member of your team.</p></div>`;
+  const opts = (k, label, f) => { const vals = [...new Set(all.flatMap(f))].filter(Boolean).sort();
+    return `<label class="fld"><span>${esc(label)}</span><select data-inv="${k}"><option value="">Any</option>${vals.map((v) => `<option ${S.inv[k] === v ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label>`; };
+  const rows = invRows();
+  const row = (m) => { const [cls, st] = statusOf(m);
+    return `<tr class="inv-row ${S.inv.open === m.id ? "on" : ""}" data-inv-open="${esc(m.id)}" data-hay="${esc(hay(m))}" tabindex="0">
+      <td><b>${esc(modelName(m))}</b>${m.speed === "fast" ? ' <span class="pill">Fast</span>' : ""}<div class="small muted mono">${esc(m.ref)}</div></td>
+      <td>${esc(m.publisher_name || "Unknown")}</td><td>${esc(TYPE_OF(m))}</td><td>${esc(m.access_provider || connName(m.connection_id))}</td>
+      <td><span class="pill ${cls}">${esc(st)}</span></td></tr>`; };
+  const open = all.find((m) => m.id === S.inv.open);
+  return `<div class="card stack">
+    <div class="between wrap"><div><span class="caps">Cynqra intelligence</span><h2 style="font-size:22px">${all.length} model${all.length === 1 ? "" : "s"} ready to work</h2></div>
+      <span class="small muted">No default: Cynqra evaluates each one and assigns it to the work it does best.</span></div>
+    <input type="search" id="inv_q" placeholder="Search intelligence: coding, reasoning, fast, OCR, multimodal, Kimi, Google..." value="${esc(S.inv.q || "")}" aria-label="Search intelligence">
+    <div class="form-grid inv-filters">${INV_FILTERS.map(([k, l, f]) => opts(k, l, f)).join("")}</div>
+    ${rows.length ? `<div class="tscroll"><table class="tbl inv"><thead><tr><th>Model</th><th>Publisher</th><th>Type</th><th>Access provider</th><th>Status</th></tr></thead>
+      <tbody>${rows.map(row).join("")}</tbody></table></div>` : `<p class="muted" style="margin:0">Nothing matches. Clear the search or a filter.</p>`}
+    ${open ? intelDetail(open) : ""}</div>`;
+}
+function intelDetail(m) {
+  const pr = S.probes[m.id] || {}, o = m.performance.overall, f = m.fault || {}, caps = m.capabilities || [];
+  const others = invModels().filter((x) => x.id !== m.id);
+  const month = (t) => t ? new Date(t * 1000).toLocaleDateString(undefined, { month: "long", year: "numeric" }) : "Unknown";
+  const cost = m.local ? `This computer's time, $${m.compute_usd_per_hour} an hour` : (m.price_in || m.price_out)
+    ? `$${m.price_in} in, $${m.price_out} out per million tokens` : "Free with your key";
+  const list = m.list_price_in != null ? ` (list price elsewhere: $${m.list_price_in} in, $${m.list_price_out} out per million tokens)` : "";
+  const speed = o.write_tps ? `${o.write_tps} tokens a second measured${o.seconds_per_attempt ? `, ${(o.seconds_per_attempt / 60).toFixed(1)} min per piece of work` : ""}` : "Not measured yet: Cynqra measures it when it evaluates it";
+  const rpm = m.rate_limit_per_min || ((supConns().find((c) => c.id === m.connection_id) || {}).rate_limits || {}).calls_per_minute;
+  const kv = (k, v) => `<div class="kv"><span>${esc(k)}</span><span>${v}</span></div>`;
+  return `<div class="card stack inv-detail" id="inv_detail">
+    <div class="between"><div><span class="caps">${esc(TYPE_OF(m))}</span><h2 style="font-size:22px">${esc(modelName(m))}</h2></div>
+      <button class="btn sm" data-inv-open="">Close</button></div>
+    ${m.description ? `<p style="margin:0;color:var(--ink2)">${esc(m.description)}</p>` : ""}
+    <div class="grid2" style="gap:0 28px">
+      <div>${kv("Model", esc(modelName(m)) + ` <span class="mono small muted">${esc(m.ref)}</span>`)}${kv("Model publisher", esc(m.publisher_name || "Unknown"))}
+        ${kv("Access provider", esc(m.access_provider || connName(m.connection_id)))}${kv("Availability", esc(statusOf(m)[1]))}
+        ${kv("Released", esc(month(m.released)))}${kv("Rate limit", rpm ? `${esc(rpm)} calls per minute (${esc(m.access_provider || "its provider")})` : "Not set")}</div>
+      <div>${kv("Cost", esc(cost + list))}${kv("Speed and latency", esc(speed))}
+        ${kv("Context", m.context ? `${Number(m.context).toLocaleString()} tokens` : "Unknown")}${kv("Longest answer", m.max_output ? `${Number(m.max_output).toLocaleString()} tokens` : "Unknown")}
+        ${kv("Tools", caps.includes("tool use") ? "Can call tools" : "Not stated")}${kv("Structured answers", caps.includes("structured output") ? "Supports a JSON schema" : "Not stated")}</div></div>
+    <div class="row wrap" style="gap:6px"><span class="small muted">Capabilities:</span>${caps.length ? caps.map((c) => `<span class="pill">${esc(c)}</span>`).join("") : '<span class="small muted">none stated by its sources yet</span>'}
+      <span class="small muted" style="margin-left:8px">Input:</span>${(m.input_modalities || m.modalities || ["text"]).map((x) => `<span class="pill">${esc(x)}</span>`).join("")}</div>
+    ${evalLine(m, pr)}
+    <h3 style="font-size:14px;margin-top:4px">Measured on Cynqra's work</h3>${perfRows(m.performance)}
+    ${Object.keys(f).length ? `<div class="notice small">Fault set: ${f.offline ? "offline" : ""}${f.offline && f.max_reply ? ", " : ""}${f.max_reply ? `replies capped at ${f.max_reply} tokens` : ""}</div>` : ""}
+    <div class="row wrap" style="gap:8px">
+      <button class="btn sm primary" data-probe="${esc(m.id)}" ${["running", "queued"].includes(pr.state) ? "disabled" : ""}>${pr.state === "running" ? "Evaluating..." : pr.state === "queued" ? "Waiting to be evaluated" : o.calls ? "Evaluate again" : "Evaluate it"}</button>
+      <button class="btn sm" data-fault-off="${esc(m.id)}" data-on="${f.offline ? "0" : "1"}">${f.offline ? "Bring back online" : "Take offline"}</button>
+      <select id="fb_${esc(m.id)}" aria-label="Stand-in"><option value="">No stand-in</option>${others.map((x) => `<option value="${esc(x.id)}" ${x.id === m.fallback_id ? "selected" : ""}>Stand-in: ${esc(modelName(x))}</option>`).join("")}</select>
+      <button class="btn sm" data-fallback="${esc(m.id)}">Set stand-in</button>
+      <button class="btn sm" data-retire="${esc(m.id)}">Stop using it</button></div>
+    <details class="small muted"><summary>Testing tools</summary><div class="row wrap" style="gap:8px;margin-top:8px">
+      <input type="number" id="cap_${esc(m.id)}" min="0" step="10" placeholder="reply cap" value="${esc(f.max_reply || "")}" style="width:110px" aria-label="Reply cap in tokens">
+      <button class="btn sm" data-fault-cap="${esc(m.id)}">Cap its replies</button></div></details>
+    ${pr.log && pr.log.length ? `<details class="small"><summary>Evaluation log</summary><pre class="log">${esc(pr.log.join("\n"))}${pr.error ? "\n" + esc(pr.error) : ""}</pre></details>` : ""}</div>`;
+}
+
 function vIntelligence() {
   const types = (S.sup && S.sup.provider_types) || [];
-  const models = regModels().filter((m) => m.status !== "retired");
+  const conns = supConns().filter((c) => c.origin !== "demo");
   const opts = types.map((t) => `<option value="${esc(t.type)}" ${t.implemented ? "" : "disabled"}>${esc(t.title)}${t.implemented ? "" : " (planned)"}</option>`).join("");
-  return `<div class="card stack"><h2 style="font-size:17px">Connect a provider</h2>
-      <p class="small muted" style="margin:0">Connect a source of intelligence once. Cynqra discovers the models it offers, measures them on its own work, and the Intelligence Router picks which one powers each worker. A worker never holds a key: the connection keeps a reference to its credential, and only the Intelligence Gateway reads it, for one call at a time. Name an environment variable, or keep the key in Cynqra's secrets file on this computer.</p>
-      <div class="form-grid">
+  const form = `<div class="form-grid">
         <label class="fld"><span>Provider</span><select id="c_type">${opts}</select></label>
-        <label class="fld"><span>Name</span><input type="text" id="c_name" placeholder="e.g. My OpenAI account"></label>
+        <label class="fld"><span>Name</span><input type="text" id="c_name" placeholder="e.g. NVIDIA Build"></label>
         <label class="fld wide"><span>Endpoint URL</span><input type="text" id="c_endpoint" placeholder="blank: the provider's own"></label>
         <label class="fld"><span>Local server</span><select id="c_server"><option value="">Not a local server</option><option value="ollama">Ollama</option><option value="endpoint">A server at the endpoint</option><option value="llama">This computer</option></select></label>
-        <label class="fld"><span>Key</span><select id="c_auth"><option value="secret">In Cynqra's secrets file</option><option value="env">In an environment variable</option><option value="none">No key</option></select></label>
-        <label class="fld"><span>Environment variable</span><input type="text" id="c_env" placeholder="e.g. OPENAI_API_KEY"></label>
-        <label class="fld"><span>Key (secrets file only)</span><input type="password" id="c_secret" autocomplete="off"></label>
+        <label class="fld"><span>Key</span><select id="c_auth"><option value="secret">Store it securely in Cynqra</option><option value="env">In an environment variable</option><option value="none">No key</option></select></label>
+        <label class="fld"><span>Environment variable</span><input type="text" id="c_env" placeholder="e.g. NVIDIA_API_KEY"></label>
+        <label class="fld"><span>API key</span><input type="password" id="c_secret" autocomplete="off"></label>
         <label class="fld wide"><span>Models to offer</span><input type="text" id="c_models" placeholder="blank: the newest models it lists (last 12 months)"></label>
         <label class="fld"><span>Price in, $ per million tokens</span><input type="number" id="c_in" step="0.01"></label>
         <label class="fld"><span>Price out, $ per million tokens</span><input type="number" id="c_out" step="0.01"></label>
         <label class="fld"><span>Calls per minute</span><input type="number" id="c_rpm"></label>
         <label class="fld"><span>Thinking effort</span><select id="c_effort"><option value="">The model's own default</option><option value="low">Low (fastest)</option><option value="medium">Medium</option><option value="high">High</option></select></label>
       </div>
-      <div class="row"><button class="btn primary" id="connect">Connect</button></div></div>
-    <h2 style="font-size:17px;margin:6px 0 0">Provider connections</h2>
-    <div class="grid2">${supConns().map(connCard).join("") || '<p class="muted">No provider connected yet.</p>'}</div>
-    <h2 style="font-size:17px;margin:6px 0 0">Intelligence Registry</h2>
-    <p class="small muted" style="margin:0">What each connection offers, with the facts its provider gives and what Cynqra has measured. Nothing here is a hand-made score.</p>
-    <div class="grid2">${models.map(intelCard).join("") || '<p class="muted">No intelligence registered yet.</p>'}</div>`;
+      <div class="row"><button class="btn primary" id="connect">Connect</button></div>`;
+  return `${inventory()}
+    <h2 style="font-size:17px;margin:6px 0 0">Access providers</h2>
+    <p class="small muted" style="margin:0">Where your intelligence comes from. A key stays with its provider connection and is used only to make a call; it is never given to a team member, and never shown again.</p>
+    <div class="grid2">${conns.map(connCard).join("") || '<p class="muted">No provider connected yet.</p>'}</div>
+    ${conns.length ? `<details class="card"><summary><b>Connect another provider</b></summary><div class="stack" style="margin-top:12px">${form}</div></details>`
+      : `<div class="card stack"><h2 style="font-size:17px">Connect a provider</h2><p class="small muted" style="margin:0">Paste an API key from a provider such as Google Gemini, NVIDIA Build, Mistral, Hugging Face, OpenAI or Anthropic. Cynqra discovers the models it offers, evaluates them, and assigns them to your team.</p>${form}</div>`}`;
 }
 
 function regScreen() {
@@ -1132,6 +1205,14 @@ function bind() {
   const auth = $("#c_auth");
   if (auth) { const sync = () => { const m = auth.value, show = (id, on) => { const el = $("#" + id); if (el && el.closest("label")) el.closest("label").style.display = on ? "" : "none"; };
     show("c_env", m === "env"); show("c_secret", m === "secret"); }; auth.onchange = sync; sync(); }
+  // Intelligence: search as you type without redrawing the page, filters and details redraw it
+  const iq = $("#inv_q");
+  if (iq) iq.oninput = () => { S.inv.q = iq.value; const t = iq.value.toLowerCase().split(/\s+/).filter(Boolean);
+    $$(".inv-row").forEach((r) => r.style.display = t.every((w) => r.dataset.hay.includes(w)) ? "" : "none"); };
+  $$("[data-inv]").forEach((x) => x.onchange = () => { S.inv[x.dataset.inv] = x.value; paint(true); });
+  $$("[data-inv-open]").forEach((x) => { const go = () => { S.inv.open = x.dataset.invOpen; paint(true);
+      const d = $("#inv_detail"); if (d && S.inv.open) d.scrollIntoView({ behavior: "smooth", block: "nearest" }); };
+    x.onclick = go; x.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } }; });
   $$("[data-browse]").forEach((b) => b.onclick = async () => {
     const id = b.dataset.browse;
     if (S.browse[id]) { delete S.browse[id]; paint(true); return; }

@@ -76,7 +76,7 @@ def deliver(run) -> dict:
           "cost": f"{budget.dollars(ec['total_actual'])} of the {budget.dollars(ec['cap_usd'])} budget",
           "risk": "HIGH (production deploy)",
           "reversibility": "Stop the live process; the export holds everything.",
-          "authority_check": "every MEDIUM and HIGH step approved by the founder", "approval": None,
+          "authority_check": "every MEDIUM and HIGH step approved by you", "approval": None,
           "actual_result": f"Live at {live_url(run)}", "confidence": "high", "metrics": metrics(run),
           "export": Path(export_path).name}
     run.store.put("transition", tid, tr)
@@ -229,7 +229,7 @@ def replay(run, task_id: str) -> dict:
         "context": t.get("handoff_hash"),
         "intelligence": sorted({c["label"] for c in calls}),
         "tools": (sorted({a["action_type"] for a in actions if a["status"] in ("executed", "approved")})
-                  or (["none: a founder decision, no tool runs"] if t["kind"] == "decision" else [])),
+                  or (["none: your decision, no tool runs"] if t["kind"] == "decision" else [])),
         "result": [o.get("file") or o for o in (t.get("outputs") or [])] or ([t["decision_id"]] if t.get("decision_id") else []),
         "verification": [f"{v['verdict']} by {v['method']}, {len(v['test_ids'])} test ids" for v in verifs],
     }

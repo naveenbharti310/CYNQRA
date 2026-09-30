@@ -174,7 +174,8 @@ class _Catalogue(_Lister):
 
         class H(BaseHTTPRequestHandler):
             def do_GET(self):
-                data = json.dumps({"data": [{"id": i, "created": t} for i, t in cat.dated.items()]}).encode()
+                data = json.dumps({"data": [dict(t, id=i) if isinstance(t, dict) else {"id": i, "created": t}
+                                            for i, t in cat.dated.items()]}).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(data)))
@@ -198,7 +199,7 @@ class LatestOnlyTests(unittest.TestCase):
 
     def setUp(self):
         import os
-        from cynqra.intelligence_layer import adapters
+        from cynqra.intelligence_layer import normalize
         self.saved = no_model_env()
         self.tmp = TempDir()
         now = time.time()
@@ -215,7 +216,7 @@ class LatestOnlyTests(unittest.TestCase):
             "z-ai/glm-5.3": now - 47 * self.DAY, "mistralai/mistral-7b-instruct-v0.3": now - 800 * self.DAY})
         self.old_url = os.environ.get("CYNQRA_MODEL_DATES_URL")
         os.environ["CYNQRA_MODEL_DATES_URL"] = self.cat.url
-        adapters._DATES.update(at=0.0, url=None, map={})
+        normalize._CACHE.update(at=0.0, url=None, map={})
         self.supply = IntelligenceSupply(self.tmp.path / "control")
 
     def tearDown(self):
@@ -248,6 +249,52 @@ class LatestOnlyTests(unittest.TestCase):
         self.assertFalse(rows["meta/llama2-70b"]["current"])
         self.assertIsNone(rows["01-ai/yi-large"]["released"], "no known date: listed last, never offered by itself")
         self.assertNotIn("nvidia/nemotron-3.5-content-safety", rows, "a safety filter is not a team member")
+
+
+class NormalizedTests(LatestOnlyTests):
+    """What discovery puts in the registry: the model, who published it, and who it is reached through, apart."""
+
+    def setUp(self):
+        super().setUp()
+        now = time.time()
+        self.cat.dated.update({
+            "moonshotai/kimi-k3": {"created": now - 75 * self.DAY, "name": "MoonshotAI: Kimi K3",
+                                   "description": "Frontier agentic model for long-horizon coding and tool use.",
+                                   "context_length": 1048576, "architecture": {"input_modalities": ["text", "image"]},
+                                   "supported_parameters": ["tools", "reasoning", "response_format"],
+                                   "pricing": {"prompt": "0.000003", "completion": "0.000015"},
+                                   "top_provider": {"max_completion_tokens": 131072}},
+            "google/gemini-3.8-flash-preview": {"created": now - 28 * self.DAY, "name": "Google: Gemini 3.8 Flash",
+                                                "description": "Fast multimodal model; reads documents and PDFs (OCR).",
+                                                "context_length": 1048576,
+                                                "architecture": {"input_modalities": ["text", "image", "audio", "file"]},
+                                                "supported_parameters": ["tools", "structured_outputs"]}})
+
+    def _entry(self, lister, ref, rpm):
+        out = self.supply.connect({"type": "openai_compatible", "name": lister, "endpoint": getattr(self, lister).url,
+                                   "auth": {"method": "none"}, "price_per_m": [0, 0],
+                                   "rate_limits": {"calls_per_minute": rpm}})
+        return next(m for m in out["intelligence"] if m["ref"] == ref)
+
+    def test_publisher_access_provider_and_model_are_three_facts(self):
+        k = self._entry("nvidia", "moonshotai/kimi-k3", 30)
+        self.assertEqual((k["display_name"], k["publisher_name"], k["access_provider"]), ("Kimi K3", "MoonshotAI", "nvidia"))
+        self.assertEqual(k["rate_limit_per_min"], 30, "the access provider's limit is a structured fact")
+        self.assertEqual(set(k["capabilities"]) >= {"reasoning", "tool use", "coding", "agentic", "long context",
+                                                     "multimodal", "structured output"}, True)
+        self.assertEqual((k["context"], k["max_output"], k["list_price_in"]), (1048576, 131072, 3.0))
+        g = self._entry("google", "gemini-3.8-flash", 8)
+        self.assertEqual((g["display_name"], g["publisher"], g["access_provider"]), ("Gemini 3.8 Flash", "google", "google"),
+                         "Google is both publisher and access provider here")
+        self.assertIn("document reading", g["capabilities"], "a search for OCR finds it")
+        self.assertEqual(g["speed"], "fast")
+
+    def test_no_catalogue_still_gives_a_publisher_and_a_readable_name(self):
+        import os
+        os.environ["CYNQRA_MODEL_DATES_URL"] = "0"
+        k = self._entry("nvidia", "z-ai/glm-5.3", 30)
+        self.assertEqual((k["display_name"], k["publisher"]), ("Glm 5.3", "z-ai"))
+        self.assertNotIn("tool use", k["capabilities"], "nothing is claimed that no source says")
 
 
 if __name__ == "__main__":

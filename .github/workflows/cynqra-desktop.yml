@@ -60,11 +60,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Windows only until the owner asks for macOS and Linux again (they were built and tested up to 0.2.1).
           - {os: windows-latest, target: windows-x64, model: qwen3.5-4b}  # GitHub's Windows machines now have 8 GB: the 12 GB model swaps and times out
-          # GitHub's macOS machine is a 3-core, 7 GB virtual Mac whose GPU is emulated: Metal loads the model but
-          # cannot really compute. The app's GPU test must catch that and fall back to the processor.
-          - {os: macos-latest, target: macos-arm64, model: qwen3.5-4b}
-          - {os: ubuntu-latest, target: linux-x64, model: qwen3.6-35b-a3b-q2}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 150
     env:
@@ -219,9 +216,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {os: ubuntu-latest, target: linux-x64, model: qwen3.6-35b-a3b-q2}
-          - {os: windows-latest, target: windows-x64, model: qwen3.6-35b-a3b-q2}
-          - {os: ubuntu-latest, target: linux-x64, model: gpt-oss-20b}
+          - {os: windows-latest, target: windows-x64, model: qwen3.5-4b}
     name: e2e (${{ matrix.target }}, ${{ matrix.model }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 358
@@ -276,10 +271,6 @@ jobs:
         with:
           pattern: cynqra-*-x64
           path: artifacts
-      - uses: actions/download-artifact@v4
-        with:
-          name: cynqra-macos-arm64
-          path: artifacts/mac
       - name: Publish the installers as a prerelease
         env:
           GH_TOKEN: ${{ github.token }}

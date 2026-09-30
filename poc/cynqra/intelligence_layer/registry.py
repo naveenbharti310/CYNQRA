@@ -29,7 +29,11 @@ DOWN_AFTER_ERRORS = 2  # consecutive failed calls before an intelligence counts 
 DOWN_FOR_S = 600
 FACTS = ("name", "provider", "ref", "runtime", "version", "context", "tools", "json_schema", "modalities", "mcp",
          "local", "price_in", "price_out", "compute_usd_per_hour", "license", "commercial_use", "params", "hardware",
-         "size_gb", "predict", "think", "served_by", "released")
+         "size_gb", "predict", "think", "served_by", "released",
+         # normalized at discovery (normalize.py): who made it, who serves it, what it can do
+         "display_name", "publisher", "publisher_name", "capabilities", "input_modalities", "type", "speed", "description",
+         "max_output", "list_price_in", "list_price_out", "access_provider", "access_type", "rate_limit_per_min",
+         "catalogued")
 
 
 def served_version(m: dict) -> str:
@@ -80,7 +84,7 @@ class IntelligenceRegistry:
             m = {"id": mid, "connection_id": connection_id, "source": source, "version": "", "context": 0,
                  "tools": False, "json_schema": True, "modalities": ["text"], "mcp": False, "local": False,
                  "price_in": 0.0, "price_out": 0.0, "compute_usd_per_hour": 0.0, "license": "", "commercial_use": "",
-                 "params": "", "hardware": "", "provider": "", "runtime": "", "fallback_id": (old or {}).get("fallback_id", "")}
+                 "params": "", "hardware": "", "provider": "", "runtime": "", "capabilities": [], "fallback_id": (old or {}).get("fallback_id", "")}
             m.update({k: facts[k] for k in FACTS if facts.get(k) not in (None, "")})
             m["ref"], m["name"] = ref, str(m.get("name") or ref)
             for k in ("price_in", "price_out", "compute_usd_per_hour"):

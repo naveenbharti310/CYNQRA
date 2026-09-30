@@ -29,6 +29,7 @@ import urllib.parse
 import urllib.request
 
 from .contracts import LOCAL_SERVERS, SETTINGS, SupplyError
+from .normalize import model_key
 
 # USD per million tokens, input and output: first-party list prices, checked 26 Sep 2026. A hosted model not listed
 # is priced at the most expensive row unless its connection states a price, so a budget errs on the safe side.
@@ -53,40 +54,12 @@ NOT_CHAT = ("embed", "tts", "whisper", "dall-e", "moderation", "image", "audio",
             "parse", "detector", "calibration", "deplot", "kosmos", "clip", "riva", "cosmos", "neva", "vila", "fuyu",
             "retriever", "ocr", "asr", "speech", "customtools", "antigravity")
 RECENT_DAYS = 365  # a model first listed within a year counts as current
-_DATES: dict = {"at": 0.0, "url": None, "map": {}}
-_TRIM = re.compile(r"-(instruct|it|chat|preview|latest|exp|v\d+(\.\d+)*|\d{2}-\d{4}|\d{4}-\d{2}-\d{2}|\d{8})$")
-
-
-def model_key(ref: str) -> str:
-    """A model's name without its vendor, provider suffix, "instruct"/"preview" tags or date stamps, so the same model
-    matches across catalogues: models/gemini-3.8-flash and google/gemini-3.8-flash-preview are one model."""
-    n = ref.lower().removeprefix("models/").split("/")[-1].split(":")[0]
-    prev = None
-    while prev != n:
-        prev, n = n, _TRIM.sub("", n)
-    return n
 
 
 def release_dates() -> dict[str, float]:
-    """When each model was first listed (Unix time), from OpenRouter's public catalogue: no key, open and closed
-    models alike. Read at most once a day; unreachable, it is an empty map and nothing is judged by date.
-    CYNQRA_MODEL_DATES_URL names another catalogue in the same format, or 0 for none."""
-    url = os.environ.get("CYNQRA_MODEL_DATES_URL", "https://openrouter.ai/api/v1/models")
-    if url in ("", "0"):
-        return {}
-    if _DATES["url"] == url and time.time() - _DATES["at"] < 86400:
-        return _DATES["map"]
-    try:
-        data = _get_json(url, {}, timeout=15)
-    except SupplyError:
-        data = {}
-    out: dict[str, float] = {}
-    for x in (data.get("data") or []) if isinstance(data, dict) else []:
-        if isinstance(x, dict) and x.get("id") and isinstance(x.get("created"), (int, float)):
-            k = model_key(x["id"])
-            out[k] = min(out.get(k, float("inf")), float(x["created"]))
-    _DATES.update(at=time.time(), url=url, map=out)
-    return out
+    """When each model was first listed (Unix time), by model_key, from the public catalogue (normalize.py)."""
+    from .normalize import catalogue
+    return {k: float(r["created"]) for k, r in catalogue().items() if isinstance(r.get("created"), (int, float))}
 
 
 def _family(ref: str) -> tuple[str, tuple]:

@@ -81,7 +81,7 @@ class Connections:
                     "models": [m for m in models if m], "settings": dict(spec.get("settings") or {}),
                     "price_per_m": spec.get("price_per_m") or None,
                     "machine_usd_per_hour": float(spec.get("machine_usd_per_hour") or 0),
-                    "rate_limits": dict(spec.get("rate_limits") or {}), "permission": "granted by the founder"
+                    "rate_limits": dict(spec.get("rate_limits") or {}), "permission": "connected by you"
                     if origin == "founder" else f"from the {origin}", "status": "new", "status_note": "",
                     "offered": [], "origin": origin, "metadata": dict(spec.get("metadata") or {}),
                     "created_at": now(), "checked_at": None}

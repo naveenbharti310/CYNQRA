@@ -151,7 +151,7 @@ class FounderTests(unittest.TestCase):
         self.assertIn("only a team member can do", str(ctx.exception))
         with self.assertRaises(EngineError) as ctx:  # the demo's team was written for its founder
             e.set_founder({"leads": ["CFO"], "stage": "launch"})
-        self.assertIn("part of its script", str(ctx.exception))
+        self.assertIn("your part is scripted", str(ctx.exception))
         kept = e.set_founder({"stage": "launch", "hours_per_week": "400"})
         self.assertEqual((kept["hours_per_week"], kept["background"]), (100, "Has run a restaurant; not technical."),
                          "hours are capped, and a form that does not show the background keeps it")

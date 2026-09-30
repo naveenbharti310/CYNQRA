@@ -26,7 +26,20 @@ to a deployed, healthy product whose tests pass:
   and were thrown away whole; 0.1.2 keeps the finished files and asks only for the rest.
 A current laptop is two to four times faster than these machines, and a Mac or a graphics card faster still.
 
-**0.2.1:** Cynqra starts from nothing and chooses nothing for you by name.
+**0.2.2 (Windows):** the Intelligence screen.
+- **An intelligence inventory**, not a list of model ids: every model your providers offer, with its readable name,
+  its publisher (who made it), its access provider (who serves it to you) and its type. Search it ("coding",
+  "OCR", "fast", "reasoning", "multimodal") and filter it by access provider, publisher, capability, speed, cost,
+  context and input.
+- **A detail view for every model:** capabilities, input types, cost on your connection and its list price
+  elsewhere, measured speed, context, longest answer, tools, release date, your provider's rate limit, and what
+  Cynqra measured when it evaluated it.
+- **Everything comes from your providers**, normalized into Cynqra's registry; nothing is a built-in list and no
+  model is a default.
+- **Plain words:** your key is "Securely stored" and never shown; a connection is "Connected by you".
+- This release is built for **Windows only**.
+
+**0.2.1** (built into 0.2.2; never published on its own): Cynqra starts from nothing and chooses nothing for you by name.
 - **A first visit is empty.** No project, no idea, no model. Cynqra asks what you want to build, who it is for, the
   result you want and anything it must or must not do, writes the brief from your answers, and asks for a budget.
   The demo is one click away ("Watch a demo instead").

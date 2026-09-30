@@ -533,13 +533,13 @@ def execute_approved(run, t: dict) -> dict:
         doc = run.paths["integration"] / "docs" / "DECISIONS.md"
         doc.parent.mkdir(parents=True, exist_ok=True)
         with doc.open("a", encoding="utf-8") as fh:
-            by = "the founder" if d.get("resolved_by") == "founder" else people.label(run.worker(d["resolved_by"]))
+            by = "you" if d.get("resolved_by") == "founder" else people.label(run.worker(d["resolved_by"]))
             fh.write(f"## {t['title']} ({d['id']}, {d['outcome_label']} by {by})\n\n{rule}\n\n")
         aid = f"{t['id']}/DECISIONS.md"
         run.store.put("artifact", aid, {"id": aid, "task_id": t["id"], "path": "docs/DECISIONS.md",
                                         "hash": digest(doc.read_bytes()), "by": owner})
         who = "founder" if d.get("resolved_by") == "founder" else d.get("resolved_by")
-        method = "founder review (MEDIUM)" if who == "founder" else "settled by the accountable cofounder (two-way door)"
+        method = "your review (MEDIUM)" if who == "founder" else "settled by the accountable cofounder (two-way door)"
         checks, reviewer = {"decision": d["id"], "label": d["outcome_label"]}, who
     elif t["kind"] == "review_merge":
         g = run.gateway(owner, t["id"], "merge_to_main", target="main", approval=d["id"])
@@ -605,4 +605,4 @@ def after_escalation(run, d: dict, action: str) -> None:
         t.update({"status": back, "attempts": 0, "cut_offs": 0})
         run.save_task(t)
     else:
-        run.set_meta(phase="stopped", notice=f"Run stopped by the founder at {t['id']}.")
+        run.set_meta(phase="stopped", notice=f"You stopped the run at {t['id']}.")

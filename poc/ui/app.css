@@ -428,3 +428,12 @@ ol.journey .jn{flex:none;width:26px;height:26px;border-radius:50%;display:inline
 .mb-row .mono{overflow-wrap:anywhere}
 .linkbtn{background:none;border:0;padding:0 2px;min-height:0;font:inherit;color:var(--accent);text-decoration:underline;cursor:pointer}
 .linkbtn:hover{color:var(--ink)}
+
+/* Intelligence inventory */
+#inv_q{width:100%;min-height:48px;font-size:16px}
+.inv-filters{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+.tbl.inv tbody tr{cursor:pointer}
+.tbl.inv tbody tr:hover,.tbl.inv tbody tr.on{background:var(--accent-soft)}
+.tbl.inv td{vertical-align:top}
+.inv-detail{border-color:var(--accent)}
+details>summary{cursor:pointer}

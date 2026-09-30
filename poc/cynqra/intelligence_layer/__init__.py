@@ -73,6 +73,7 @@ class IntelligenceSupply:
         except SupplyError as exc:
             self.connections.set_status(connection_id, "error", str(exc))
             raise
+        found = [self._normalize(f, conn, adapter) for f in found]
         note = conn.get("_listing_note") or ""
         self.connections.set_status(connection_id, "connected", f"{len(found)} model(s) offered" + (
             f"; {note}" if note else ""), offered=[f["ref"] for f in found])
@@ -82,6 +83,20 @@ class IntelligenceSupply:
                 self.registry.retire(m["id"], "no longer offered by its provider connection")
         return [self.registry.register(f, connection_id=connection_id) for f in found]
 
+    @staticmethod
+    def _normalize(f: dict, conn: dict, adapter) -> dict:
+        """One discovered model, normalized (normalize.py): its publisher and the access provider it is reached
+        through kept apart, its capabilities, input types, context and dates from the provider's listing and the public
+        catalogue, and the connection's rate limit as a structured fact the Router can read."""
+        from .normalize import describe, host_of
+        out = dict(f)
+        if not f.get("local") and adapter.type not in ("demo_script", "local"):
+            host = host_of(conn.get("endpoint") or getattr(adapter, "DEFAULT", ""))
+            out.update({k: v for k, v in describe(f["ref"], f, host).items() if v not in (None, "", [])})
+        out.update(access_provider=conn.get("name") or adapter.title, access_type=adapter.title,
+                   rate_limit_per_min=int((conn.get("rate_limits") or {}).get("calls_per_minute") or 0) or None)
+        return out
+
     def catalog(self, connection_id: str) -> dict:
         """Everything the connection's provider lists, whether it is offered now or not, so the founder can search it
         and choose which models Cynqra may use. Nothing is registered by looking."""
@@ -90,11 +105,13 @@ class IntelligenceSupply:
         chosen = list(conn.get("models") or [])
         conn["models"], conn["_all"] = [], True
         adapter = self.adapters[conn["type"]]
-        found = adapter.discover(conn, self.credentials.resolve(conn["credential_id"]))
+        found = [self._normalize(f, conn, adapter) for f in adapter.discover(conn, self.credentials.resolve(conn["credential_id"]))]
         from .adapters import current
         fresh = set(current([f["ref"] for f in found], {f["ref"]: f.get("released") for f in found}))
         active = {m["ref"] for m in self.registry.models() if m["connection_id"] == connection_id}
-        rows = [{"ref": f["ref"], "name": f.get("name") or f["ref"], "context": f.get("context"),
+        rows = [{"ref": f["ref"], "name": f.get("display_name") or f.get("name") or f["ref"], "context": f.get("context"),
+                 "publisher_name": f.get("publisher_name") or "", "type": f.get("type") or "",
+                 "capabilities": f.get("capabilities") or [], "description": f.get("description") or "",
                  "released": f.get("released"), "current": f["ref"] in fresh, "offered": f["ref"] in active}
                 for f in found]
         # newest first; models with no known date last

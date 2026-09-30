@@ -129,6 +129,37 @@ for this one call) → the provider's **adapter** → the provider → the model
 many serving companies; Cynqra records which company serves each model and always asks for that same one, so costs
 and results are never mixed between companies.
 
+**The Intelligence screen.** Everything on it comes from the connected providers, normalized into the registry
+(`intelligence_layer/normalize.py`); nothing is a list written into Cynqra, and there is no default model.
+
+```
+Provider connection  ->  Model discovery  ->  Intelligence Registry  ->  Intelligence Router
+  (key, rate limit)       (what it lists)      (normalized, measured)     (which model, per worker and work)
+        ->  Worker intelligence binding  ->  Intelligence Gateway  ->  Execution  ->  Verification
+        ->  Performance measurement  ->  reassignment or replacement when it is earned
+```
+
+Three facts are kept apart for every model, because one model can be reached several ways:
+
+| Fact | Example | Where it comes from |
+| --- | --- | --- |
+| **Model** | Kimi K3 | the provider's listing; its readable name from the public catalogue |
+| **Model publisher** | Moonshot AI | the prefix in the model's id, else the first-party API's own host, else the catalogue |
+| **Access provider** | NVIDIA Build | the connection it was discovered through: its rate limit, price and credential |
+
+Google can be both publisher and access provider. Each entry also carries capabilities (reasoning, coding, tool use,
+agentic, structured output, long context, multimodal, vision, document reading), input types, context, longest
+answer, list price, release date and a description. They are read from the provider's listing first, then from
+OpenRouter's public model catalogue (read at most once a day, no key), then from the model's own name. A capability
+no source states is not claimed. What Cynqra measures (verified work, speed, cost) sits beside these facts and
+decides. The access provider's rate limit is a structured fact (`rate_limit_per_min`) the Router can weigh with cost,
+speed, availability, capability, reliability, context and measured performance.
+
+The screen searches the registry itself: "coding", "OCR", "fast", "reasoning", "multimodal", a publisher or a
+provider. It filters by access provider, publisher, capability, speed, cost, context and input. Each model opens to
+its details and its measured record, and can be evaluated, taken offline, given a stand-in or stopped. Access
+providers are listed below it, in customer words: the credential is "Securely stored" and never shown again.
+
 ## When a team member stops
 
 **What.** Cynqra never swaps a member's AI on the first sign of trouble. It first finds out **why** the member stopped.

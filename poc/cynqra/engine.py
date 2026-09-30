@@ -503,7 +503,7 @@ class Engine:
                 raise EngineError("In this version the CTO's seat reviews, merges and releases the code, which only a "
                                   "team member can do. You can lead product, money or compliance yourself.")
             if self.meta["mode"] == "demo" and (clean["leads"], clean["stage"]) != (fixed.get("leads"), fixed.get("stage")):
-                raise EngineError("A demo's founder is part of its script: its team was written for that founder. "
+                raise EngineError("In a demo your part is scripted: its team was written for that part. "
                                   "In live mode Cynqra builds the team around what you bring.")
             company["founder"] = clean
             self.store.put("company", self.cid, company)
@@ -782,7 +782,7 @@ class Engine:
 
     def _after_roadmap(self, d: dict, action: str) -> None:
         if action != "approve":
-            self._roadmap(note=d.get("note") or "The founder asked for a different roadmap.")
+            self._roadmap(note=d.get("note") or "You asked for a different roadmap.")
             return
         org = self.store.get("organization", "org_1")
         org.update({"status": "active", "approved_by": "founder", "approved_at": now()})
@@ -797,7 +797,7 @@ class Engine:
 
     def _after_breaker(self, d: dict, action: str) -> None:
         if action != "approve":
-            self.set_meta(phase="stopped", notice="Run stopped at the budget cap by the founder.")
+            self.set_meta(phase="stopped", notice="You stopped the run at the budget cap.")
             return
         cap = project_settings.get(self.store)["budget_usd"]
         new = float(d["edited"].get("budget_usd") or max(cap, budget.ledger(self.store)["spent_total"]) * 1.5)
