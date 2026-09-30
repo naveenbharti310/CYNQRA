@@ -136,7 +136,8 @@ class GoogleLimitTests(unittest.TestCase):
 
 
 class ProviderSpecificTests(unittest.TestCase):
-    """What differs by provider: Google's key header, and how long a thinking model thinks."""
+    """What differs by provider, and what must not: every key goes as a Bearer token, and a thinking model is told
+    how long to think."""
 
     OK = {"choices": [{"message": {"content": '{"ok": true}'}, "finish_reason": "stop"}], "usage": {}}
 
@@ -154,15 +155,15 @@ class ProviderSpecificTests(unittest.TestCase):
         self.assertIsNone(out["error"])
         return seen
 
-    def test_google_gets_its_own_key_header_and_no_bearer(self):
-        h = self._sent("https://generativelanguage.googleapis.com/v1beta/openai")["headers"]
-        self.assertEqual(h.get("x-goog-api-key"), "AQ.Ab-test-key")
-        self.assertNotIn("Authorization", h, "Google refuses an AQ. key sent twice")
-
-    def test_other_providers_get_a_bearer_token(self):
-        h = self._sent("https://integrate.api.nvidia.com/v1")["headers"]
-        self.assertEqual(h.get("Authorization"), "Bearer AQ.Ab-test-key")
-        self.assertNotIn("x-goog-api-key", h)
+    def test_every_provider_google_included_gets_a_bearer_token(self):
+        # Google's OpenAI-compatible route reads only Authorization: a key in x-goog-api-key alone is never seen, and
+        # every call fails with "Missing or invalid Authorization header", whatever the key
+        from cynqra.intelligence_layer.adapters import _auth_headers
+        for base in ("https://generativelanguage.googleapis.com/v1beta/openai", "https://integrate.api.nvidia.com/v1"):
+            h = self._sent(base)["headers"]
+            self.assertEqual(h.get("Authorization"), "Bearer AQ.Ab-test-key", base)
+            self.assertNotIn("x-goog-api-key", h)
+            self.assertEqual(_auth_headers(base, "AQ.Ab-test-key"), {"Authorization": "Bearer AQ.Ab-test-key"}, base)
 
     def test_the_founders_thinking_effort_reaches_a_hosted_model(self):
         p = self._sent("https://integrate.api.nvidia.com/v1", CYNQRA_EFFORT="low")["payload"]

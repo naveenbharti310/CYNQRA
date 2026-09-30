@@ -113,11 +113,10 @@ def _get_json(url: str, headers: dict, timeout: float = 30.0):
 
 
 def _auth_headers(base: str, secret: str | None) -> dict:
-    """Google takes its key in x-goog-api-key (its "AQ." keys are refused as a Bearer token); the rest take Bearer."""
+    """A Bearer token for every provider. Google's OpenAI-compatible route reads only Authorization: sent in
+    x-goog-api-key alone, the key is never seen ("Missing or invalid Authorization header")."""
     if not secret:
         return {}
-    if (urllib.parse.urlparse(base).hostname or "").endswith(".googleapis.com"):
-        return {"x-goog-api-key": secret}
     return {"Authorization": f"Bearer {secret}"}
 
 

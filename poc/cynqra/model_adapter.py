@@ -122,7 +122,6 @@ import subprocess
 import threading
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 
 class _Overlay:
@@ -375,11 +374,9 @@ def _local_openai(prompt: str, model: str, max_tokens: int, want_json: bool = Fa
     hosted = _ENV.get("local") is False  # a hosted provider reached as an OpenAI-compatible server, not a laptop's
     headers = {"Content-Type": "application/json"}
     if _ENV.get("CYNQRA_LOCAL_API_KEY"):
-        if (urllib.parse.urlparse(base).hostname or "").endswith(".googleapis.com"):
-            # Google's own header: its "AQ." keys sent as a Bearer token are refused on the OpenAI-compatible route
-            headers["x-goog-api-key"] = _ENV["CYNQRA_LOCAL_API_KEY"]
-        else:
-            headers["Authorization"] = f"Bearer {_ENV['CYNQRA_LOCAL_API_KEY']}"
+        # Every provider, Google included: its OpenAI-compatible route reads only Authorization and ignores
+        # x-goog-api-key ("Missing or invalid Authorization header"), for AIza and AQ. keys alike
+        headers["Authorization"] = f"Bearer {_ENV['CYNQRA_LOCAL_API_KEY']}"
     floor = HOSTED_MIN_REPLY if hosted else 8192
     payload: dict = {"model": model, "messages": [{"role": "user", "content": prompt}],
                      "max_tokens": _cap(int(_ENV.get("CYNQRA_NUM_PREDICT") or 0) or max(max_tokens, floor)), "stream": False}
