@@ -13,6 +13,12 @@ runs on Python 3.10 or newer, with the standard library only; nothing to install
 | **Run with a model on your own computer** | Install the desktop app (below) and open **This computer** to download a model. No key needed. | The same, privately, more slowly |
 | **Install the desktop app** | Download it from the repository's **Releases** page (Windows, macOS, Linux), or run `python3 poc/desktop.py` | Cynqra in its own window |
 
+**On Windows, the quickest way to try every change:** clone the repository once, then double-click
+`Start-Cynqra.cmd` in its folder. Each start fetches the newest version (`git pull`) and opens Cynqra, so a fix is
+ready the moment it is pushed, with no installer, no build and no GitHub minutes. It needs Python 3.10+ and Git for
+Windows, installed once. Local models on this computer need the installed app (it bundles llama-server); online
+providers work from here.
+
 Never paste a key into a chat or a document. Keys live only in environment variables, Cynqra's secrets file
 (readable only by you), or GitHub secrets.
 
