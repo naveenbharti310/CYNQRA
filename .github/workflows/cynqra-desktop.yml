@@ -60,7 +60,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {os: windows-latest, target: windows-x64, model: qwen3.6-35b-a3b-q2}
+          - {os: windows-latest, target: windows-x64, model: qwen3.5-4b}  # GitHub's Windows machines now have 8 GB: the 12 GB model swaps and times out
           # GitHub's macOS machine is a 3-core, 7 GB virtual Mac whose GPU is emulated: Metal loads the model but
           # cannot really compute. The app's GPU test must catch that and fall back to the processor.
           - {os: macos-latest, target: macos-arm64, model: qwen3.5-4b}
