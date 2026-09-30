@@ -17,7 +17,7 @@ const base = process.argv[2];
 const out = process.argv[3];
 const W = 1600, H = 900, DSF = 1.2; // 1920 x 1080 frames
 const CAPTION_TOP = H - 150;        // the caption band: a highlight ends above it, a click target too
-const WORK_DELAY = 0.6;             // seconds between the team's steps while the video watches them
+const WORK_DELAY = 0.25;             // seconds between the team's steps while the video watches them
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 (async () => {
@@ -165,6 +165,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await D("cursor", b.x + Math.min(b.width / 2, 60), b.y + b.height / 2, ms);
     await sleep(ms + 80);
   };
+  // A click that leaves the screen: the screen fades first, so the next one never shows before its card.
+  const leave = async (target) => {
+    await moveTo(target);
+    await D("ripple");
+    await D("veil", true);
+    await sleep(340);
+    await loc(target).click();
+    await sleep(200);
+  };
   const click = async (target) => {
     await moveTo(target);
     await D("ripple");
@@ -183,26 +192,26 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await D("ripple");
     await veil(true);
     await page.click(`button.nav[data-view="${view}"]`);
-    await sleep(450);
+    await sleep(220);
     await hideGuide();
     await page.evaluate(() => window.scrollTo(0, 0));
     await sleep(150);
     await veil(false);
   };
   // Opening another page: the screen fades, the page loads under the veil, and it fades back in.
-  const openPage = async (url, ready, prep) => {
+  const openPage = async (url, ready, prep, keepVeil = false) => {
     beats.push({ label: "~page", text: url, wall: Date.now() / 1000, spots: [] });
     await unsay();
     await clear();
     await veil(true);
     await page.evaluate(() => { window.name = "demo-veil"; });
-    await page.goto(url);
+    await page.goto(url.replace(/#.*$/, "") + "#demo-veil");
     await page.waitForSelector(ready);
     await page.evaluate(() => document.fonts.ready);
     await hideGuide();
     if (prep) await prep();
     await sleep(300);
-    await veil(false);
+    if (!keepVeil) await veil(false);
   };
   const chapter = async (num, title, sub, prep) => {
     beats.push({ label: "~chapter", text: title, wall: Date.now() / 1000, spots: [] });
@@ -259,6 +268,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await clear();
     await goOn(i);
     await top();
+    if (opt.then) {  // a long stretch of work until the next moment: say what the team is doing meanwhile
+      beats.push({ label: opt.thenLabel || "Work", text: opt.then, wall: Date.now() / 1000, spots: [] });
+      await D("caption", opt.then, opt.thenLabel || "Work", "bottom");
+    }
   };
 
   // ---------- title ----------
@@ -270,8 +283,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     <span class="dc-line in" style="animation-delay:.5s">You bring the vision.</span>
     <span class="dc-line in" style="animation-delay:1.2s">Cynqra creates <i>the organisation that can build it</i>.</span>
     <span class="dc-foot in" style="animation-delay:2.4s">Proof of concept, recorded from the real running software. Demo mode: the team's words come from a script. The code, the checks, the numbers and the deploy are real.</span></div>`);
+  await sleep(900);  // the card has faded in fully: the page under it never shows
   await cdp.send("Page.startScreencast", { format: "jpeg", quality: 92, maxWidth: 1920, maxHeight: 1080, everyNthFrame: 1 });
-  await sleep(7600);
+  await sleep(6800);
 
   // ---------- 1 describe the idea ----------
   const messy = (await state()).scenarios.find((x) => x.id === "bluedip").messy;
@@ -295,7 +309,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await say("A hard budget, in dollars. Nothing is spent past it.", "Budget");
   await unsay();
   await clear();
-  await click("#submit");
+  await leave("#submit");
   await D("caption", "You hand over the vision. You don't name a team.", "You", "bottom");
   await page.waitForSelector("#approve-workforce");
   await sleep(2400);
@@ -312,10 +326,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await say("And an estimated budget. Nothing is spent yet.", "Budget");
   await unsay();
   await clear();
-  await click("#approve-workforce");
-  await D("caption", "You approve the plan.", "You decide", "bottom");
+  await leave("#approve-workforce");
+  await D("caption", "You approve the plan. Next, Cynqra needs to know you.", "You decide", "bottom");
   await page.waitForSelector("#define-founder");
-  await sleep(1600);
+  await sleep(2200);
 
   // ---------- 3 define yourself ----------
   await chapter("STEP 3 OF 7", "Define yourself", "The organisation is fitted around what you bring.", async () => { await hideGuide(); await page.fill("#f_background", ""); await page.evaluate(() => window.scrollTo(0, 0)); });
@@ -328,9 +342,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await say("This founder runs restaurants and is not technical, so all three cofounders stay.", "You");
   await unsay();
   await clear();
-  await click("#define-founder");
+  await leave("#define-founder");
+  await D("caption", "Cynqra fits the organisation around you.", "You", "bottom");
   await page.waitForSelector("#approve-plan");
-  await sleep(900);
+  await sleep(2000);
 
   // ---------- 4 approve the team and budget ----------
   await chapter("STEP 4 OF 7", "Approve the team and budget", "Who does what, by when, and what it costs.", async () => { await hideGuide(); await page.evaluate(() => window.scrollTo(0, 0)); });
@@ -343,16 +358,16 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await say("Your organisation, each person given the AI best suited to their work. If an AI cannot do the work, a new person takes the seat and you are told why.", "Team");
   await unsay();
   await clear();
-  await click("#approve-plan");
+  await leave("#approve-plan");
   await waitFor((st) => st.auto.on, "the run to start");
   await work(false);
-  await D("veil", true);
   await D("caption", "You approve the team and budget. From here Cynqra runs the organisation.", "You decide", "bottom");
   await page.waitForSelector("header.top");
   await sleep(3800);
 
   // ---------- 5 watch it being built ----------
   expect((st) => reworked(st, "t_06"), (st) => pending(st, "decision"), (st) => reworked(st, "t_11"),
+    (st) => (task(st, "t_12").answers || []).length > 0,
     (st) => ((st.workforce || {}).ceo_notices || []).some((n) => n.kind === "settled_by_cofounder"),
     (st) => pending(st, "deploy"));
   await chapter("STEP 5 OF 7", "Watch it being built", "Cynqra manages the organisation. You manage the vision.", async () => {
@@ -386,14 +401,19 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await goOn(1);
   await moment(2, "the cap caught", '.tcard[data-task="t_11"]',
     "A test catches an estimate that ignored the owner's cap of 15 customers. Fixed before it counts.", "Checked", { tone: "red" });
-  await moment(3, "the merge settled",
+  await moment(3, "a question answered", '.tcard[data-task="t_12"]',
+    `Unsure what a new restaurant sees before it has any history, ${await person("w_fe")} asks ${await person("w_cto")} instead of guessing. The answer comes back in the next round, and you are not interrupted.`, "Questions",
+    { then: "Meanwhile the app is built and tested, and each piece is reviewed by the cofounder who leads its area before it counts." });
+  await moment(4, "the merge settled",
     '.tcard[data-task="t_16"]', `Merging the finished code can be undone, so ${await person("w_cto")}, your AI CTO, settles it, and you are told instead of asked.`, "Settled");
-  await caught(4, "going live");
+  await caught(5, "going live");
   watching(false);
   await nav("decisions");
   await page.waitForSelector(".dcard");
   await spot([".dcard > .between", ".dcard .dline"], "red", { merge: true });
   await say("Going live cannot be undone. It waits for you.", "You decide");
+  await spot(".dcard .deny", "red");
+  await say(`${await person("w_devops")} also wanted to email the pilot restaurants. The rules stopped it: no one on the team sends messages outside the company.`, "Stopped");
   await unsay();
   await clear();
   await click('.dcard button[data-decide="approve"]');
@@ -444,7 +464,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await page.click('button.nav[data-view="delivery"]');
     await page.waitForSelector('[data-step="refine"]');
     await page.evaluate(() => window.scrollTo(0, 0));
-  });
+  }, true);  // the step card lifts the veil under itself
   await chapter("STEP 7 OF 7", "Audit and refine", "Until it meets the objective you started with.", async () => {
     await page.evaluate(() => { const d = document.querySelector('[data-step="refine"] details'); if (d) d.open = true; });
     await page.evaluate(() => window.scrollTo(0, 0));

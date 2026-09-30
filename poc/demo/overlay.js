@@ -6,7 +6,9 @@
   if (window.__demo || window.top !== window) return;
   const PAPER = "#F6F4EF";
   // A page opened with the veil already down (a move to another page) starts covered, so its first paint never shows.
-  const veiled = window.name === "demo-veil";
+  // (the name does not survive a move to another origin, such as the live product on its own port: the address says it)
+  const veiled = window.name === "demo-veil" || location.hash === "#demo-veil";
+  if (location.hash === "#demo-veil") history.replaceState(null, "", location.pathname + location.search);
   if (veiled && document.documentElement) {
     const pre = document.createElement("style");
     pre.id = "demo-preveil";

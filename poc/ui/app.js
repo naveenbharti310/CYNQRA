@@ -419,7 +419,7 @@ function modelBanner() {
   if (!S.st || S.st.meta.mode !== "live" || regModels().some((m) => m.available)) return "";
   const r = rt(), working = isDesktop() && RT_WORKING.includes(r.state);
   return `<div class="notice">${working ? `A model is ${r.state === "downloading" ? "downloading" : "starting"} on this computer; the run continues when it is ready.`
-    : "No intelligence is available, so the organization cannot work."} ${isDesktop() ? `<button class="btn sm" data-model-open="1">Models on this computer</button>` : ""}<button class="btn sm primary" data-reg-open="1">Connect a provider</button></div>`;
+    : "No intelligence is available, so the organisation cannot work."} ${isDesktop() ? `<button class="btn sm" data-model-open="1">Models on this computer</button>` : ""}<button class="btn sm primary" data-reg-open="1">Connect a provider</button></div>`;
 }
 
 /* Where a live run's intelligence comes from, on the first screen. */
@@ -609,7 +609,7 @@ function vOrg() {
       <div class="node founder"><b>You, the founder</b><small>Outcome, budget, the two approval gates, MEDIUM and HIGH risk</small></div>${branch("founder")}
       <div class="nodes" style="margin-top:18px"><div class="node svc"><b>Verification Service</b><small style="color:var(--accent-ink)">Not a worker. Tests, lint, review</small></div></div>
       <div class="card stack" style="margin-top:28px;width:100%;background:var(--paper);border:0">
-        <label class="lbl" for="gq">Ask the organization graph</label>
+        <label class="lbl" for="gq">Ask the organisation graph</label>
         <div class="row"><select id="gq"><option value="approves">Who approves</option><option value="owns">Who owns</option><option value="depends">What depends on</option></select>
           <input type="text" id="gs" value="merge_to_main" aria-label="Action type or task id" style="flex:1"><button class="btn sm" id="ask">Ask</button></div>${ans}</div></div>
     <div class="card side-panel stack"><div><span class="caps">AI ${esc(seatOf(w))} · seat ${esc(w.id)}</span><h2 style="font-size:22px">${esc(w.name || seatOf(w))}</h2></div>
@@ -864,7 +864,7 @@ function vDecisions() {
     <span style="color:${d.status === "approved" ? "var(--green)" : "var(--red)"}">${esc(label(d))}</span></div>`).join("") || `<span class="muted small">Nothing yet.</span>`;
   const denied = (st.denied || []).map((a) => `<div class="deny"><span class="h">Stopped: ${esc(actionTitle(a.action_type))} by the ${esc(wt(a.worker_id))}, on ${esc(taskTitle(a.task_id))}</span><span class="small">${esc(a.policy_reason)}</span></div>`).join("") || `<span class="muted small">Nothing stopped yet.</span>`;
   return `<p class="small muted" style="margin:0">Every answer you give is kept on the record. Brought to you today: ${st.metrics.escalations_today} of at most ${st.metrics.escalation_budget}; anything past that waits in a daily digest.</p>
-    <div class="dec"><div class="dec-main">${main.map((d, i) => card(d, i === 0)).join("") || `<div class="card"><p class="muted" style="margin:0">Nothing waits on you. The organization is working.</p></div>`}
+    <div class="dec"><div class="dec-main">${main.map((d, i) => card(d, i === 0)).join("") || `<div class="card"><p class="muted" style="margin:0">Nothing waits on you. The organisation is working.</p></div>`}
       ${dig.length ? `<div class="card"><h3 style="font-size:15px">Daily digest, over the escalation budget</h3>${dig.map((d) => card(d, false)).join("")}</div>` : ""}</div>
       <div class="dec-side"><div class="card stack"><h3 style="font-size:15px">Answered</h3>${answered}</div>
         <div class="card stack"><h3 style="font-size:15px">Stopped by policy, nothing for you to do</h3>${denied}</div></div></div>`;
@@ -872,7 +872,7 @@ function vDecisions() {
 
 function vPerformance() {
   const st = S.st;
-  if (!(st.performance || []).length) return `<div class="card"><p class="muted">No organization yet.</p></div>`;
+  if (!(st.performance || []).length) return `<div class="card"><p class="muted">No organisation yet.</p></div>`;
   const evals = (st.evaluations || []).slice().reverse().map((e) => `<div class="list-row small"><span><b>${esc(e.decision)}</b> ${esc(e.task_id)}, ${esc(wt(e.worker_id))} on ${esc(modelName(e.model_id))}: ${esc(e.why)}${e.regression_check ? ` · regression check: ${esc(e.regression_check)}` : ""}${e.why_kept ? ` · ${esc(e.why_kept)}` : ""}</span><span class="mono">${esc(e.at.slice(11, 19))}</span></div>`).join("");
   return `<p class="small muted" style="margin:0">Intelligence is measured on the work itself, per worker and per model it ran on: quality, reliability, efficiency, cost, fit and stability. The Replacement Engine reads these signals.</p>
     ${scorecards()}
