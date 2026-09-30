@@ -30,7 +30,7 @@ been proven end to end on strong real AI models in its current form.
 | When a member stops: finds out why first; replaces only an AI that cannot do the work, and tells the founder the cost | ✅ Built and tested. |
 | Prediction models checked on data they have not seen | ✅ Built and tested (a backtest against last week's numbers). |
 | Connections to OpenAI-compatible, Anthropic, local models, Hugging Face | ✅ Built. Bedrock planned. |
-| Installable desktop app (Windows, macOS, Linux) | ✅ Builds and installs; version 0.2.0. |
+| Installable desktop app (Windows, macOS, Linux) | ✅ Builds and installs; version 0.2.1. |
 | **A full project on strong real models, current design** | ❌ **Not yet done.** See "Real-model results". |
 | Web research and calculation tools for the experts | ❌ Not built. |
 | Checks of document substance | Partly: the financial model's numbers are recomputed, and foundation documents must mark assumptions and list sources. Facts are not yet checked against their sources. |

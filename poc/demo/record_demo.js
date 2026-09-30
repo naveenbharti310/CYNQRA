@@ -277,6 +277,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   // ---------- title ----------
   await page.goto(base + "/");
   await page.waitForSelector("#structure");
+  await page.check("#m-demo input");  // Cynqra opens on the founder's own idea; the video is the demo
+  await page.waitForSelector("#messy");
   await page.evaluate(() => document.fonts.ready);
   await hideGuide();
   await D("card", `<div class="dc-wrap"><span class="dc-word in">Cynqra</span><span class="dc-bar"></span>

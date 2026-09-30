@@ -231,7 +231,7 @@ def run_app(args) -> int:
         return 0
     desk = Desktop(d, args.port)
     (d / "instance.json").write_text(json.dumps({"url": desk.url, "pid": os.getpid()}), encoding="utf-8")
-    desk.autostart()
+    # no model starts by itself: the founder chooses what runs on this computer, and Cynqra chooses among what runs
     print(f"Cynqra {VERSION} running at {desk.url}", flush=True)
     stop_on_terminate()
     try:

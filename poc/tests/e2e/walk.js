@@ -32,6 +32,13 @@ function loadPlaywright() {
   try {
     await page.goto(base + "/");
     await page.waitForSelector("#structure");
+    // a first visit starts empty, on the founder's own idea; the demo is one click away
+    const blank = await page.evaluate(() => ({ name: document.querySelector("#coname").value, mode: document.querySelector("input[name=mode]:checked").value,
+      answers: [...document.querySelectorAll("[data-answer]")].map((t) => t.value).join("") }));
+    if (blank.name || blank.answers || blank.mode !== "live") errors.push(`first visit is not empty: ${JSON.stringify(blank)}`);
+    steps.push("first visit: live, nothing prefilled");
+    await page.check("#m-demo input");
+    await page.waitForSelector("#scenario");
     const scenarios = await page.$$eval("#scenario option", (o) => o.map((x) => x.value));
     if (scenarios.join() !== "bluedip,candidate_tracker,restaurant_forecast") errors.push(`demo scenarios offered: ${scenarios}`);
     steps.push("three demo scenarios offered, Bluedip first");

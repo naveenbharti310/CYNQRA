@@ -8,13 +8,27 @@ runs on Python 3.10 or newer, with the standard library only; nothing to install
 
 | To... | Do this | What it shows |
 | --- | --- | --- |
-| **Watch the demo** (free, scripted words; real code, models, tests and going live) | `python3 poc/run_poc.py`, choose **Demo**, press **Make it a brief** | The Bluedip project through all seven steps, from the founder's words to a live app, audited and accepted. Two smaller demos are in the list. |
-| **Run your own idea with an online AI** | Start as above, choose **Live**, click **Connect a provider** (OpenAI-compatible such as Hugging Face or OpenAI, or Anthropic), and name the key's environment variable or paste it into Cynqra's secrets file. Or set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` before starting. | What real AI models do with your idea |
+| **Watch the demo** (free, scripted words; real code, models, tests and going live) | `python3 poc/run_poc.py`, choose **Watch a demo instead**, press **Make it a brief** | The Bluedip project through all seven steps, from the founder's words to a live app, audited and accepted. Two smaller demos are in the list. |
+| **Run your own idea with an online AI** | Start as above (Cynqra opens on your own idea, with nothing filled in), click **Connect a provider** and paste your key into Cynqra's secrets file. Cynqra offers the provider's models released in the last 12 months, evaluates each one on its own work, then chooses a model for every team member. Answer the four questions, press **Make it a brief**, and set a budget. | What real AI models do with your idea |
 | **Run with a model on your own computer** | Install the desktop app (below) and open **This computer** to download a model. No key needed. | The same, privately, more slowly |
 | **Install the desktop app** | Download it from the repository's **Releases** page (Windows, macOS, Linux), or run `python3 poc/desktop.py` | Cynqra in its own window |
 
 Never paste a key into a chat or a document. Keys live only in environment variables, Cynqra's secrets file
 (readable only by you), or GitHub secrets.
+
+## What Cynqra decides for you, and what it never assumes
+
+A first visit is empty: no project name, no idea, no model. Cynqra asks four questions (what you want to build, who it
+is for, the result you want, anything it must or must not do) and writes the brief from your answers; it asks for a
+budget before it plans. It starts no model by itself.
+
+When a provider is connected with no models named, Cynqra reads when each model was first released (the provider's
+own dates when it gives real ones, else OpenRouter's public catalogue, read at most once a day) and offers only the
+chat models released in the last 12 months, the newest version of each family. Video, music, speech, robotics, safety
+filters and aliases are left out. **Search and choose models** on the connection lists everything, newest first, to
+add or remove any. Each new model is then evaluated on Cynqra's own work (planning a brief, and writing code that must
+pass its tests), and the Router gives each seat the model measured best at that seat's kind of work: planning for a
+cofounder, code for an engineer (`poc/tests/test_first_run.py`).
 
 ## Connect a free online AI
 
@@ -34,8 +48,7 @@ out a busy reply, falls back to plain JSON when a provider refuses a schema, and
 | Calls per minute | 12 | 30 | 30 | 5 |
 
 Leave **Local server** as "Not a local server" and keep the key in **Cynqra's secrets file** (or name an environment
-variable). Always name the models: a platform like NVIDIA lists over a hundred, and at price 0 every one of them would
-look free to the Router. Always enter the price: a model Cynqra has no price for is counted at the highest price, and
+variable). Models to offer may be left blank: Cynqra then offers only the newest ones (see above). Always enter the price: a model Cynqra has no price for is counted at the highest price, and
 the budget stop would end a free run early. Free tiers may keep what is sent to them, so test with sample ideas.
 
 ## Test it

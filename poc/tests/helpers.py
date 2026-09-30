@@ -10,6 +10,10 @@ from pathlib import Path
 
 POC = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(POC))
+# A connected model's automatic evaluation makes real calls in the background; a test that wants it turns it on.
+os.environ.setdefault("CYNQRA_AUTO_EVALUATE", "0")
+# Release dates come from a public catalogue on the internet; a test that needs them serves its own.
+os.environ.setdefault("CYNQRA_MODEL_DATES_URL", "0")
 
 from cynqra.engine import Engine  # noqa: E402
 from cynqra.intelligence import ModelSource  # noqa: E402

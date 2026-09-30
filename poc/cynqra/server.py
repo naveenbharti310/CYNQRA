@@ -27,7 +27,9 @@ POST /api/connections               connect a provider {type, name, endpoint, au
                                     env_var | secret}, server (local), models, account, region, rate_limits,
                                     settings, price_per_m, machine_usd_per_hour}; its models are discovered
 POST /api/connections/<id>/discover|update|remove   update: {models, settings, rate_limits, price_per_m,
-                                    machine_usd_per_hour, name, account, region}; then discovered again
+                                    machine_usd_per_hour, name, account, region}; then discovered again, and
+                                    each new hosted model does Cynqra's evaluation work in the background
+POST /api/connections/<id>/catalog  every model the provider lists, offered now or not, to search and choose from
 POST /api/intelligence              register an intelligence a connection offers but does not list
                                     {connection_id, ref, name, ...facts}
 POST /api/intelligence/<id>/fault|fallback|retire|probe
@@ -46,6 +48,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import os
 import re
 import shutil
 import signal
@@ -70,7 +73,7 @@ mimetypes.add_type("text/javascript", ".js")
 
 
 class App:
-    def __init__(self, data_root: Path, intelligence_factory=None, runtime=None):
+    def __init__(self, data_root: Path, intelligence_factory=None, runtime=None, auto_evaluate: bool | None = None):
         self.root = Path(data_root)
         self.root.mkdir(parents=True, exist_ok=True)
         self.factory = intelligence_factory
@@ -86,6 +89,11 @@ class App:
                 {"type": "local", "server": "llama", "name": "This computer", "auth": {"method": "none"}}, origin="app")
             self.supply.discover(local["id"])
         self.probes: dict[str, dict] = {}
+        # A newly connected model does Cynqra's evaluation work before any project relies on it, so the Router
+        # chooses from measured evidence, not from a name or a default (CYNQRA_AUTO_EVALUATE=0 turns it off).
+        self.auto_evaluate = (os.environ.get("CYNQRA_AUTO_EVALUATE", "1") != "0") if auto_evaluate is None \
+            else auto_evaluate
+        self._eval_lock = threading.Lock()
         self.engine = self._new_engine()
         self.auto = {"on": False, "delay": 0.9}
         self.last_step: dict = {}
@@ -169,12 +177,20 @@ class App:
     def supply_call(self, what: str, target: str | None, body: dict):
         sup = self.supply
         if what == "connect":
-            return sup.connect(body)
+            out = sup.connect(body)
+            self.evaluate_new(out["intelligence"])
+            return out
+        if what == "catalog":
+            return sup.catalog(target)
         if what == "discover":
-            return {"intelligence": sup.discover(target), "connection": sup.connections.public(target)}
+            found = sup.discover(target)
+            self.evaluate_new(found)
+            return {"intelligence": found, "connection": sup.connections.public(target)}
         if what == "update":
             sup.connections.update(target, body)
-            return {"intelligence": sup.discover(target), "connection": sup.connections.public(target)}
+            found = sup.discover(target)
+            self.evaluate_new(found)
+            return {"intelligence": found, "connection": sup.connections.public(target)}
         if what == "disconnect":
             sup.remove_connection(target)
             return {"ok": True}
@@ -206,6 +222,33 @@ class App:
             threading.Thread(target=go, daemon=True).start()
             return self.probes[target]
         raise KeyError(what)
+
+    def evaluate_new(self, entries: list[dict]) -> None:
+        """Every hosted model with no measured record does Cynqra's evaluation work (probe.py) in the background, one
+        at a time. A model on this computer is evaluated on request: starting it loads gigabytes."""
+        if not self.auto_evaluate:
+            return
+        reg = self.supply.registry
+        todo = [e["id"] for e in entries if not e.get("local") and e.get("status") != "retired"
+                and not reg.stats(e["id"])["attempts"]
+                and (self.probes.get(e["id"]) or {}).get("state") not in ("queued", "running", "done")]
+        for mid in todo:
+            self.probes[mid] = {"state": "queued", "log": [], "auto": True}
+        if not todo:
+            return
+
+        def go():
+            with self._eval_lock:
+                for mid in todo:
+                    if self._stop.is_set():
+                        return
+                    self.probes[mid]["state"] = "running"
+                    try:
+                        r = probe(self.supply, mid, log=self.probes[mid]["log"].append)
+                        self.probes[mid].update(state="done", result=r)
+                    except Exception as exc:  # noqa: BLE001 - shown on the intelligence's card
+                        self.probes[mid].update(state="error", error=str(exc))
+        threading.Thread(target=go, daemon=True).start()
 
     def close(self) -> None:
         self._stop.set()
@@ -395,7 +438,7 @@ def make_server(app: App, port: int = 8750) -> ThreadingHTTPServer:
                     return self._send(404, {"error": "not found"})
                 app.quit.set()
                 return self._send(200, {"ok": True})
-            m = re.match(r"^/api/connections/(conn_[a-z0-9]+)/(discover|update|remove)$", path)
+            m = re.match(r"^/api/connections/(conn_[a-z0-9]+)/(discover|update|remove|catalog)$", path)
             if m:
                 what = {"remove": "disconnect"}.get(m.group(2), m.group(2))
                 return self._guard(lambda: app.supply_call(what, m.group(1), body))

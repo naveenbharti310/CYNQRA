@@ -5,7 +5,7 @@
 const S = {
   teamOption: "recommended",
   st: null, view: "company", worker: null, replayTask: null, replay: null, replayKey: "",
-  seen: -1, sig: "", err: "", busy: false, graph: null, mode: "demo", shown: new Set(), guide: true, modelOpen: false,
+  seen: -1, sig: "", err: "", busy: false, graph: null, browse: {}, answers: {}, budgetGiven: false, mode: "live", shown: new Set(), guide: true, modelOpen: false,
   regOpen: false, probes: {}, sup: null, scenario: "bluedip",
 };
 /* Cards animate in only the first time they appear; a repaint must not replay it for every card. */
@@ -191,10 +191,10 @@ function wizard() {
   const scen = scenario();
   const modeChoice = phase === "new" ? `
       <label class="lbl" for="coname">Project name</label>
-      <input type="text" id="coname" value="${esc(scen && S.mode === "demo" ? scen.title : "My project")}">
+      <input type="text" id="coname" placeholder="For example: Fitslot" value="${esc(scen && S.mode === "demo" ? scen.title : (S.answers.name || ""))}">
       ${`<div class="modes" role="radiogroup" aria-label="Intelligence">
-        <label class="mode ${S.mode === "demo" ? "on" : ""}" id="m-demo"><input type="radio" name="mode" value="demo" ${S.mode === "demo" ? "checked" : ""}>Demo: scripted workers</label>
-        <label class="mode ${S.mode === "live" ? "on" : ""}" id="m-live"><input type="radio" name="mode" value="live" ${S.mode === "live" ? "checked" : ""}>Live: real models</label>
+        <label class="mode ${S.mode === "live" ? "on" : ""}" id="m-live"><input type="radio" name="mode" value="live" ${S.mode === "live" ? "checked" : ""}>Your idea, real AI models</label>
+        <label class="mode ${S.mode === "demo" ? "on" : ""}" id="m-demo"><input type="radio" name="mode" value="demo" ${S.mode === "demo" ? "checked" : ""}>Watch a demo instead</label>
       </div>
       ${S.mode === "demo" ? `<label class="lbl" for="scenario">Demo scenario</label>
         <select id="scenario" data-keep="no">${(st.scenarios || []).map((x) => `<option value="${esc(x.id)}" ${x.id === S.scenario ? "selected" : ""}>${esc(x.title)}</option>`).join("")}</select>` : intelSources()}`}` : "";
@@ -208,8 +208,7 @@ function wizard() {
       <h1 class="hero">Describe what you want to build.</h1>
       <p class="lede">Not a prompt: a vision. Say what you want to build and the outcome you want. Cynqra works out what it takes, and the organisation that can build it around you.</p>
       ${modeChoice}
-      <label class="lbl" for="messy">What you want to build, in your own words</label>
-      <textarea class="big" id="messy" placeholder="For example: an app that helps independent gyms fill their empty classes.">${esc(obj ? obj.statement : scen && S.mode === "demo" ? scen.messy : "")}</textarea>
+      ${ideaInputs(obj, scen, phase)}
       <div class="row"><button class="btn primary" id="structure" ${S.busy ? "disabled" : ""}>${obj ? "Make the brief again" : "Make it a brief"}</button></div>
       <div class="err" role="alert">${S.errAt ? "" : esc(S.err)}</div>
       <p class="small muted" style="margin:0">${(phase === "new" ? S.mode === "demo" : st.meta.mode === "demo")
@@ -217,6 +216,29 @@ function wizard() {
         : `Live mode: every worker is bound to an intelligence from the ones available, chosen from measured evidence.${isDesktop() ? " A model on this computer takes minutes per step; the Work view shows what it is doing." : ""}`}</p>
     </div>
     <div class="wiz-right">${right}</div></div></div>`;
+}
+
+// A live project starts from nothing: Cynqra asks what it needs, then writes the brief from the answers.
+const QUESTIONS = [
+  ["what", "What do you want to build?", "For example: an app that helps independent gyms fill their empty classes.", true],
+  ["who", "Who is it for?", "For example: owners of small gyms with 50 to 300 members.", true],
+  ["result", "What result do you want? How will you know it worked?", "For example: classes at least 70% full within three months.", true],
+  ["rules", "Anything it must or must not do? (optional)", "For example: no card payments; it has to run on a phone.", false]];
+const Q_LABEL = { what: "What I want to build", who: "Who it is for", result: "The result I want", rules: "What it must or must not do" };
+const composeIdea = (a) => QUESTIONS.filter(([k]) => (a[k] || "").trim()).map(([k]) => `${Q_LABEL[k]}: ${a[k].trim()}`).join("\n");
+function parseIdea(text) {
+  const out = {}, keys = Object.keys(Q_LABEL);
+  for (const line of String(text || "").split("\n")) { const k = keys.find((x) => line.startsWith(Q_LABEL[x] + ": ")); if (k) out[k] = line.slice(Q_LABEL[k].length + 2); }
+  if (!Object.keys(out).length && text) out.what = text;
+  return out;
+}
+function ideaInputs(obj, scen, phase) {
+  const demo = phase === "new" ? S.mode === "demo" : S.st.meta.mode === "demo";
+  if (demo) return `<label class="lbl" for="messy">What the founder in this demo wants, in their own words</label>
+      <textarea class="big" id="messy">${esc(obj ? obj.statement : scen ? scen.messy : "")}</textarea>`;
+  const a = Object.keys(S.answers).length > 1 ? S.answers : { ...parseIdea(obj ? obj.statement : ""), ...S.answers };
+  return QUESTIONS.map(([k, q, ph, req]) => `<label class="lbl" for="q_${k}">${esc(q)}</label>
+      <textarea class="${k === "what" ? "big" : ""}" rows="${k === "what" ? 3 : 2}" id="q_${k}" data-answer="${k}" ${req ? 'aria-required="true"' : ""} placeholder="${esc(ph)}">${esc(a[k] || "")}</textarea>`).join("");
 }
 
 const scenario = () => ((S.st && S.st.scenarios) || []).find((x) => x.id === ((S.st.meta || {}).scenario || S.scenario));
@@ -236,8 +258,10 @@ function objectiveCard(obj) {
     ${obj.notice ? `<div class="notice">${esc(obj.notice)}</div>` : ""}
     <div class="fields">${fields}
       <div class="field" style="border-style:dashed"><div class="caps">Budget</div>
-        <div class="between"><label for="usd">Budget, US dollars (hard cap)</label><input type="number" id="usd" data-keep="no" min="0" step="0.5" value="${esc(s.budget_usd)}" style="width:110px"></div>
-        <div class="between"><label for="tv">Value of an hour, US dollars</label><input type="number" id="tv" data-keep="no" min="0" step="1" value="${esc(s.time_value_per_hour)}" style="width:110px"></div></div>
+        ${st.meta.mode === "live" ? `<div class="between"><label for="usd">Budget, US dollars (hard cap), required</label><input type="number" id="usd" min="0" step="0.5" placeholder="e.g. 5" value="${esc(S.budgetGiven ? s.budget_usd : "")}" style="width:110px"></div>
+        <div class="between"><label for="tv">Value of an hour of your time, US dollars (optional)</label><input type="number" id="tv" min="0" step="1" placeholder="e.g. 50" value="${esc(S.budgetGiven ? s.time_value_per_hour : "")}" style="width:110px"></div>`
+        : `<div class="between"><label for="usd">Budget, US dollars (hard cap)</label><input type="number" id="usd" data-keep="no" min="0" step="0.5" value="${esc(s.budget_usd)}" style="width:110px"></div>
+        <div class="between"><label for="tv">Value of an hour, US dollars</label><input type="number" id="tv" data-keep="no" min="0" step="1" value="${esc(s.time_value_per_hour)}" style="width:110px"></div>`}</div>
       <details class="field" style="border-style:dashed"><summary class="caps">Constraints, optional</summary>${cons}</details>
     </div>
     <div class="between" style="margin-top:auto;padding-top:14px;border-top:1px solid var(--line)">
@@ -256,7 +280,7 @@ function founderStep() {
       <h1 class="hero">Define yourself.</h1>
       <p class="lede">Your experience, your skills, what you can contribute. ${demo ? "Cynqra fits the team around you" : "Cynqra builds the organisation again around what you write"}: no seat for what you bring yourself, and an area you lead gets no AI cofounder; that seat reports to you.</p>
       <label class="lbl" for="f_background">Your background</label>
-      <textarea class="big" id="f_background" data-keep="yes" placeholder="For example: ten years as a backend engineer; I know restaurants from running one.">${esc(f.background || "")}</textarea>
+      <textarea class="big" id="f_background" data-keep="yes" placeholder="For example: ten years as a backend engineer; I know the customers because I was one.">${esc(f.background || "")}</textarea>
       <div class="stack" style="gap:8px"><span class="lbl">What you lead yourself</span>
         ${LEADS.map(([k, l, n]) => `<label class="lead-opt ${off ? "off" : ""}"><input type="checkbox" data-founder-lead="${k}" data-keep="no" ${off} ${leads.includes(k) ? "checked" : ""}><span>${l} <span class="muted">(${n})</span></span></label>`).join("")}
         ${demo ? `<p class="small muted" style="margin:0">In a demo the founder is part of the script, so these are fixed. In live mode the team is fitted to what you choose.</p>` : ""}</div>
@@ -441,7 +465,7 @@ function intelSources() {
   const env = ((S.sup && S.sup.environment) || []).filter((n) => !conns.some((c) => c.name === n));
   const n = avail.length || env.length;
   return `<div class="card stack" style="padding:14px 16px"><div class="between"><b>Intelligence available</b><span class="pill ${n ? "teal" : "amber"}">${avail.length ? `${avail.length} model${avail.length === 1 ? "" : "s"}` : env.length ? `${env.length} source${env.length === 1 ? "" : "s"}` : "None yet"}</span></div>
-    <span class="small muted">${avail.length ? `From ${esc(conns.filter((c) => avail.some((m) => m.connection_id === c.id)).map((c) => c.name).join(", "))}. Cynqra picks which one powers each worker from measured evidence.`
+    <span class="small muted">${avail.length ? `From ${esc(conns.filter((c) => avail.some((m) => m.connection_id === c.id)).map((c) => c.name).join(", "))}. Cynqra evaluates each one on its own work, then chooses which one powers each team member.`
       : env.length ? `From this computer's settings: ${esc(env.join(", "))}. Connected when you start; Cynqra picks which model powers each worker from measured evidence.`
       : "Download an open model to this computer, or connect a provider such as Hugging Face, OpenAI or Anthropic."}</span>
     <div class="row wrap" style="gap:8px">${isDesktop() ? `<button class="btn sm" data-model-open="1">Models on this computer</button>` : ""}<button class="btn sm" data-reg-open="1">Connect a provider</button></div></div>`;
@@ -480,9 +504,9 @@ function modelScreen() {
     const running = m.id === r.model && r.state === "ready";
     const label = m.installed ? "Start" : m.partial_gb ? `Resume download (${m.partial_gb} of ${m.size_gb} GB)` : `Download ${m.size_gb} GB and start`;
     const action = running ? `<span class="pill green">Running</span>`
-      : `<button class="btn ${m.recommended ? "primary" : ""}" data-rt-start="${esc(m.id)}" ${working || S.busy ? "disabled" : ""}>${label}</button>`;
-    return `<div class="mcard ${m.recommended ? "rec" : ""} ${running ? "on" : ""}">
-      <div class="between"><b>${esc(m.name)}</b><span class="row" style="gap:6px">${m.recommended ? `<span class="pill teal">Recommended for this computer</span>` : ""}
+      : `<button class="btn" data-rt-start="${esc(m.id)}" ${working || S.busy ? "disabled" : ""}>${label}</button>`;
+    return `<div class="mcard ${running ? "on" : ""}">
+      <div class="between"><b>${esc(m.name)}</b><span class="row" style="gap:6px">${m.fits ? `<span class="pill">Fits this computer's memory</span>` : ""}
         ${m.fits ? "" : `<span class="pill amber">Needs ${m.min_gb} GB of memory</span>`}</span></div>
       <p class="small" style="margin:6px 0 10px">${esc(m.about)}</p>
       <div class="between"><span class="small muted mono">${m.size_gb} GB · ${Math.round(m.ctx / 1024)}K context${m.installed ? " · downloaded" : ""}</span>${action}</div></div>`;
@@ -761,11 +785,14 @@ function connCard(c) {
       <span class="pill ${c.status === "connected" ? "teal" : "warn"}">${esc(c.status)}</span></div>
     ${c.endpoint ? `<div class="kv"><span>Endpoint</span><span class="mono small">${esc(c.endpoint)}</span></div>` : ""}
     <div class="kv"><span>Credential</span><span>${cr.method === "none" ? "none needed" : `${esc(auth)}: ${cr.present ? "present" : esc(cr.status || "missing")}`}</span></div>
-    <div class="kv"><span>Offers</span><span>${offered.length ? esc(offered.map((m) => m.name).join(", ")) : "nothing yet"}</span></div>
+    <div class="kv"><span>Offers</span><span>${offered.length ? esc(offered.slice(0, 6).map((m) => m.name).join(", ")) + (offered.length > 6 ? ` and ${offered.length - 6} more` : "") : "nothing yet"}</span></div>
     ${c.rate_limits && c.rate_limits.calls_per_minute ? `<div class="kv"><span>Rate limit</span><span>${esc(c.rate_limits.calls_per_minute)} calls per minute</span></div>` : ""}
     <div class="kv"><span>Added</span><span>${esc(c.permission)}</span></div>
     ${c.status_note ? `<p class="small muted" style="margin:0">${esc(c.status_note)}</p>` : ""}
-    <div class="row wrap" style="gap:8px"><button class="btn sm" data-discover="${esc(c.id)}">Discover again</button>
+    ${(() => { const ids = offered.map((m) => m.id), q = ids.filter((i) => ["queued", "running"].includes((S.probes[i] || {}).state)).length;
+      return q ? `<div class="notice small">Evaluating ${q} of ${ids.length} model${ids.length === 1 ? "" : "s"} on Cynqra's own work. Nothing is assigned on a name or a default.</div>` : ""; })()}
+    ${browser(c)}
+    <div class="row wrap" style="gap:8px">${c.origin === "demo" || c.type === "local" ? "" : `<button class="btn sm" data-browse="${esc(c.id)}">${S.browse[c.id] ? "Close the model list" : "Search and choose models"}</button>`}<button class="btn sm" data-discover="${esc(c.id)}">Discover again</button>
       ${c.origin === "demo" ? "" : `<button class="btn sm" data-disconnect="${esc(c.id)}">Remove</button>`}</div></div>`;
 }
 
@@ -781,10 +808,11 @@ function intelCard(m) {
     <div class="kv"><span>Price</span><span class="mono">${m.local ? `$${m.compute_usd_per_hour}/h of this computer` : `$${m.price_in} in, $${m.price_out} out per M tokens`}</span></div>
     <div class="kv"><span>Regression check</span><span>${esc((m.regression || {}).status || "n/a")}</span></div>
     <div class="kv"><span>Calls, errors, speed</span><span class="mono">${o.calls}, ${o.call_errors}, ${o.write_tps ? o.write_tps + " tokens/s" : "n/a"}</span></div>
+    ${evalLine(m, pr)}
     <h3 style="font-size:14px;margin-top:4px">Measured on Cynqra's work</h3>${perfRows(m.performance)}
     ${Object.keys(f).length ? `<div class="notice small">Fault set: ${f.offline ? "offline" : ""}${f.offline && f.max_reply ? ", " : ""}${f.max_reply ? `replies capped at ${f.max_reply} tokens` : ""}</div>` : ""}
     <div class="row wrap" style="gap:8px">
-      <button class="btn sm" data-probe="${esc(m.id)}" ${pr.state === "running" ? "disabled" : ""}>${pr.state === "running" ? "Probing..." : "Probe it"}</button>
+      <button class="btn sm" data-probe="${esc(m.id)}" ${["running", "queued"].includes(pr.state) ? "disabled" : ""}>${pr.state === "running" ? "Evaluating..." : pr.state === "queued" ? "Waiting to be evaluated" : o.calls ? "Evaluate again" : "Evaluate it"}</button>
       <button class="btn sm" data-fault-off="${esc(m.id)}" data-on="${f.offline ? "0" : "1"}">${f.offline ? "Bring back online" : "Take offline"}</button>
       <input type="number" id="cap_${esc(m.id)}" min="0" step="10" placeholder="reply cap" value="${esc(f.max_reply || "")}" style="width:100px" aria-label="Reply cap in tokens">
       <button class="btn sm" data-fault-cap="${esc(m.id)}">Set reply cap</button>
@@ -792,6 +820,37 @@ function intelCard(m) {
       <button class="btn sm" data-fallback="${esc(m.id)}">Set fallback</button>
       <button class="btn sm" data-retire="${esc(m.id)}">Retire</button></div>
     ${pr.log && pr.log.length ? `<pre class="log">${esc(pr.log.join("\n"))}${pr.error ? "\n" + esc(pr.error) : ""}</pre>` : ""}</div>`;
+}
+
+// Cynqra evaluates every connected model on its own work before relying on it: planning a founder's words into a
+// brief (what a cofounder does) and writing code that passes its tests (what an engineer does).
+function evalLine(m, pr) {
+  const st = pr.state;
+  if (st === "queued") return `<div class="notice small">Waiting for its evaluation: Cynqra will have it plan a brief and write code that must pass tests.</div>`;
+  if (st === "running") return `<div class="notice small">Being evaluated now: planning a brief, then writing code that must pass its tests. This can take a few minutes on a free endpoint.</div>`;
+  if (st === "error") return `<div class="notice warn small">The evaluation could not finish: ${esc(pr.error || "")}</div>`;
+  if (st === "done") return `<div class="notice small">Evaluated. Cynqra uses these measurements to choose which team members this model powers.</div>`;
+  return m.performance.overall.calls ? "" : `<div class="notice small">Not evaluated yet. Press "Evaluate it" so Cynqra can measure it before choosing it for anyone.</div>`;
+}
+
+// The models a connection's provider lists: search them and choose which ones Cynqra may use.
+function browser(c) {
+  const b = S.browse[c.id];
+  if (!b) return "";
+  if (b.loading) return `<div class="notice small">Reading the list of models from ${esc(c.name)}...</div>`;
+  if (b.err) return `<div class="notice warn small">${esc(b.err)}</div>`;
+  const month = (t) => t ? new Date(t * 1000).toLocaleDateString(undefined, { month: "short", year: "numeric" }) : "";
+  const all = b.models || [], shown = all.filter((x) => b.all || x.current || b.sel.has(x.ref)), hidden = all.length - shown.length;
+  const list = shown.map((x) => `<label class="mb-row" data-mb-name="${esc((x.ref + " " + x.name).toLowerCase())}">
+      <input type="checkbox" data-mb="${esc(c.id)}" value="${esc(x.ref)}" ${b.sel.has(x.ref) ? "checked" : ""}>
+      <span class="mono small">${esc(x.ref)}</span>
+      <span class="small muted">${x.released ? `Released ${esc(month(x.released))}` : "Release date unknown"}${x.current ? "" : " · older"}</span></label>`).join("");
+  return `<div class="stack mbrowser" style="gap:8px">
+    <p class="small muted" style="margin:0">${b.dates ? `Newest first. Shown: models released in the last 12 months, the newest version of each.` : "Release dates could not be read, so every model is listed."}${hidden ? ` <button class="linkbtn" data-mb-all="${esc(c.id)}">Show ${hidden} older or undated model${hidden === 1 ? "" : "s"}</button>` : b.all && b.dates ? ` <button class="linkbtn" data-mb-all="${esc(c.id)}">Show only the latest</button>` : ""}</p>
+    <input type="search" id="mb_q_${esc(c.id)}" data-mb-search="${esc(c.id)}" placeholder="Search ${esc(shown.length)} models, e.g. kimi, gemini, glm" aria-label="Search models">
+    <div class="mb-list">${list || '<p class="small muted">The provider lists no chat models.</p>'}</div>
+    <div class="between"><span class="small muted" id="mb_n_${esc(c.id)}">${b.sel.size} chosen. Cynqra evaluates each new one, then decides who it powers.</span>
+      <button class="btn sm primary" data-mb-save="${esc(c.id)}" ${S.busy ? "disabled" : ""}>Use the chosen models</button></div></div>`;
 }
 
 function vIntelligence() {
@@ -808,7 +867,7 @@ function vIntelligence() {
         <label class="fld"><span>Key</span><select id="c_auth"><option value="secret">In Cynqra's secrets file</option><option value="env">In an environment variable</option><option value="none">No key</option></select></label>
         <label class="fld"><span>Environment variable</span><input type="text" id="c_env" placeholder="e.g. OPENAI_API_KEY"></label>
         <label class="fld"><span>Key (secrets file only)</span><input type="password" id="c_secret" autocomplete="off"></label>
-        <label class="fld wide"><span>Models to offer</span><input type="text" id="c_models" placeholder="blank: every model it lists"></label>
+        <label class="fld wide"><span>Models to offer</span><input type="text" id="c_models" placeholder="blank: the newest models it lists (last 12 months)"></label>
         <label class="fld"><span>Price in, $ per million tokens</span><input type="number" id="c_in" step="0.01"></label>
         <label class="fld"><span>Price out, $ per million tokens</span><input type="number" id="c_out" step="0.01"></label>
         <label class="fld"><span>Calls per minute</span><input type="number" id="c_rpm"></label>
@@ -972,19 +1031,23 @@ function bind() {
   $$(".mode input").forEach((r) => r.onchange = () => {
     if (!r.checked) return;
     S.mode = r.value;
-    const x = scenario(), m = $("#messy"), c = $("#coname");  // live mode starts from your idea, not the demo's
-    if (x && m && c) {
-      if (r.value === "live" && m.value === x.messy) { m.value = ""; if (c.value === x.title) c.value = "My project"; }
-      if (r.value === "demo" && !m.value.trim()) { m.value = x.messy; c.value = x.title; }
-    }
-    paint(true);
+    paint(true);  // live starts from your own answers; a demo shows its founder's words
   });
   const sc = $("#scenario");
   if (sc) sc.onchange = () => { S.scenario = sc.value; const x = scenario(); if (x) { $("#messy").value = x.messy; $("#coname").value = x.title; } paint(true); };
   const on = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
   on("structure", () => {
-    const isNew = S.st.meta.phase === "new", name = isNew ? $("#coname").value : "", messy = $("#messy").value;
-    const mode = (($("input[name=mode]:checked") || {}).value) || S.mode;
+    const isNew = S.st.meta.phase === "new", name = isNew ? ($("#coname") || {}).value || "" : "";
+    const mode = isNew ? ((($("input[name=mode]:checked") || {}).value) || S.mode) : S.st.meta.mode;
+    let messy = ($("#messy") || {}).value || "";
+    if (mode === "live") {
+      const ans = {}; $$("[data-answer]").forEach((t) => ans[t.dataset.answer] = t.value);
+      S.answers = { ...ans, name };
+      const missing = QUESTIONS.filter(([k, , , req]) => req && !(ans[k] || "").trim()).map(([, q]) => q.replace(/\?.*$/, "?"));
+      if (isNew && !name.trim()) missing.unshift("A project name");
+      if (missing.length) { act(async () => { throw new Error("Cynqra needs a little more before it can write your brief. Please answer: " + missing.join(" ")); }); return; }
+      messy = composeIdea(ans);
+    }
     act(async () => {
       if (isNew) await api("/api/company", { name, mode, scenario: S.scenario });
       await api("/api/objective/draft", { messy });
@@ -993,7 +1056,10 @@ function bind() {
   on("submit", () => {
     const fields = {}; $$("[data-field]").forEach((i) => fields[i.dataset.field] = i.value);
     const constraints = {}; $$("[data-constraint]").forEach((i) => constraints[i.dataset.constraint] = i.value);
-    const usd = Number($("#usd").value), tv = Number($("#tv").value);
+    const usdRaw = $("#usd").value.trim(), tvRaw = $("#tv").value.trim();
+    if (S.st.meta.mode === "live" && !(Number(usdRaw) > 0)) { act(async () => { throw new Error("Set a budget in US dollars first: it is the most Cynqra may spend on AI for this project, and it never goes over it."); }); return; }
+    const usd = usdRaw === "" ? null : Number(usdRaw), tv = tvRaw === "" ? null : Number(tvRaw);
+    S.budgetGiven = true;
     act(async () => {
       await api("/api/objective/fields", { fields });
       await api("/api/objective/guardrails", { budget_usd: usd, time_value_per_hour: tv, constraints });
@@ -1033,7 +1099,7 @@ function bind() {
   on("resume", () => act(() => api("/api/run/resume", {})));
   on("auto", () => act(() => api("/api/run/auto", { on: !S.st.auto.on })));
   on("kill", () => act(() => api("/api/killswitch", { on: !S.st.meta.frozen })));
-  on("reset", () => { if (window.confirm("Archive this run and start a new one? Nothing is deleted.")) act(async () => { await api("/api/reset", {}); S.view = "company"; S.seen = -1; S.mode = "demo"; }); });
+  on("reset", () => { if (window.confirm("Archive this run and start a new one? Nothing is deleted.")) act(async () => { await api("/api/reset", {}); S.view = "company"; S.seen = -1; S.mode = "live"; S.answers = {}; S.budgetGiven = false; }); });
   on("ask", () => {
     const q = $("#gq").value, subject = $("#gs").value.trim();
     act(async () => {
@@ -1066,6 +1132,29 @@ function bind() {
   const auth = $("#c_auth");
   if (auth) { const sync = () => { const m = auth.value, show = (id, on) => { const el = $("#" + id); if (el && el.closest("label")) el.closest("label").style.display = on ? "" : "none"; };
     show("c_env", m === "env"); show("c_secret", m === "secret"); }; auth.onchange = sync; sync(); }
+  $$("[data-browse]").forEach((b) => b.onclick = async () => {
+    const id = b.dataset.browse;
+    if (S.browse[id]) { delete S.browse[id]; paint(true); return; }
+    S.browse[id] = { loading: true, sel: new Set() }; paint(true);
+    try {
+      const r = await api(`/api/connections/${id}/catalog`, {});
+      S.browse[id] = { models: r.models, dates: r.dates, all: !r.dates, sel: new Set(r.models.filter((x) => x.offered).map((x) => x.ref)) };
+    } catch (e) { S.browse[id] = { err: e.message, sel: new Set() }; }
+    paint(true);
+  });
+  $$("[data-mb-all]").forEach((x) => x.onclick = () => { const b = S.browse[x.dataset.mbAll]; if (b) { b.all = !b.all; paint(true); } });
+  $$("[data-mb-search]").forEach((q) => q.oninput = () => {
+    const t = q.value.trim().toLowerCase(), box = q.closest(".mbrowser");
+    box.querySelectorAll(".mb-row").forEach((r) => r.style.display = !t || r.dataset.mbName.includes(t) ? "" : "none");
+  });
+  $$("[data-mb]").forEach((x) => x.onchange = () => { const b = S.browse[x.dataset.mb]; if (!b) return;
+    if (x.checked) b.sel.add(x.value); else b.sel.delete(x.value);
+    const n = $("#mb_n_" + x.dataset.mb); if (n) n.textContent = `${b.sel.size} chosen. Cynqra evaluates each new one, then decides who it powers.`; });
+  $$("[data-mb-save]").forEach((b) => b.onclick = () => {
+    const id = b.dataset.mbSave, sel = [...((S.browse[id] || {}).sel || [])];
+    if (!sel.length) { act(async () => { throw new Error("Choose at least one model, or remove the connection."); }); return; }
+    act(async () => { await api(`/api/connections/${id}/update`, { models: sel }); delete S.browse[id]; });
+  });
   $$("[data-discover]").forEach((b) => b.onclick = () => { const id = b.dataset.discover; act(() => api(`/api/connections/${id}/discover`, {})); });
   $$("[data-disconnect]").forEach((b) => b.onclick = () => { const id = b.dataset.disconnect; if (window.confirm("Remove this connection? Its credential is deleted and the intelligence it offered is retired; their measured record is kept.")) act(() => api(`/api/connections/${id}/remove`, {})); });
   $$("[data-probe]").forEach((b) => b.onclick = () => { const id = b.dataset.probe; act(async () => { S.probes[id] = await api(`/api/intelligence/${id}/probe`, {}); }); });

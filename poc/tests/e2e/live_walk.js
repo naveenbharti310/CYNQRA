@@ -28,7 +28,9 @@ function loadPlaywright() {
     await page.waitForSelector("#structure");
     await page.check("#m-live input");
     await page.fill("#coname", "Live UI check");
-    await page.fill("#messy", objective);
+    await page.fill("#q_what", objective);
+    await page.fill("#q_who", "The shop's own staff.");
+    await page.fill("#q_result", "No custom order is lost or missed.");
     await page.click("#structure");
     steps.push("live mode chosen, objective sent");
     await page.waitForSelector("#submit", { timeout: LONG });
@@ -36,6 +38,7 @@ function loadPlaywright() {
     if (!/Live mode/.test(pill)) errors.push(`mode pill says ${pill}`);
     steps.push(`objective structured, ${await page.$$eval(".field.inf", (e) => e.length)} inferred fields`);
     await shot("objective");
+    await page.fill("#usd", "3");
     await page.click("#submit");
     await page.waitForSelector("#approve-workforce:not([disabled])", { timeout: LONG });
     steps.push(`workforce proposed: ${await page.$$eval(".wiz-right .tbl tbody tr", (r) => r.length)} roles`);

@@ -82,6 +82,26 @@ class IntelligenceSupply:
                 self.registry.retire(m["id"], "no longer offered by its provider connection")
         return [self.registry.register(f, connection_id=connection_id) for f in found]
 
+    def catalog(self, connection_id: str) -> dict:
+        """Everything the connection's provider lists, whether it is offered now or not, so the founder can search it
+        and choose which models Cynqra may use. Nothing is registered by looking."""
+        import copy
+        conn = copy.deepcopy(self.connections.get(connection_id))
+        chosen = list(conn.get("models") or [])
+        conn["models"], conn["_all"] = [], True
+        adapter = self.adapters[conn["type"]]
+        found = adapter.discover(conn, self.credentials.resolve(conn["credential_id"]))
+        from .adapters import current
+        fresh = set(current([f["ref"] for f in found], {f["ref"]: f.get("released") for f in found}))
+        active = {m["ref"] for m in self.registry.models() if m["connection_id"] == connection_id}
+        rows = [{"ref": f["ref"], "name": f.get("name") or f["ref"], "context": f.get("context"),
+                 "released": f.get("released"), "current": f["ref"] in fresh, "offered": f["ref"] in active}
+                for f in found]
+        # newest first; models with no known date last
+        rows.sort(key=lambda x: (-(x["released"] or 0), x["ref"].lower()))
+        return {"connection_id": connection_id, "limited": bool(chosen), "dates": any(r["released"] for r in rows),
+                "models": rows}
+
     def connect_environment(self) -> list[dict]:
         """The intelligence this process's environment names (API keys, a local server, a model command), connected
         with credentials that reference the environment variables, never copies of them."""

@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -44,7 +46,76 @@ WORST_PRICE = (10.00, 50.00)
 # Provider types designed for but not built in V1. Listed so the product can say so; they cannot be connected.
 PLANNED = {"bedrock": "AWS Bedrock (IAM authentication): planned after V1; it is an adapter added here"}
 NOT_CHAT = ("embed", "tts", "whisper", "dall-e", "moderation", "image", "audio", "realtime", "transcribe", "search",
-            "davinci", "babbage", "computer-use")
+            "davinci", "babbage", "computer-use",
+            # what a provider lists that cannot do a team member's work: video, music, speech, robotics, safety
+            # filters, rerankers, parsers and detectors
+            "veo", "lyria", "banana", "robotics", "-live", "translate", "aqa", "guard", "safety", "reward", "rerank",
+            "parse", "detector", "calibration", "deplot", "kosmos", "clip", "riva", "cosmos", "neva", "vila", "fuyu",
+            "retriever", "ocr", "asr", "speech", "customtools", "antigravity")
+RECENT_DAYS = 365  # a model first listed within a year counts as current
+_DATES: dict = {"at": 0.0, "url": None, "map": {}}
+_TRIM = re.compile(r"-(instruct|it|chat|preview|latest|exp|v\d+(\.\d+)*|\d{2}-\d{4}|\d{4}-\d{2}-\d{2}|\d{8})$")
+
+
+def model_key(ref: str) -> str:
+    """A model's name without its vendor, provider suffix, "instruct"/"preview" tags or date stamps, so the same model
+    matches across catalogues: models/gemini-3.8-flash and google/gemini-3.8-flash-preview are one model."""
+    n = ref.lower().removeprefix("models/").split("/")[-1].split(":")[0]
+    prev = None
+    while prev != n:
+        prev, n = n, _TRIM.sub("", n)
+    return n
+
+
+def release_dates() -> dict[str, float]:
+    """When each model was first listed (Unix time), from OpenRouter's public catalogue: no key, open and closed
+    models alike. Read at most once a day; unreachable, it is an empty map and nothing is judged by date.
+    CYNQRA_MODEL_DATES_URL names another catalogue in the same format, or 0 for none."""
+    url = os.environ.get("CYNQRA_MODEL_DATES_URL", "https://openrouter.ai/api/v1/models")
+    if url in ("", "0"):
+        return {}
+    if _DATES["url"] == url and time.time() - _DATES["at"] < 86400:
+        return _DATES["map"]
+    try:
+        data = _get_json(url, {}, timeout=15)
+    except SupplyError:
+        data = {}
+    out: dict[str, float] = {}
+    for x in (data.get("data") or []) if isinstance(data, dict) else []:
+        if isinstance(x, dict) and x.get("id") and isinstance(x.get("created"), (int, float)):
+            k = model_key(x["id"])
+            out[k] = min(out.get(k, float("inf")), float(x["created"]))
+    _DATES.update(at=time.time(), url=url, map=out)
+    return out
+
+
+def _family(ref: str) -> tuple[str, tuple]:
+    """A model's family and version: gemini-3.8-flash is ("gemini-#-flash", (3, 8))."""
+    k = model_key(ref)
+    return re.sub(r"\d+(\.\d+)*", "#", k), tuple(float(x) for x in re.findall(r"\d+(?:\.\d+)?", k))
+
+
+def dated(listing: dict[str, dict]) -> dict[str, float | None]:
+    """When each listed model was released: the provider's own date when its dates are real (they differ from model
+    to model), else the public catalogue's, else unknown."""
+    own = {r: m.get("created") for r, m in listing.items() if isinstance(m.get("created"), (int, float))}
+    real = len(set(own.values())) > max(1, len(own) // 4)
+    pub = release_dates()
+    return {r: (float(own[r]) if real and r in own else pub.get(model_key(r))) for r in listing}
+
+
+def current(refs: list[str], when: dict[str, float | None]) -> list[str]:
+    """The models worth offering: released within RECENT_DAYS, and only the newest version in each family. With no
+    release date known for any of them, the newest version in each family."""
+    cut = time.time() - RECENT_DAYS * 86400 if any(when.get(r) for r in refs) else None
+    best: dict[str, tuple] = {}
+    for r in refs:
+        if cut is not None and (when.get(r) or 0) < cut:
+            continue
+        fam, ver = _family(r)
+        if fam not in best or ver > best[fam][0]:
+            best[fam] = (ver, r)
+    return sorted(r for _, r in best.values())
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -66,6 +137,15 @@ def _get_json(url: str, headers: dict, timeout: float = 30.0):
         raise SupplyError(f"{url} answered HTTP {exc.code}: {exc.read()[:200].decode(errors='replace')}") from exc
     except (urllib.error.URLError, OSError, ValueError) as exc:
         raise SupplyError(f"could not reach {url}: {exc}") from exc
+
+
+def _auth_headers(base: str, secret: str | None) -> dict:
+    """Google takes its key in x-goog-api-key (its "AQ." keys are refused as a Bearer token); the rest take Bearer."""
+    if not secret:
+        return {}
+    if (urllib.parse.urlparse(base).hostname or "").endswith(".googleapis.com"):
+        return {"x-goog-api-key": secret}
+    return {"Authorization": f"Bearer {secret}"}
 
 
 def _allow(conn: dict) -> list[str]:
@@ -157,19 +237,34 @@ class OpenAICompatibleAdapter(ProviderAdapter):
         if not allow or hf:
             base = conn.get("endpoint") or self.DEFAULT
             try:
-                data = _get_json(base + "/models", {"Authorization": f"Bearer {secret}"} if secret else {})
-                listing = {m["id"]: m for m in (data.get("data") or []) if isinstance(m, dict) and m.get("id")}
+                data = _get_json(base + "/models", _auth_headers(base, secret))
+                # Google lists "models/gemini-..."; its chat route takes the name without the prefix
+                listing = {m["id"].removeprefix("models/"): m for m in (data.get("data") or [])
+                           if isinstance(m, dict) and m.get("id")}
             except SupplyError:
                 if not allow:
                     raise
                 # the founder named the models: they are registered, priced at the safe default, and the
                 # connection's status says the listing could not be read
                 conn["_listing_note"] = "the model listing could not be read; stated models priced at the safe default"
-        refs = allow or [i for i in listing if not any(x in i.lower() for x in NOT_CHAT)]
+        chat = [i for i in listing if not any(x in i.lower() for x in NOT_CHAT)]
+        when = dated({r: listing[r] for r in chat}) if chat and not hf else {}
+        if allow or hf or conn.get("_all"):
+            refs = allow or chat
+        else:
+            # nothing named: the models released within a year, newest of each family; the rest stay searchable
+            refs = current(chat, when)
+            older = len(chat) - len(refs)
+            if not any(when.values()):
+                conn["_listing_note"] = ("release dates could not be read, so the newest version of each model "
+                                         "family is offered; search the list to change it")
+            elif older:
+                conn["_listing_note"] = f"{older} older or duplicate model(s) left out; search the list to add one"
         out, unavailable = [], []
         for ref in refs:
             facts = {"ref": ref, "name": ref, "provider": self._host(conn), "runtime": "openai_compatible_api",
-                     "local": False, "modalities": ["text"], "json_schema": True, "tools": True}
+                     "local": False, "modalities": ["text"], "json_schema": True, "tools": True,
+                     "released": when.get(ref)}
             if hf and listing:
                 try:
                     facts.update(self._hf(ref, listing, (conn.get("_served_by") or {}).get(ref)))

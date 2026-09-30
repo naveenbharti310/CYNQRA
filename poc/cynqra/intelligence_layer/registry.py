@@ -29,7 +29,7 @@ DOWN_AFTER_ERRORS = 2  # consecutive failed calls before an intelligence counts 
 DOWN_FOR_S = 600
 FACTS = ("name", "provider", "ref", "runtime", "version", "context", "tools", "json_schema", "modalities", "mcp",
          "local", "price_in", "price_out", "compute_usd_per_hour", "license", "commercial_use", "params", "hardware",
-         "size_gb", "predict", "think", "served_by")
+         "size_gb", "predict", "think", "served_by", "released")
 
 
 def served_version(m: dict) -> str:

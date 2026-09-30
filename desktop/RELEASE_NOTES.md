@@ -26,6 +26,17 @@ to a deployed, healthy product whose tests pass:
   and were thrown away whole; 0.1.2 keeps the finished files and asks only for the rest.
 A current laptop is two to four times faster than these machines, and a Mac or a graphics card faster still.
 
+**0.2.1:** Cynqra starts from nothing and chooses nothing for you by name.
+- **A first visit is empty.** No project, no idea, no model. Cynqra asks what you want to build, who it is for, the
+  result you want and anything it must or must not do, writes the brief from your answers, and asks for a budget.
+  The demo is one click away ("Watch a demo instead").
+- **Only this year's models.** A connected provider offers only the chat models released in the last 12 months,
+  the newest of each family, not its whole catalogue (Google and NVIDIA together listed 111). **Search and choose
+  models** shows everything, newest first, with release dates.
+- **Cynqra evaluates, then assigns.** Each new model plans a brief and writes code that must pass its tests; each
+  seat then goes to the model measured best at that seat's work: planning for a cofounder, code for an engineer.
+- **Google's new "AQ." keys** work; **Kimi K3** can be told to think less and answer faster.
+
 **0.2.0:** everything since 0.1.2, in one installer:
 - **The seven steps**, from your idea to an audited product you accept, with the organisation built around you
   (you define yourself at step 3) and a real name for every AI team member. A replacement brings a new person, and

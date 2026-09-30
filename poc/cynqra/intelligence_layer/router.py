@@ -6,7 +6,8 @@ model can power many workers, and two workers with the same title can run on dif
 workloads differ (staff() scores each worker over its own work).
 
 Selection. For a kind of work k and an available model m, from the registry's measured outcomes:
-  p      chance one attempt passes verification: m's verified/attempts on k, pulled toward m's record on all kinds
+  p      chance one attempt passes verification: m's verified/attempts on k, pulled toward m's record on the closest
+         measured work (code for building work, the evaluation's planning work for coordination), else on all kinds,
          with the weight of two samples; with no history at all, 1/2 for every model (no model is favoured by name)
   c, t   cost (USD) and seconds of one attempt: m's measured means on k, else on all kinds, else the mean size every
          model has measured on k, priced at m's rate and speed, else S2's estimate of tokens per task
@@ -35,6 +36,11 @@ def _risk(kind: str) -> str:
     return roles.risk(kind) if kind in roles.TASK_TYPES else "LOW"  # assign, objective, plan: coordination work
 
 
+def proxy_kind(kind: str) -> str:
+    """The evaluation work closest to a kind of work: code for what becomes files, the objective for the rest."""
+    return "code" if kind in roles.BUILD_TYPES else "objective"
+
+
 def tokens_guess(reg: Registry, kind: str) -> float:
     others = reg.outcomes(task_kind=kind)
     return (sum(o["tokens"] for o in others) / len(others)) if others else EST_TOKENS[_risk(kind)]
@@ -43,7 +49,12 @@ def tokens_guess(reg: Registry, kind: str) -> float:
 def estimate(reg: Registry, m: dict, kind: str, time_value_per_hour: float) -> dict:
     """What one model is expected to cost, take and achieve on one kind of work, and on what evidence."""
     st_k, st_all = reg.stats(m["id"], kind), reg.stats(m["id"])
-    p_model = (st_all["verified"] + 1) / (st_all["attempts"] + 2)
+    # With no record on this kind, the closest measured work speaks first: writing code for building work, and
+    # structuring a founder's words into a plan (the evaluation's objective) for a cofounder's planning, assigning
+    # and reviewing. So a cofounder's seat goes to the model that plans best, an engineer's to the one that codes.
+    near = st_k if st_k["attempts"] else reg.stats(m["id"], proxy_kind(kind))
+    base = near if near["attempts"] else st_all
+    p_model = (base["verified"] + 1) / (base["attempts"] + 2)
     p = (st_k["verified"] + PRIOR * p_model) / (st_k["attempts"] + PRIOR)
     tokens = st_k["tokens_per_attempt"] or st_all["tokens_per_attempt"] or tokens_guess(reg, kind)
     if st_k["attempts"]:
