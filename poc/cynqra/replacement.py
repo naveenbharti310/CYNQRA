@@ -56,6 +56,9 @@ MAX_BAD_REPLIES = 3  # unusable replies in a row from one worker on one task bef
 # as the provider's side, the cautious reading: waiting costs time, replacing a capable AI costs its record.
 _STATUS = re.compile(r"\bHTTP (\d{3})\b")
 _CREDIT = re.compile(r"credits?\b|billing|payment required|insufficient[_ ](quota|credit|balance|funds)", re.I)
+# Google's free tier answers every limit with "check your plan and billing details"; the limit's name or its "retry in"
+# says whether it passes within the minute (a rate limit) or only tomorrow (the free allowance is used up)
+_PER_MINUTE = re.compile(r"per ?minute|retry in \d", re.I)
 PHRASES = (
     ("no_credit", _CREDIT),
     ("access", re.compile(r"invalid api key|unauthori[sz]ed|forbidden|authentication|is not set\b|"
@@ -69,7 +72,7 @@ PHRASES = (
 )
 PLAIN = {"outage": "its provider is not answering", "timeout": "its provider took too long to answer",
          "rate_limit": "its provider is limiting how often it may be called",
-         "no_credit": "the provider account has no credit left", "access": "the provider refused the key",
+         "no_credit": "the provider account has no credit or free allowance left for now", "access": "the provider refused the key",
          "withdrawn": "it can no longer be used", "reply": "its reply was cut off or could not be read"}
 PROVIDER_SIDE = ("outage", "timeout", "rate_limit")
 ACCOUNT = ("no_credit", "access")
@@ -84,6 +87,8 @@ def diagnose(error: str) -> str:
     m = _STATUS.search(e)
     if m:
         code = int(m.group(1))
+        if code == 429 and _PER_MINUTE.search(e):  # a free tier's per-minute limit, however its message words it
+            return "rate_limit"
         if code == 402 or (code == 429 and _CREDIT.search(e)):  # an empty account can answer 429 too
             return "no_credit"
         if code in (401, 403):

@@ -16,6 +16,27 @@ runs on Python 3.10 or newer, with the standard library only; nothing to install
 Never paste a key into a chat or a document. Keys live only in environment variables, Cynqra's secrets file
 (readable only by you), or GitHub secrets.
 
+## Connect a free online AI
+
+**What:** the settings for the online platforms that give free use, so a real team can be tested at no cost. **Why:**
+a free tier limits how often it can be called and some do not accept every way of asking for JSON; Cynqra now waits
+out a busy reply, falls back to plain JSON when a provider refuses a schema, and gives thinking models room to answer
+(`poc/tests/test_hosted_providers.py`). **How:** open **Intelligence**, then **Connect a provider**, and fill in:
+
+| Field | Google Gemini | NVIDIA Build | Mistral | Z.ai |
+| --- | --- | --- | --- | --- |
+| Get a key | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | [build.nvidia.com](https://build.nvidia.com) | [console.mistral.ai](https://console.mistral.ai) | [z.ai/model-api](https://z.ai/model-api) |
+| Provider | OpenAI-compatible API | OpenAI-compatible API | OpenAI-compatible API | OpenAI-compatible API |
+| Endpoint URL | `https://generativelanguage.googleapis.com/v1beta/openai` | `https://integrate.api.nvidia.com/v1` | `https://api.mistral.ai/v1` | `https://api.z.ai/api/paas/v4` |
+| Models to offer | the Flash model named in AI Studio | `moonshotai/kimi-k3` | the Devstral and Mistral Medium names in the console | `glm-4.7-flash` (as the console names it) |
+| Price in and out | 0 and 0 | 0 and 0 | 0 and 0 | 0 and 0 |
+| Calls per minute | 8 | 30 | 30 | 5 |
+
+Leave **Local server** as "Not a local server" and keep the key in **Cynqra's secrets file** (or name an environment
+variable). Always name the models: a platform like NVIDIA lists over a hundred, and at price 0 every one of them would
+look free to the Router. Always enter the price: a model Cynqra has no price for is counted at the highest price, and
+the budget stop would end a free run early. Free tiers may keep what is sent to them, so test with sample ideas.
+
 ## Test it
 
 ```

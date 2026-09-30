@@ -26,6 +26,15 @@ to a deployed, healthy product whose tests pass:
   and were thrown away whole; 0.1.2 keeps the finished files and asks only for the rest.
 A current laptop is two to four times faster than these machines, and a Mac or a graphics card faster still.
 
+**0.2.0:** everything since 0.1.2, in one installer:
+- **The seven steps**, from your idea to an audited product you accept, with the organisation built around you
+  (you define yourself at step 3) and a real name for every AI team member. A replacement brings a new person, and
+  the one before stays in the history with their record.
+- **Free online AI works properly:** Google Gemini, NVIDIA Build, Mistral and Z.ai can be connected with their
+  free keys. A busy free tier is waited out instead of stopping the work, a platform that refuses Cynqra's JSON
+  format is asked in a simpler one, and thinking models get room to answer. The settings for each are in the guide.
+- **Every screen redesigned** for phones, tablets and desktops, with errors shown next to the button you pressed.
+
 **0.1.2:** an engineer's reply carries only the files it writes or changes, and the other files are kept,
 so fixing one test no longer means rewriting every file; a reply cut off at the model's output limit keeps
 the files it finished and asks for the rest.

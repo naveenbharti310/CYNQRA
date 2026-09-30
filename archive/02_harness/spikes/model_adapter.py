@@ -96,11 +96,28 @@ Two faults can be set on a route, for proving that
 Cynqra notices and replaces a failing model: offline (the model cannot be
 reached) and CYNQRA_MAX_REPLY (a hard cap on the reply, so a real model
 really runs out of room). Neither invents an answer.
+
+30 Sep 2026, eighth pass: hosted OpenAI-compatible providers that are not
+Hugging Face or OpenAI (Google Gemini, NVIDIA Build, Mistral, Z.ai,
+OpenRouter). Their calls go through the same path as a local server, which
+was built for a laptop. Three things differ for a hosted API:
+  * A free tier answers "too many requests" often. Such a call is now retried
+    (HOSTED_RETRY_WAITS_S, honouring the provider's retry-after up to a
+    minute) before it counts as the provider's side; a laptop's server is
+    still never retried.
+  * Not every provider accepts a strict JSON Schema. A reply of HTTP 400 or
+    422 about response_format is sent again with plain JSON mode, then with
+    no format at all; the prompt still asks for JSON and the caller still
+    checks it. What a provider accepted is remembered for the process, so
+    later calls do not pay for the refusal again.
+  * Thinking models spend part of the reply on thinking, so a hosted call
+    gets at least HOSTED_MIN_REPLY tokens of room, as Hugging Face calls do.
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import threading
 import time
@@ -132,6 +149,12 @@ ANTHROPIC_MIN_MAX_TOKENS = 16000
 TIMEOUT_S = 600
 RETRY_STATUS = {408, 409, 429, 500, 502, 503, 504, 529}
 RETRY_WAITS_S = (2.0, 6.0)
+# a hosted free tier limits calls per minute: waits that outlast a one-minute window
+HOSTED_RETRY_WAITS_S = (5.0, 15.0, 30.0, 60.0)
+HOSTED_MIN_REPLY = 16000
+# what each hosted provider accepted as response_format, by (endpoint, model): "json_schema", "json_object" or "none"
+_JSON_MODE: dict[tuple[str, str], str] = {}
+_JSON_MODES = ("json_schema", "json_object", "none")
 EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 
 
@@ -189,14 +212,14 @@ def _post_once(url: str, body: bytes, headers: dict, timeout: float = TIMEOUT_S)
     except urllib.error.HTTPError as exc:
         detail = ""
         try:
-            detail = exc.read().decode("utf-8", "replace")[:300]
+            detail = exc.read().decode("utf-8", "replace")[:800]  # long enough to hold a limit's name
         except Exception:
             pass
         msg = f"HTTP {exc.code} from provider: {detail}"
         if exc.code in RETRY_STATUS:
             wait = None
             try:
-                wait = min(30.0, float(exc.headers.get("retry-after")))
+                wait = min(60.0, float(exc.headers.get("retry-after")))
             except (TypeError, ValueError):
                 pass
             raise _Retryable(msg, wait) from exc
@@ -205,9 +228,10 @@ def _post_once(url: str, body: bytes, headers: dict, timeout: float = TIMEOUT_S)
         raise _Retryable(f"network error: {exc}") from exc
 
 
-def _post(url: str, payload: dict, headers: dict, timeout: float = TIMEOUT_S, retry: bool = True) -> dict:
+def _post(url: str, payload: dict, headers: dict, timeout: float = TIMEOUT_S, retry: bool = True,
+          waits: tuple = RETRY_WAITS_S) -> dict:
     body = json.dumps(payload).encode("utf-8")
-    for wait in (RETRY_WAITS_S if retry else ()) + (None,):
+    for wait in (tuple(waits) if retry else ()) + (None,):
         try:
             return _post_once(url, body, headers, timeout)
         except _Retryable as exc:
@@ -347,14 +371,16 @@ def _local_openai(prompt: str, model: str, max_tokens: int, want_json: bool = Fa
                   temperature: float | None = None, partial: bool = False) -> dict:
     """LM Studio or llama-server. Their context size is set when the server loads the model (-c 32768)."""
     base = _ENV["CYNQRA_LOCAL_BASE_URL"].rstrip("/")
+    hosted = _ENV.get("local") is False  # a hosted provider reached as an OpenAI-compatible server, not a laptop's
     headers = {"Content-Type": "application/json"}
     if _ENV.get("CYNQRA_LOCAL_API_KEY"):
         headers["Authorization"] = f"Bearer {_ENV['CYNQRA_LOCAL_API_KEY']}"
+    floor = HOSTED_MIN_REPLY if hosted else 8192
     payload: dict = {"model": model, "messages": [{"role": "user", "content": prompt}],
-                     "max_tokens": _cap(int(_ENV.get("CYNQRA_NUM_PREDICT") or 0) or max(max_tokens, 8192)), "stream": False}
-    if want_json and schema:
-        payload["response_format"] = {"type": "json_schema",
-                                      "json_schema": {"name": "result", "strict": True, "schema": schema}}
+                     "max_tokens": _cap(int(_ENV.get("CYNQRA_NUM_PREDICT") or 0) or max(max_tokens, floor)), "stream": False}
+    key = (base, model)
+    mode = _JSON_MODE.get(key, "json_schema") if want_json and schema else "none"
+    _json_format(payload, mode, schema)
     think = (_ENV.get("CYNQRA_THINK") or "").strip().lower()
     if think == "false":
         payload["chat_template_kwargs"] = {"enable_thinking": False}
@@ -367,7 +393,18 @@ def _local_openai(prompt: str, model: str, max_tokens: int, want_json: bool = Fa
     try:
         # No transport retries: the request is deterministic (seed, temperature 0), so sending it again would
         # spend minutes of a laptop's time for the same answer. The caller retries with its own temperature.
-        data = _post(base + "/chat/completions", payload, headers, _local_timeout(), retry=False)
+        while True:
+            try:
+                data = _post(base + "/chat/completions", payload, headers, _local_timeout(), retry=hosted,
+                             waits=HOSTED_RETRY_WAITS_S)
+                break
+            except RuntimeError as exc:
+                if mode == "none" or not _format_refused(str(exc)):
+                    raise
+                mode = _JSON_MODES[_JSON_MODES.index(mode) + 1]  # the provider refused this format: a plainer one
+                _json_format(payload, mode, schema)
+        if want_json and schema:
+            _JSON_MODE[key] = mode
     except RuntimeError as exc:
         text = str(exc)
         if "exceed_context_size" in text or "exceeds the available context size" in text:
@@ -392,6 +429,26 @@ def _local_openai(prompt: str, model: str, max_tokens: int, want_json: bool = Fa
                         # prompt tokens the server reused from its cache instead of reading them again
                         "cached": int(t.get("cache_n") or 0)}
     return out
+
+
+def _json_format(payload: dict, mode: str, schema: dict | None) -> None:
+    """Ask for JSON the way this provider accepts: a strict schema, plain JSON mode, or nothing (the prompt asks)."""
+    if mode == "json_schema":
+        payload["response_format"] = {"type": "json_schema",
+                                      "json_schema": {"name": "result", "strict": True, "schema": schema}}
+    elif mode == "json_object":
+        payload["response_format"] = {"type": "json_object"}
+    else:
+        payload.pop("response_format", None)
+
+
+_FORMAT_REFUSED = re.compile(r"response_format|json_schema|json_object|structured output|response format|"
+                             r"responseschema|response_schema", re.I)
+
+
+def _format_refused(error: str) -> bool:
+    """The provider refused the request because of how JSON was asked for, not because of the prompt or the key."""
+    return bool(re.search(r"HTTP (400|422)\b", error)) and bool(_FORMAT_REFUSED.search(error))
 
 
 def _hf(prompt: str, model: str, max_tokens: int, want_json: bool = False, schema: dict | None = None,
