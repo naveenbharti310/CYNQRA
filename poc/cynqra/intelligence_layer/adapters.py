@@ -78,7 +78,7 @@ def _price(conn: dict, ref: str) -> tuple[float, float]:
     return LIST_PRICES.get(ref, WORST_PRICE)
 
 
-HOSTED_TIMEOUT_S = 600  # a hosted API that has not answered in ten minutes is stuck, not slow; 30 min is for a laptop
+HOSTED_TIMEOUT_S = 1200  # a free hosted endpoint can write at 10 tokens/s (Kimi K3 on NVIDIA); after 20 min it is stuck
 
 
 def _hosted(route: dict, conn: dict) -> dict:

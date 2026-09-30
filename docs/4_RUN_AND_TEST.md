@@ -28,9 +28,10 @@ out a busy reply, falls back to plain JSON when a provider refuses a schema, and
 | Get a key | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | [build.nvidia.com](https://build.nvidia.com) | [console.mistral.ai](https://console.mistral.ai) | [z.ai/model-api](https://z.ai/model-api) |
 | Provider | OpenAI-compatible API | OpenAI-compatible API | OpenAI-compatible API | OpenAI-compatible API |
 | Endpoint URL | `https://generativelanguage.googleapis.com/v1beta/openai` | `https://integrate.api.nvidia.com/v1` | `https://api.mistral.ai/v1` | `https://api.z.ai/api/paas/v4` |
-| Models to offer | the Flash model named in AI Studio | `moonshotai/kimi-k3` | the Devstral and Mistral Medium names in the console | `glm-4.7-flash` (as the console names it) |
+| Models to offer | `gemini-3.5-flash-lite` (500 free calls a day; the newest Flash gives about 20) | `moonshotai/kimi-k3` | the Devstral and Mistral Medium names in the console | `glm-4.7-flash` (as the console names it) |
 | Price in and out | 0 and 0 | 0 and 0 | 0 and 0 | 0 and 0 |
-| Calls per minute | 8 | 30 | 30 | 5 |
+| Thinking effort | the model's own default | Low (Kimi K3 thinks at its maximum unless told, at about 10 tokens a second) | the model's own default | the model's own default |
+| Calls per minute | 12 | 30 | 30 | 5 |
 
 Leave **Local server** as "Not a local server" and keep the key in **Cynqra's secrets file** (or name an environment
 variable). Always name the models: a platform like NVIDIA lists over a hundred, and at price 0 every one of them would

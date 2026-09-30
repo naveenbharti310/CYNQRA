@@ -135,5 +135,45 @@ class GoogleLimitTests(unittest.TestCase):
                          "no_credit")
 
 
+class ProviderSpecificTests(unittest.TestCase):
+    """What differs by provider: Google's key header, and how long a thinking model thinks."""
+
+    OK = {"choices": [{"message": {"content": '{"ok": true}'}, "finish_reason": "stop"}], "usage": {}}
+
+    def _sent(self, base, **route):
+        from unittest import mock
+        seen = {}
+
+        def fake_post(url, payload, headers, *a, **k):
+            seen.update(url=url, payload=payload, headers=headers)
+            return self.OK
+        r = {"kind": "local", "label": "m", "local": False, "CYNQRA_LOCAL_BASE_URL": base,
+             "CYNQRA_LOCAL_API_KEY": "AQ.Ab-test-key", **route}
+        with mock.patch.object(model_adapter, "_post", fake_post):
+            out = model_adapter.complete("Answer in JSON.", want_json=True, schema=SCHEMA, route=r)
+        self.assertIsNone(out["error"])
+        return seen
+
+    def test_google_gets_its_own_key_header_and_no_bearer(self):
+        h = self._sent("https://generativelanguage.googleapis.com/v1beta/openai")["headers"]
+        self.assertEqual(h.get("x-goog-api-key"), "AQ.Ab-test-key")
+        self.assertNotIn("Authorization", h, "Google refuses an AQ. key sent twice")
+
+    def test_other_providers_get_a_bearer_token(self):
+        h = self._sent("https://integrate.api.nvidia.com/v1")["headers"]
+        self.assertEqual(h.get("Authorization"), "Bearer AQ.Ab-test-key")
+        self.assertNotIn("x-goog-api-key", h)
+
+    def test_the_founders_thinking_effort_reaches_a_hosted_model(self):
+        p = self._sent("https://integrate.api.nvidia.com/v1", CYNQRA_EFFORT="low")["payload"]
+        self.assertEqual(p["reasoning_effort"], "low")
+        p = self._sent("https://integrate.api.nvidia.com/v1")["payload"]
+        self.assertNotIn("reasoning_effort", p, "unset leaves the model's own default")
+
+    def test_a_laptop_server_is_not_sent_reasoning_effort(self):
+        p = self._sent("http://127.0.0.1:8080/v1", CYNQRA_EFFORT="low", local=True)["payload"]
+        self.assertNotIn("reasoning_effort", p)
+
+
 if __name__ == "__main__":
     unittest.main()

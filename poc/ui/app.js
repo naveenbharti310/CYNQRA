@@ -805,13 +805,14 @@ function vIntelligence() {
         <label class="fld"><span>Name</span><input type="text" id="c_name" placeholder="e.g. My OpenAI account"></label>
         <label class="fld wide"><span>Endpoint URL</span><input type="text" id="c_endpoint" placeholder="blank: the provider's own"></label>
         <label class="fld"><span>Local server</span><select id="c_server"><option value="">Not a local server</option><option value="ollama">Ollama</option><option value="endpoint">A server at the endpoint</option><option value="llama">This computer</option></select></label>
-        <label class="fld"><span>Key</span><select id="c_auth"><option value="env">In an environment variable</option><option value="secret">In Cynqra's secrets file</option><option value="none">No key</option></select></label>
+        <label class="fld"><span>Key</span><select id="c_auth"><option value="secret">In Cynqra's secrets file</option><option value="env">In an environment variable</option><option value="none">No key</option></select></label>
         <label class="fld"><span>Environment variable</span><input type="text" id="c_env" placeholder="e.g. OPENAI_API_KEY"></label>
         <label class="fld"><span>Key (secrets file only)</span><input type="password" id="c_secret" autocomplete="off"></label>
         <label class="fld wide"><span>Models to offer</span><input type="text" id="c_models" placeholder="blank: every model it lists"></label>
         <label class="fld"><span>Price in, $ per million tokens</span><input type="number" id="c_in" step="0.01"></label>
         <label class="fld"><span>Price out, $ per million tokens</span><input type="number" id="c_out" step="0.01"></label>
         <label class="fld"><span>Calls per minute</span><input type="number" id="c_rpm"></label>
+        <label class="fld"><span>Thinking effort</span><select id="c_effort"><option value="">The model's own default</option><option value="low">Low (fastest)</option><option value="medium">Medium</option><option value="high">High</option></select></label>
       </div>
       <div class="row"><button class="btn primary" id="connect">Connect</button></div></div>
     <h2 style="font-size:17px;margin:6px 0 0">Provider connections</h2>
@@ -1046,14 +1047,25 @@ function bind() {
   on("connect", () => {
     const v = (id) => (($("#" + id) || {}).value || "").trim();
     const method = v("c_auth");
+    // a key typed where the name of an environment variable belongs would be read as that name and never found
+    const looksLikeKey = (x) => /^(AQ\.|AIza|nvapi-|sk-|hf_|gsk_)/.test(x) || (x.length > 30 && !/^[A-Z][A-Z0-9_]*$/.test(x));
+    if (method === "env" && looksLikeKey(v("c_env"))) { const e = $("#c_env"); if (e) e.value = "";
+      act(async () => { throw new Error("That looks like the key itself, not the name of an environment variable. Choose \"In Cynqra's secrets file\" under Key and paste the key into the Key (secrets file only) box."); }); return; }
+    if (method === "secret" && !v("c_secret") && looksLikeKey(v("c_env"))) { const e = $("#c_env"); if (e) e.value = "";
+      act(async () => { throw new Error("The key was typed into the Environment variable box. Paste it into the Key (secrets file only) box instead."); }); return; }
     const spec = { type: v("c_type"), name: v("c_name"), endpoint: v("c_endpoint"), models: v("c_models"),
       auth: method === "env" ? { method, env_var: v("c_env") } : method === "secret" ? { method, secret: v("c_secret") } : { method } };
     if (v("c_server")) spec.server = v("c_server");
     if (v("c_in") !== "" || v("c_out") !== "") spec.price_per_m = [Number(v("c_in") || 0), Number(v("c_out") || 0)];
     if (v("c_rpm") !== "") spec.rate_limits = { calls_per_minute: Number(v("c_rpm")) };
+    if (v("c_effort")) spec.settings = { CYNQRA_EFFORT: v("c_effort") };
     const sec = $("#c_secret"); if (sec) sec.value = "";  // the key leaves the page with this request only
     act(() => api("/api/connections", spec));
   });
+  // show only the box the chosen way of keeping the key uses
+  const auth = $("#c_auth");
+  if (auth) { const sync = () => { const m = auth.value, show = (id, on) => { const el = $("#" + id); if (el && el.closest("label")) el.closest("label").style.display = on ? "" : "none"; };
+    show("c_env", m === "env"); show("c_secret", m === "secret"); }; auth.onchange = sync; sync(); }
   $$("[data-discover]").forEach((b) => b.onclick = () => { const id = b.dataset.discover; act(() => api(`/api/connections/${id}/discover`, {})); });
   $$("[data-disconnect]").forEach((b) => b.onclick = () => { const id = b.dataset.disconnect; if (window.confirm("Remove this connection? Its credential is deleted and the intelligence it offered is retired; their measured record is kept.")) act(() => api(`/api/connections/${id}/remove`, {})); });
   $$("[data-probe]").forEach((b) => b.onclick = () => { const id = b.dataset.probe; act(async () => { S.probes[id] = await api(`/api/intelligence/${id}/probe`, {}); }); });
