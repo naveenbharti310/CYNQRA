@@ -134,6 +134,13 @@ class Store:
             self.conn.execute("CREATE TRIGGER IF NOT EXISTS events_no_update BEFORE UPDATE ON events BEGIN SELECT RAISE(ABORT, 'events are append only'); END;")
             self.conn.execute("CREATE TRIGGER IF NOT EXISTS events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT, 'events are append only'); END;")
 
+    def close(self) -> None:
+        """Close the SQLite connection owned by this store."""
+        with self.lock:
+            if self.conn is not None:
+                self.conn.close()
+                self.conn = None
+
     def claim_task(self, task_id: str, holder_id: str, lease_seconds: float = 120.0) -> str | None:
         """Atomically claim a task. Expired leases are reclaimed; a live lease has exactly one holder."""
         now_ts = time.time()
