@@ -166,12 +166,19 @@ def assumption_tests(tasks: list[dict], milestones: list[dict], assumptions: lis
     return out
 
 
+DEFAULT_DURATION_MINUTES = {
+    "code": 45, "document": 30, "research": 30, "design": 45, "data": 45, "backtest": 45,
+    "review_merge": 20, "deploy": 20, "decision": 15, "accept_delivery": 10,
+}
+
 def critical_path(tasks: list[dict]) -> list[str]:
-    longest: dict[str, list[str]] = {}
-    for t in tasks:  # dependencies only name earlier tasks
-        best = max((longest[d] for d in t["dependencies"] if d in longest), key=len, default=[])
-        longest[t["id"]] = best + [t["id"]]
-    return max(longest.values(), key=len, default=[])
+    """Critical path by estimated elapsed minutes, not task count."""
+    best: dict[str, tuple[float, list[str]]] = {}
+    for t in tasks:
+        own = float(t.get("estimated_minutes") or DEFAULT_DURATION_MINUTES.get(t.get("kind"), 30))
+        dep = max((best[d] for d in t["dependencies"] if d in best), key=lambda x: x[0], default=(0.0, []))
+        best[t["id"]] = (dep[0] + own, dep[1] + [t["id"]])
+    return max(best.values(), key=lambda x: x[0], default=(0.0, []))[1]
 
 
 def coordination(owner: dict, workers: list[dict]) -> dict:
