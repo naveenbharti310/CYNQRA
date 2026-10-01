@@ -17,6 +17,7 @@ MAX_OUTPUT = 200_000
 DEFAULT_TIMEOUT = 60
 COMMANDS = {
     "python": ("python", "python3"),
+    "pip": ("pip", "pip3"),
     "pytest": ("pytest", "-m", "pytest"),
     "git": ("git",),
     "npm": ("npm",),
