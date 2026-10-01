@@ -2,7 +2,7 @@ name: cynqra-phase-gates
 
 on:
   push:
-    branches: [cynqra-phase-0-8]
+    branches: [main, cynqra-phase-0-8]
   workflow_dispatch:
     inputs:
       real_model:
