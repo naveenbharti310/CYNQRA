@@ -328,7 +328,7 @@ class OpenAICompatibleAdapter(ProviderAdapter):
                       **({"CYNQRA_OPENAI_URL": ep + "/chat/completions"} if ep else {})})
             _hosted(r, conn)
         elif flavor in ("gemini", "nvidia"):
-            r.update({"kind": "local", "CYNQRA_LOCAL_BASE_URL": ep + "/chat/completions",
+            r.update({"kind": "local", "CYNQRA_LOCAL_BASE_URL": ep,
                       "CYNQRA_LOCAL_API_KEY": secret})
             _hosted(r, conn)
         else:
