@@ -92,6 +92,36 @@ class QualificationEngine:
             return cheap
         return self.deep_probe(model_id, log=log)
 
+    def bootstrap(self, max_models: int = 3, log=lambda _msg: None) -> dict:
+        """Bootstrap a fresh supply without treating discovery as qualification.
+        
+        CYNQRA probes a small metadata-selected candidate set. A cheap real probe narrows the set,
+        then deep qualification is run until one current execution profile is actually qualified.
+        No model name is hardcoded.
+        """
+        models = [
+            m for m in self.registry.models()
+            if m.get("status") != "retired" and m.get("runtime") != "scripted"
+        ]
+        def candidate_key(m):
+            caps = {str(x).lower() for x in (m.get("capabilities") or [])}
+            fit = (2 if {"reasoning", "structured output"} <= caps else
+                   1 if ("reasoning" in caps or "structured output" in caps) else 0)
+            return (-fit, -(float(m.get("released") or 0)), str(m.get("id") or ""))
+        models.sort(key=candidate_key)
+        tried, qualified = [], None
+        for m in models[:max(0, int(max_models))]:
+            q = self.cheap_probe(m["id"], "objective")
+            tried.append({"model_id": m["id"], "cheap": q})
+            if q.get("status") != "candidate":
+                continue
+            d = self.deep_probe(m["id"], log=log)
+            tried[-1]["deep"] = d
+            if d.get("status") == "qualified":
+                qualified = d
+                break
+        return {"qualified": qualified, "tried": tried, "available": bool(self.registry.available())}
+
     def history(self, model_id: str | None = None) -> list[dict]:
         rows = self.supply.store.all("qualification")
         return [r for r in rows if model_id is None or r.get("model_id") == model_id]
