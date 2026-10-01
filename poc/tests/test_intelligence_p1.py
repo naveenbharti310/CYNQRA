@@ -38,7 +38,6 @@ class IdentityAndBindingTests(SupplyBase):
         fresh = self.reg.get("model-a")
         self.assertNotEqual(fresh["execution_profile_id"], old_profile)
         self.assertEqual(self.reg.stats("model-a")["attempts"], 0)
-        self.assertEqual(self.reg.profile("model-a")["by_version"][old_profile and "p1"], None) if False else None
         hist = self.reg.outcomes("model-a")
         self.assertEqual(hist[0]["execution_profile_id"], old_profile)
 
