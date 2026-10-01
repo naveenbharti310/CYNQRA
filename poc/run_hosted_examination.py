@@ -103,6 +103,7 @@ def selection_details(entries: list[dict], selected: list[dict], limit: int) -> 
         "discovered_models": len(entries),
         "active_models": len(active),
         "provider_counts": providers,
+        "discovered_refs": sorted(str(m.get("ref") or "") for m in active),
         "selected_count": len(selected),
         "requested_limit": limit,
         "selection_policy": "metadata-only calibration priority; provider/family diversity; no model-quality ranking",
