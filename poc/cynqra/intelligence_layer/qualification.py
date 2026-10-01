@@ -77,7 +77,7 @@ class QualificationEngine:
             "passed": bool(result.get("passed")),
             "objective_passed": bool(result.get("objective_passed")),
             "code_passed": bool(result.get("code_passed")),
-            "usd": sum(float(x.get("usage", {}).get("tokens_in", 0) or 0) * 0 for x in result.get("code_rounds", [])),
+            "usd": float((result.get("performance") or {}).get("overall", {}).get("usd_total") or 0.0),
             "profile": result.get("performance"),
         })
 
