@@ -72,8 +72,12 @@ def main() -> int:
     ap.add_argument("--data-root", default="")
     args = ap.parse_args()
 
-    if not os.environ.get("GEMINI_API_KEY") and not os.environ.get("NVIDIA_API_KEY"):
-        raise SystemExit("no GEMINI_API_KEY or NVIDIA_API_KEY secret is available")
+    if args.provider == "google" and not os.environ.get("GEMINI_API_KEY"):
+        raise SystemExit("provider=google requires GEMINI_API_KEY")
+    if args.provider == "nvidia" and not os.environ.get("NVIDIA_API_KEY"):
+        raise SystemExit("provider=nvidia requires NVIDIA_API_KEY")
+    if args.provider == "all" and not os.environ.get("GEMINI_API_KEY") and not os.environ.get("NVIDIA_API_KEY"):
+        raise SystemExit("provider=all requires GEMINI_API_KEY and/or NVIDIA_API_KEY")
 
     root = Path(args.data_root or Path.cwd() / "hosted-examination")
     root.mkdir(parents=True, exist_ok=True)
