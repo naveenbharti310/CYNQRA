@@ -7,26 +7,96 @@ archive/ are historical records and must not silently override this contract.
 
 ## Product architecture
 
+The architecture is outcome-first and objective-specific. CYNQRA does not select a universally "best" model and
+then build around it. It receives the founder's objective, turns that objective into measurable requirements and
+acceptance criteria, creates the work graph and workforce, evaluates available intelligence against the actual work,
+binds the strongest evidenced intelligence to each worker/task, and continuously re-evaluates that choice from
+verified execution results.
+
 Founder objective
 -> objective system
--> requirements and risks
+-> requirements, constraints, risks and acceptance criteria
+-> work graph
 -> workforce synthesis
 -> cofounders
 -> specialist workforce
--> intelligence registry
--> measured intelligence selection
+-> intelligence supply and registry
+-> objective-specific intelligence selection
 -> worker binding
--> planner
+-> planner and scheduler
 -> budget
 -> governed execution
--> verification
--> performance
--> replacement or rerouting
+-> continuous review and verification
+-> rework / replacement / rerouting
+-> production verification
 -> delivery
--> audit and refinement
+-> audit, learning and refinement
 
 The organization is dynamic. Roles are generated from the confirmed objective and founder profile. There is no
 fixed universal organization.
+
+### Outcome and intelligence-selection contract
+
+The unit CYNQRA optimizes is the verified objective outcome, not model prestige, benchmark rank, or a generic model
+score.
+
+For every material work item, CYNQRA maintains two evidence layers:
+
+1. Global intelligence evidence: provider/version identity, capabilities, context, cost, latency, reliability and
+   measured history across prior work.
+2. Objective evidence: performance of that intelligence on the current objective, its role, task kind, acceptance
+   criteria, tool environment, failures, rework, verification results, cost and time.
+
+Global evidence is a prior. Objective evidence becomes more authoritative as the current run produces verified
+results. A model is never considered "best" for an objective merely because it is popular, expensive, newer, or
+strong on a generic benchmark.
+
+Selection is therefore a closed loop:
+
+discover -> qualify -> propose candidates -> objective-specific calibration -> bind -> execute -> verify -> measure
+-> retain, reroute or replace -> re-verify.
+
+The bounded hosted calibration runner is an intake mechanism for discovering and qualifying intelligence; it is not
+the product's final model-ranking mechanism. Models not selected for a bounded calibration remain explicitly
+untested, not failed. Provider outages remain provider failures, not intelligence failures.
+
+### Objective work graph
+
+The objective system produces an inspectable work graph. Each work item has, at minimum:
+
+* objective and requirement references
+* role/worker ownership
+* task kind and dependencies
+* acceptance criteria and verification method
+* risk and budget constraints
+* required capabilities/tools/context
+* current intelligence binding
+* execution state
+* verification evidence
+* rework history
+* intelligence-selection evidence
+
+The graph may branch, execute independent work in parallel, merge through governed integration points, and reopen
+completed work when verification finds a defect. This makes the user's objective the stable control plane while
+workers and intelligence remain replaceable.
+
+### Quality control loop
+
+A worker's output is never sufficient evidence of completion.
+
+For material work:
+* the worker produces an artifact;
+* an independent verifier checks it against objective-specific acceptance criteria;
+* failures become structured rework;
+* repeated or diagnostic failures update intelligence evidence;
+* CYNQRA decides whether to keep the binding, reroute the task, or replace the intelligence;
+* replacement candidates must pass the applicable qualification/regression check before binding;
+* the resulting artifact is re-verified;
+* the objective is complete only when its acceptance criteria and production verification gates pass.
+
+The user-facing system should expose this loop as progress: workforce formation, intelligence selection, task
+assignment, execution, review, findings, rework, replacement/rerouting, verification and final production readiness.
+The visibility is an explanation of the control plane, not a second manual workflow for the founder.
 
 ## Identity contract
 
