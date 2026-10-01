@@ -48,20 +48,26 @@ class IntelligenceGateway:
         self.lock = threading.Lock()
         self.capacity = CapacityManager(registry.store)
 
-    def invoke(self, model_id: str, request: dict, pinned_version: str | None = None) -> dict:
+    def invoke(self, model_id: str, request: dict, pinned_version: str | None = None,
+               mode: str = "normal") -> dict:
         req = {k: request[k] for k in REQUEST_KEYS if k in request}
         entry = self.registry.get(model_id)
         if entry.get("status") == "retired":
             return self._failed(entry, f"{entry['name']} is retired: {entry.get('status_note') or 'retired'}")
         if pinned_version is not None and served_version(entry) != str(pinned_version):
             raise VersionChanged(model_id, pinned_version, served_version(entry))
-        if (entry.get("regression") or {}).get("status") == "failed":
-            return self._failed(entry, f"{entry['name']} failed its regression check")
+        regression_status = (entry.get("regression") or {}).get("status")
         qstatus = (entry.get("qualification") or {}).get("status")
-        if qstatus and qstatus != "qualified":
-            return self._failed(entry, f"{entry['name']} is not qualified: {qstatus}")
-        if (entry.get("regression") or {}).get("status") not in ("passed", "not applicable"):
-            return self._failed(entry, f"{entry['name']} is not regression-qualified")
+        calibration = mode in ("qualification", "regression")
+        if regression_status == "failed" and calibration:
+            return self._failed(entry, f"{entry['name']} failed its previous regression check")
+        if not calibration:
+            if regression_status == "failed":
+                return self._failed(entry, f"{entry['name']} failed its regression check")
+            if qstatus and qstatus != "qualified":
+                return self._failed(entry, f"{entry['name']} is not qualified: {qstatus}")
+            if regression_status not in ("passed", "not applicable"):
+                return self._failed(entry, f"{entry['name']} is not regression-qualified")
         conn = self.connections.find_id(entry.get("connection_id"))
         if conn is None:
             return self._failed(entry, "its provider connection was removed")
