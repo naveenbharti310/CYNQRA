@@ -1,32 +1,45 @@
+import os
+import tempfile
+import unittest
 from pathlib import Path
-
-import pytest
 
 from cynqra.worker_runtime import WorkerRuntimeError, list_files, read_file, run, safe_path, search_files, write_file
 
 
-def test_paths_cannot_escape(tmp_path: Path):
-    with pytest.raises(WorkerRuntimeError):
-        safe_path(tmp_path, "../outside")
-    with pytest.raises(WorkerRuntimeError):
-        safe_path(tmp_path, "/etc/passwd")
+class WorkerRuntimeTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
 
+    def tearDown(self):
+        self.tmp.cleanup()
 
-def test_file_lifecycle_and_search(tmp_path: Path):
-    write_file(tmp_path, "src/app.py", "print('ok')\n")
-    assert read_file(tmp_path, "src/app.py") == "print('ok')\n"
-    assert list_files(tmp_path) == ["src/app.py"]
-    assert search_files(tmp_path, "print") == ["src/app.py"]
+    def test_paths_cannot_escape(self):
+        with self.assertRaises(WorkerRuntimeError):
+            safe_path(self.root, "../outside")
+        with self.assertRaises(WorkerRuntimeError):
+            safe_path(self.root, "/etc/passwd")
 
+    def test_file_lifecycle_and_search(self):
+        write_file(self.root, "src/app.py", "print('ok')\n")
+        self.assertEqual(read_file(self.root, "src/app.py"), "print('ok')\n")
+        self.assertEqual(list_files(self.root), ["src/app.py"])
+        self.assertEqual(search_files(self.root, "print"), ["src/app.py"])
 
-def test_commands_are_allowlisted(tmp_path: Path):
-    result = run(tmp_path, ["python", "-c", "print('ok')"])
-    assert result["passed"] is True
-    with pytest.raises(WorkerRuntimeError):
-        run(tmp_path, ["bash", "-lc", "echo nope"])
+    def test_commands_are_allowlisted(self):
+        result = run(self.root, ["python", "-c", "print('ok')"])
+        self.assertTrue(result["passed"])
+        with self.assertRaises(WorkerRuntimeError):
+            run(self.root, ["bash", "-lc", "echo nope"])
 
-
-def test_runtime_does_not_forward_unallowlisted_environment(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("CYNQRA_TEST_SECRET", "should-not-pass")
-    result = run(tmp_path, ["python", "-c", "import os; raise SystemExit(1 if 'CYNQRA_TEST_SECRET' in os.environ else 0)"])
-    assert result["passed"] is True
+    def test_runtime_does_not_forward_unallowlisted_environment(self):
+        old = os.environ.get("CYNQRA_TEST_SECRET")
+        os.environ["CYNQRA_TEST_SECRET"] = "should-not-pass"
+        try:
+            result = run(self.root, ["python", "-c", "import os; raise SystemExit(1 if 'CYNQRA_TEST_SECRET' in os.environ else 0)"])
+            self.assertTrue(result["passed"])
+        finally:
+            if old is None:
+                os.environ.pop("CYNQRA_TEST_SECRET", None)
+            else:
+                os.environ["CYNQRA_TEST_SECRET"] = old
