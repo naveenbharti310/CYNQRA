@@ -63,9 +63,24 @@ def release_dates() -> dict[str, float]:
 
 
 def _family(ref: str) -> tuple[str, tuple]:
-    """A model's family and version: gemini-3.8-flash is ("gemini-#-flash", (3, 8))."""
+    """Group releases without erasing parameter-size variants such as 8B versus 70B."""
     k = model_key(ref)
-    return re.sub(r"\d+(\.\d+)*", "#", k), tuple(float(x) for x in re.findall(r"\d+(?:\.\d+)?", k))
+    parts = k.split("-")
+    version = []
+    family_parts = []
+    for part in parts:
+        if re.fullmatch(r"\d+(?:\.\d+)?(?:b|m|k)", part, re.I):
+            family_parts.append(part.lower())
+            continue
+        nums = re.findall(r"\d+(?:\.\d+)?", part)
+        if nums and not re.fullmatch(r"\d+(?:\.\d+)?", part):
+            family_parts.append(re.sub(r"\d+(?:\.\d+)?", "#", part))
+        elif nums:
+            version.extend(float(x) for x in nums)
+            family_parts.append("#")
+        else:
+            family_parts.append(part)
+    return "-".join(family_parts), tuple(version)
 
 
 def dated(listing: dict[str, dict]) -> dict[str, float | None]:
@@ -101,11 +116,25 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 _OPENER = urllib.request.build_opener(_NoRedirect)
 
 
+MAX_RESPONSE_BYTES = 8_000_000
+
 def _get_json(url: str, headers: dict, timeout: float = 30.0):
     req = urllib.request.Request(url, headers=headers)
     try:
         with _OPENER.open(req, timeout=timeout) as r:
-            return json.loads(r.read().decode("utf-8"))
+            length = r.headers.get("Content-Length")
+            if length and int(length) > MAX_RESPONSE_BYTES:
+                raise SupplyError("provider response is larger than the safety limit")
+            chunks, total = [], 0
+            while True:
+                chunk = r.read(min(64 * 1024, MAX_RESPONSE_BYTES - total + 1))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+                if total > MAX_RESPONSE_BYTES:
+                    raise SupplyError("provider response is larger than the safety limit")
+            return json.loads(b"".join(chunks).decode("utf-8"))
     except urllib.error.HTTPError as exc:
         raise SupplyError(f"{url} answered HTTP {exc.code}: {exc.read()[:200].decode(errors='replace')}") from exc
     except (urllib.error.URLError, OSError, ValueError) as exc:
