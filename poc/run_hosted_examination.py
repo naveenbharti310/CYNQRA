@@ -56,7 +56,7 @@ def select(entries: list[dict], limit: int) -> list[dict]:
     # If the provider split left room, fill from the remaining highest-capability entries.
     chosen_ids = {m["id"] for m in chosen}
     for m in sorted(entries, key=_candidate_score, reverse=True):
-        if m.get("status") != "retired" or m["id"] in chosen_ids:
+        if m.get("status") == "retired" or m["id"] in chosen_ids:
             continue
         chosen.append(m)
         chosen_ids.add(m["id"])
