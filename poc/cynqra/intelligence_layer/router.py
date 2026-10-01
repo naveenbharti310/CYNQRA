@@ -91,6 +91,8 @@ def rank(reg: Registry, kinds: list[str], time_value_per_hour: float, budget_lef
     for m in reg.available():
         if (exclude and m["id"] in exclude) or not fits(m)[0]:
             continue
+        if not all(reg.qualified_for(m, k)[0] for k in kinds):  # it failed the qualification of this family of work
+            continue
         per = [estimate(reg, m, k, time_value_per_hour) for k in kinds]
         row = {"model_id": m["id"], "model": m["name"], "runtime": m["runtime"],
                "score": round(sum(e["score"] for e in per), 4),
@@ -122,3 +124,172 @@ def staff(reg: Registry, settings: dict, workers: list[dict], workload: dict[str
             raise RouterError("no available model can staff the organization: register one in the model registry")
         out[w["id"]] = {"model_id": best["model_id"], "model": best["model"], "candidates": rows, "kinds": kinds}
     return out
+
+
+# --- objective-aware selection (mandate 12, 44, 45, 61) ----------------------------------------------------------
+# A pure function of a decision snapshot (cynqra/controller.py builds and persists it), so any historical selection
+# can be replayed from its own inputs:
+#   1 eligible intelligence: the candidate set
+#   2-4 hard constraints, each a fact: qualified (for this family of work), available, context, output limit,
+#       modality, protocol fit, the founder's constraints. A violation makes a candidate infeasible whatever else it
+#       is good at; constraints are never traded against evidence
+#   5-6 evidence: the global prior and this objective's evidence, per kind of work (evidence.py)
+#   8 selection by the risk tier's policy: quality first, or the lowest expected cost of a verified result among
+#       candidates whose evidenced quality clears the tier's floor. No score is universal: the same candidates are
+#       ordered differently for different work, objectives and tiers
+#   then exploitation or bounded exploration, and an incumbent kept unless a challenger is verifiably superior
+from . import evidence as _evidence  # noqa: E402
+
+TIERS = ("LOW", "MEDIUM", "HIGH")
+
+
+def hard_constraints(c: dict, work: dict, snap: dict) -> list[dict]:
+    """Every hard constraint this candidate violates for this work, each with its reason. An unknown fact excludes
+    nothing; a known incompatibility excludes."""
+    out = []
+
+    def no(name, why):
+        out.append({"constraint": name, "why": why})
+    q = c.get("qualification") or {}
+    if q.get("status") not in ("passed", "not applicable"):
+        no("qualified", f"not qualified ({q.get('status') or 'unverified'}): unverified means unknown, not usable")
+    else:
+        for k in work["kinds"]:
+            fam = "code" if k in roles.BUILD_TYPES else "objective"
+            if (q.get("by_kind") or {}).get(fam) == "failed":
+                no("qualified", f"failed its {fam} qualification, which {k} work needs")
+    if not c.get("available", False):
+        no("available", c.get("availability") or "unavailable")
+    if c.get("context") and int(c["context"]) < int(work.get("min_context") or 0):
+        no("context", f"context {c['context']} tokens, the work needs {work['min_context']}")
+    if c.get("max_output") and int(c["max_output"]) < int(work.get("output_tokens") or 0):
+        no("output_limit", f"writes at most {c['max_output']} tokens, the work needs {work['output_tokens']}")
+    mods = c.get("input_modalities") or []
+    if mods and "text" not in [str(x).lower() for x in mods]:
+        no("modality", "does not read text")
+    if work.get("local_only") and not c.get("local"):
+        no("founder_constraints", "the founder's constraints keep the work on this computer")
+    if c["id"] in (snap.get("exclude") or []):
+        no("excluded", "excluded for this decision: " + str((snap.get("exclude_why") or {}).get(c["id"]) or
+                                                            "the intelligence being replaced"))
+    bad = [r for r in snap.get("evidence") or [] if r.get("intelligence_id") == c["id"] and r.get("protocol")
+           and r.get("src") == "objective" and r.get("clean") is not False
+           and r.get("objective_version") == snap["context"].get("objective_version")
+           and r.get("served_version") == c.get("served_version") and r.get("task_kind") in work["kinds"]]
+    if len(bad) >= 3:
+        no("protocol", f"{len(bad)} protocol violations on this work in this objective: incompatible protocol behavior")
+    return out
+
+
+def _economics(c: dict, per_kind: list[dict], sel: dict, budget: dict, tv: float) -> dict:
+    """Expected money and time of a verified result on each kind, at the evidenced chance of success: cost and
+    latency as dimensions of their own, never folded into a quality number."""
+    A = int(sel.get("attempts") or ATTEMPTS)
+    usd = minutes = value = 0.0
+    out_kinds = []
+    for a in per_kind:
+        k = a["kind"]
+        meas = (c.get("measured") or {}).get(k) or {}
+        cost, secs = float(meas.get("usd_per_attempt") or 0.0), float(meas.get("seconds_per_attempt") or 0.0)
+        p = max(1e-3, float(a["quality"]["mean"]))
+        P = 1 - (1 - p) ** A
+        E = P / p
+        usd += E * cost
+        minutes += E * secs / 60
+        value += (E * cost + tv / 3600 * E * secs) / P
+        out_kinds.append({"kind": k, "usd_per_attempt": round(cost, 6), "seconds_per_attempt": round(secs, 1),
+                          "p_attempt": round(p, 4), "p_task": round(P, 4), "expected_attempts": round(E, 3),
+                          "basis": meas.get("basis")})
+    head = float(budget.get("headroom") if budget.get("headroom") is not None else 1e18)
+    return {"expected_usd": round(usd, 6), "expected_minutes": round(minutes, 2),
+            "expected_value_cost": round(value, 6), "fits_budget": usd <= head + 1e-9, "by_kind": out_kinds}
+
+
+def select(snap: dict) -> dict:
+    """The selection a snapshot implies. Deterministic: the same snapshot always gives the same result."""
+    pol = {k: v["body"] for k, v in snap["policies"].items()}
+    sel, work, ctx = pol["selection"], snap["work"], dict(snap["context"])
+    ctx.update(role=work.get("role"), work_item_id=work.get("work_item_id"), now=snap["now"])
+    ctx["candidate_versions"] = {c["id"]: c.get("served_version") or "" for c in snap["candidates"]}
+    by: dict[str, list] = {}
+    for r in snap.get("evidence") or []:
+        by.setdefault(r.get("intelligence_id"), []).append(r)
+    tv = float((snap.get("budget") or {}).get("time_value_per_hour") or 0.0)
+    rows = []
+    for c in snap["candidates"]:
+        per_kind = [_evidence.assess(by.get(c["id"], []), ctx, pol, k) for k in work["kinds"]]
+        q = _evidence.bundle(per_kind)
+        econ = _economics(c, per_kind, sel, snap.get("budget") or {}, tv)
+        rows.append({"id": c["id"], "name": c.get("name"), "served_version": c.get("served_version") or "",
+                     "violations": hard_constraints(c, work, snap), "quality": q, "economics": econ,
+                     "per_kind": [{"kind": a["kind"], "quality": a["quality"], "raw": a["raw"], "levels": a["levels"],
+                                   "strength": a["strength"], "excluded": a["excluded"], "used": a["used"]}
+                                  for a in per_kind]})
+    feasible = [r for r in rows if not r["violations"]]
+    tier = work.get("risk_tier") if work.get("risk_tier") in TIERS else "LOW"
+    tp = sel["tiers"][tier]
+    kq = lambda r: (not r["economics"]["fits_budget"], -r["quality"]["lcb"], -r["quality"]["mean"],  # noqa: E731
+                    r["economics"]["expected_value_cost"], r["id"])
+    ke = lambda r: (not r["economics"]["fits_budget"], r["economics"]["expected_value_cost"],  # noqa: E731
+                    -r["quality"]["lcb"], r["id"])
+    clears = [r for r in feasible if r["quality"][tp["floor"]] >= tp["quality_floor"]]
+    if tp["tradeoff"] == "quality_first" or not clears:
+        ordered = sorted(feasible, key=kq)
+        basis = "quality first" if tp["tradeoff"] == "quality_first" else \
+            f"no candidate clears the {tier} quality floor ({tp['floor']} {tp['quality_floor']}): quality first"
+    else:
+        rest = [r for r in feasible if r not in clears]
+        ordered = sorted(clears, key=ke) + sorted(rest, key=kq)
+        basis = (f"{tp['tradeoff']}: the lowest expected cost of a verified result among candidates whose "
+                 f"{tp['floor']} quality clears {tp['quality_floor']}")
+    out = {"tier": tier, "tradeoff": tp["tradeoff"], "basis": basis, "ranking": [r["id"] for r in ordered],
+           "eligible": [r["id"] for r in feasible],
+           "excluded": [{"id": r["id"], "violations": r["violations"]} for r in rows if r["violations"]],
+           "rows": rows, "selected": None, "mode": "no_feasible_candidate", "challenger": None}
+    if not ordered:
+        out["reason"] = "no candidate satisfies every hard constraint: " + "; ".join(
+            f"{r['id']}: {r['violations'][0]['why']}" for r in rows) if rows else "no candidate intelligence"
+        return out
+    top = ordered[0]
+    mode = "single_candidate" if len(ordered) == 1 else "exploit"
+    chosen = top
+    inc = snap.get("incumbent") or {}
+    inc_row = next((r for r in feasible if r["id"] == inc.get("intelligence_id")
+                    and r["served_version"] == (inc.get("served_version") or r["served_version"])), None)
+    if inc_row is not None and inc_row is not top:
+        if _evidence.superior(top["quality"], inc_row["quality"]):
+            mode = "reselect"
+        else:  # stability: a challenger must demonstrate verified superiority before it replaces the incumbent
+            chosen, mode = inc_row, "keep_incumbent"
+    elif inc_row is not None:
+        mode = "keep_incumbent"
+    ex = sel["exploration"]
+    explore = snap.get("exploration") or {}
+    if (tp["explore"] and work.get("scope") == "task" and mode in ("exploit", "keep_incumbent") and len(ordered) > 1
+            and _rank(chosen["quality"]["maturity"]) >= _rank(ex["incumbent_maturity"])
+            and int(explore.get("used") or 0) < int(ex["max_per_objective"])):
+        room = float(ex["budget_fraction"]) * float((snap.get("budget") or {}).get("cap") or 0) \
+            - float(explore.get("spent_usd") or 0)
+        challengers = [r for r in ordered if r is not chosen and r["quality"]["maturity"] in ex["challenger_maturity"]
+                       and r["quality"]["ucb"] > chosen["quality"]["mean"] and r["economics"]["fits_budget"]
+                       and r["economics"]["expected_usd"] <= room + 1e-12]
+        if challengers:
+            pick = sorted(challengers, key=lambda r: (-r["quality"]["ucb"], r["economics"]["expected_value_cost"],
+                                                      r["id"]))[0]
+            out["challenger"] = {"id": pick["id"], "against": chosen["id"],
+                                 "why": f"its upper bound {pick['quality']['ucb']} beats the incumbent's mean "
+                                        f"{chosen['quality']['mean']} on {pick['quality']['maturity']} evidence"}
+            chosen, mode = pick, "explore"
+    q, e = chosen["quality"], chosen["economics"]
+    out.update(selected=chosen["id"], mode=mode, reason=(
+        f"{chosen.get('name') or chosen['id']} ({mode}) for {work.get('work_item_id')}: {basis}. Evidenced quality "
+        f"{q['mean']} (80% band {q['lcb']} to {q['ucb']}), decided by {q['decisive_level']} evidence, "
+        f"{q['objective_n']} weighted samples on this objective ({q['maturity']}); expected ${e['expected_usd']} and "
+        f"{e['expected_minutes']} min per verified result. {len(feasible) - 1} feasible alternative(s) considered, "
+        f"{len(rows) - len(feasible)} excluded by hard constraints."))
+    return out
+
+
+def _rank(maturity: str) -> int:
+    return ("none", "thin", "developing", "mature").index(maturity) if maturity in ("none", "thin", "developing",
+                                                                                     "mature") else 0

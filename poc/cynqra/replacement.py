@@ -36,40 +36,24 @@ Triggers:
 """
 from __future__ import annotations
 
-import re
 import shutil
 import time
 
-from . import binding, budget, people, performance, planner, roles
+from . import attribution as attr
+from . import binding, budget, controller, people, performance, planner, policies, roles
 from . import settings as project_settings
+from .attribution import diagnose  # noqa: F401  - why a call failed; kept here for the engines that ask
+from .intelligence_layer import evidence as evidence_model
 from .db import now
 from .intelligence import IntelligenceError
 from .intelligence_layer import router
+from .intelligence_layer.registry import served_version
 from .probe import regression_check
 
-MAX_REPLACEMENTS = 2  # intelligence changes per task before the founder decides
-MAX_BAD_REPLIES = 3  # unusable replies in a row from one worker on one task before its AI is changed
+_RP = policies.body("replacement")
+MAX_REPLACEMENTS = _RP["max_replacements"]  # intelligence changes per task before the founder decides
+MAX_BAD_REPLIES = _RP["max_bad_replies"]  # unusable replies in a row from one worker on one task before its AI changes
 
-# Why a call failed. The provider's HTTP status says it best ("HTTP 402 from provider: ..."); the words of the
-# message are read only when there is no status, and only as whole phrases, so a port number such as :40312 or a
-# local "insufficient memory" is never mistaken for a refused key or an empty account. Anything unrecognised counts
-# as the provider's side, the cautious reading: waiting costs time, replacing a capable AI costs its record.
-_STATUS = re.compile(r"\bHTTP (\d{3})\b")
-_CREDIT = re.compile(r"credits?\b|billing|payment required|insufficient[_ ](quota|credit|balance|funds)", re.I)
-# Google's free tier answers every limit with "check your plan and billing details"; the limit's name or its "retry in"
-# says whether it passes within the minute (a rate limit) or only tomorrow (the free allowance is used up)
-_PER_MINUTE = re.compile(r"per ?minute|retry in \d", re.I)
-PHRASES = (
-    ("no_credit", _CREDIT),
-    ("access", re.compile(r"invalid api key|unauthori[sz]ed|forbidden|authentication|is not set\b|"
-                          r"credential is missing|stored key is missing", re.I)),
-    ("rate_limit", re.compile(r"rate limit|too many requests", re.I)),
-    ("timeout", re.compile(r"timed out|\btimeout\b", re.I)),
-    ("withdrawn", re.compile(r"\bretired\b|connection was removed|regression check", re.I)),
-    # the provider answered, but the AI's own reply could not be used: its fault, never the provider's
-    ("reply", re.compile(r"reply truncated|did not return a JSON object|did not follow the required format|"
-                         r"returned no answer", re.I)),
-)
 PLAIN = {"outage": "its provider is not answering", "timeout": "its provider took too long to answer",
          "rate_limit": "its provider is limiting how often it may be called",
          "no_credit": "the provider account has no credit or free allowance left for now", "access": "the provider refused the key",
@@ -77,33 +61,6 @@ PLAIN = {"outage": "its provider is not answering", "timeout": "its provider too
 PROVIDER_SIDE = ("outage", "timeout", "rate_limit")
 ACCOUNT = ("no_credit", "access")
 WORK_STATES = ("PLANNED", "ASSIGNED", "REWORK", "BLOCKED", "LEAD_REVIEW")
-
-
-def diagnose(error: str) -> str:
-    """Why a call failed: outage, timeout, rate_limit, no_credit, access, or withdrawn (the AI can no longer be used).
-    None of these says the AI cannot do the work; that is known only from its work (verification, cut-offs,
-    protocol violations, its measured record)."""
-    e = error or ""
-    m = _STATUS.search(e)
-    if m:
-        code = int(m.group(1))
-        if code == 429 and _PER_MINUTE.search(e):  # a free tier's per-minute limit, however its message words it
-            return "rate_limit"
-        if code == 402 or (code == 429 and _CREDIT.search(e)):  # an empty account can answer 429 too
-            return "no_credit"
-        if code in (401, 403):
-            return "access"
-        if code == 404:  # the provider no longer serves this model
-            return "withdrawn"
-        if code == 429:
-            return "rate_limit"
-        if code in (408, 504):
-            return "timeout"
-        return "outage"
-    for cause, pattern in PHRASES:
-        if pattern.search(e):
-            return cause
-    return "outage"
 
 
 def _per_task(run, model_id: str | None, kind: str) -> float | None:
@@ -177,44 +134,60 @@ def _record(run, t, decision: str, why: str, rows: list, extra: dict | None = No
     return ev
 
 
+def alternatives(run, t: dict, kinds: list[str], exclude: set, why: str, worker: dict | None = None) -> tuple[dict, list]:
+    """The alternatives for a piece of work, ranked by the controller from the same evidence and policy as every
+    selection (a persisted decision), in the Router's row shape."""
+    if worker is not None and worker["id"] != t.get("owner_worker_id"):
+        work = controller.work_for_worker(run, worker, kinds)
+        d = controller.decide(run, work, "replacement", exclude=exclude, exclude_why={m: why[:200] for m in exclude})
+    else:
+        d = controller.rank_for(run, t, kinds, exclude=exclude, exclude_why={m: why[:200] for m in exclude})
+    return d, controller.legacy_rows(d)
+
+
 def evaluate(run, t: dict, why: str, forced: bool) -> dict:
-    """Decide keep, reroute or replace for the worker that owns t. Returns the step's result."""
+    """Decide keep, reroute or replace for the worker that owns t. Returns the step's result. Forced (the work
+    kept failing, or the AI can no longer be used): the best alternative that passes its regression check. On
+    evidence alone: only an alternative whose evidenced quality is verifiably superior to the incumbent's on this
+    work, so a single noisy failure or an untested challenger never displaces it."""
     if t.get("replacements", 0) >= MAX_REPLACEMENTS:
         return run.escalate(t, why + " It has already had its intelligence changes.") if forced \
             else {"did": "kept", "task": t["id"]}
-    reg, s = run.registry, project_settings.get(run.store)
+    reg = run.registry
     wid = t["owner_worker_id"]
     w = run.worker(wid)
-    old = run.model_of(wid)
+    old = run.model_for(wid, t["id"])
     left = budget.left_for(run.store, t["id"])
-    _, rows = router.choose(reg, s, [t["kind"]], budget_left=left, exclude={old})
-    try:
-        current = router.estimate(reg, reg.get(old), t["kind"], s["time_value_per_hour"])
-    except Exception:  # noqa: BLE001 - a removed model has no estimate: any alternative is better
-        current = None
-    options = []  # (score, action, payload); a reroute first among equals, it changes no intelligence
+    d, rows = alternatives(run, t, [t["kind"]], {old} if old else set(), why)
+    for r in rows:
+        r["fits_budget"] = r["fits_budget"] and r["expected_usd"] <= left + 1e-9
+    current = controller.assess_incumbent(run, t, old, [t["kind"]]) if old else None
+    order = {r["model_id"]: i for i, r in enumerate(rows)}
+    options = []  # (rank, tie, action, payload); a reroute first among equals, it changes no intelligence
     peers = []
     for p in run.workers():
         pm = run.model_of(p["id"])
-        if p["id"] == wid or p["role"] != w["role"] or not pm or pm == old:
+        if p["id"] == wid or p["role"] != w["role"] or not pm or pm == old or pm not in order:
             continue
-        m = reg.get(pm)
-        if not reg.availability(m)[0]:
+        if not reg.availability(reg.get(pm))[0]:
             continue
-        e = router.estimate(reg, m, t["kind"], s["time_value_per_hour"])
-        if e["expected_usd"] <= left + 1e-9:
+        r = rows[order[pm]]
+        if r["fits_budget"]:
             busy = sum(1 for x in run.tasks() if x["owner_worker_id"] == p["id"] and x["status"] != "VERIFIED")
-            peers.append((e["score"], busy, p))
+            peers.append((order[pm], busy, p))
     if peers:
         best_peer = min(peers, key=lambda x: (x[0], x[1]))
         options.append((best_peer[0], 0, "reroute", best_peer[2]))
-    options += [(r["score"], 1, "replace", r) for r in rows if r["fits_budget"]]
+    options += [(order[r["model_id"]], 1, "replace", r) for r in rows if r["fits_budget"]]
     options.sort(key=lambda o: (o[0], o[1]))
     fallback = _fallback_of(reg, old)
     if forced and fallback:  # the failing intelligence names its fallback: that is tried first
         options.sort(key=lambda o: o[2] != "replace" or o[3]["model_id"] != fallback)
-    if not forced:  # evidence-triggered: change only when an alternative is expected to do better
-        options = [o for o in options if current is None or o[0] < current["score"]]
+    if not forced:  # evidence-triggered: change only on verified superiority
+        def q(mid):
+            return controller.quality_of(d, mid) or {"mean": 0, "lcb": 0, "ucb": 0, "effective_n": 0}
+        options = [o for o in options if current is None or evidence_model.superior(
+            q(o[3]["model_id"] if o[2] == "replace" else run.model_of(o[3]["id"])), current)]
     tried = []
     for _, _, action, payload in options:
         model_id = payload["model_id"] if action == "replace" else run.model_of(payload["id"])
@@ -224,21 +197,25 @@ def evaluate(run, t: dict, why: str, forced: bool) -> dict:
         tried.append({"model_id": model_id, "action": action, "regression": check["evidence"], "passed": check["passed"]})
         if not check["passed"]:
             continue
-        extra = {"regression_check": check["evidence"], "tried": tried, "forced": forced}
+        extra = {"regression_check": check["evidence"], "tried": tried, "forced": forced,
+                 "ranking_decision": d["decision_id"]}
+        choice = controller.record_choice(run, d, model_id, "reroute" if action == "reroute" else "replacement",
+                                          why, tried)
         if action == "reroute":
-            _record(run, t, "reroute", why, rows, {**extra, "to_worker": payload["id"]})
-            return _reroute(run, t, payload, why)
-        _record(run, t, "replace", why, rows, {**extra, "to_model": model_id})
-        return _swap(run, t, payload, rows, why, check["evidence"])
+            _record(run, t, "reroute", why, rows, {**extra, "to_worker": payload["id"],
+                                                   "decision_id": choice["decision_id"]})
+            return _reroute(run, t, payload, why, choice)
+        _record(run, t, "replace", why, rows, {**extra, "to_model": model_id, "decision_id": choice["decision_id"]})
+        return _swap(run, t, payload, rows, why, check["evidence"], choice)
     if forced:
-        _record(run, t, "escalate", why, rows, {"tried": tried, "forced": True})
+        _record(run, t, "escalate", why, rows, {"tried": tried, "forced": True, "ranking_decision": d["decision_id"]})
         reason = (" No other model passed its regression check." if tried else
                   " No other model in the registry can take it over within the budget." if rows else
                   " No other model in the registry is available.")
         return run.escalate(t, why + reason)
-    _record(run, t, "keep", why, rows, {"tried": tried, "forced": False,
-                                        "why_kept": "no alternative is expected to do better" if not tried
-                                        else "no better alternative passed its regression check"})
+    _record(run, t, "keep", why, rows, {"tried": tried, "forced": False, "ranking_decision": d["decision_id"],
+                                        "why_kept": "no alternative is verifiably superior on this work" if not tried
+                                        else "no superior alternative passed its regression check"})
     return {"did": "kept", "task": t["id"]}
 
 
@@ -250,15 +227,17 @@ def _fallback_of(reg, model_id: str | None) -> str | None:
         return None
 
 
-def _swap(run, t: dict, best: dict, rows: list, why: str, regression: str) -> dict:
+def _swap(run, t: dict, best: dict, rows: list, why: str, regression: str, decision: dict | None = None) -> dict:
     wid = t["owner_worker_id"]
     w = run.worker(wid)
-    old = run.model_of(wid)
+    old = run.model_for(wid, t["id"])
     reg = run.registry
     spent = budget.ledger(run.store)["spent"].get(t["id"], 0.0)
     prior = [o for o in reg.outcomes(old) if o["run_id"] == run.cid and o["task_id"] == t["id"]]
-    binding.bind(run, wid, reg.get(best["model_id"]), reason=why, by="replacement_engine", candidates=rows,
-                 task_id=t["id"])
+    new = reg.get(best["model_id"])
+    binding.bind(run, wid, new, reason=why, by="replacement_engine", candidates=rows, task_id=t["id"],
+                 decision=decision)
+    binding.bind_task(run, t["id"], wid, new, reason=why, by="replacement_engine", decision=decision, candidates=rows)
     left, joined = people.replace(run, wid, why, old, best["model_id"])
     w = run.worker(wid)
     e = router.estimate(reg, reg.get(best["model_id"]), t["kind"],
@@ -293,9 +272,13 @@ def _swap(run, t: dict, best: dict, rows: list, why: str, regression: str) -> di
     return {"did": "replaced", "task": t["id"], "from": old, "to": best["model_id"]}
 
 
-def _reroute(run, t: dict, peer: dict, why: str) -> dict:
+def _reroute(run, t: dict, peer: dict, why: str, decision: dict | None = None) -> dict:
     """Task reassignment: the work moves to a peer of the same role; its files and its allocation move with it."""
     frm = t["owner_worker_id"]
+    to_model = run.model_of(peer["id"])
+    if to_model:
+        binding.bind_task(run, t["id"], peer["id"], run.registry.get(to_model), reason=f"rerouted: {why}"[:400],
+                          by="replacement_engine", decision=decision)
     src, dst = run.workspace(frm, t["id"]), run.workspace(peer["id"], t["id"])
     for sub in ("inbox", "out"):
         if (src / sub).exists():
@@ -311,7 +294,7 @@ def _reroute(run, t: dict, peer: dict, why: str) -> dict:
     run.event("task.rerouted", "task", t["id"], {"from_worker": frm, "to_worker": peer["id"], "reason": why[:200]},
               actor="replacement_engine", correlation_id=t["id"])
     t.update({"owner_worker_id": peer["id"], "status": "REWORK" if t["kind"] in roles.FILE_TYPES else "ASSIGNED",
-              "attempts": 0, "cut_offs": 0, "replacements": t.get("replacements", 0) + 1,
+              "attempts": 0, "cut_offs": 0, "replacements": t.get("replacements", 0) + 1, "rerouted": True,
               **planner.coordination(peer, run.workers()),
               "feedback": f"Rerouted to you from {frm}: {why[:300]} Its files are in your workspace."})
     run.save_task(t)
@@ -326,13 +309,14 @@ def _reroute(run, t: dict, peer: dict, why: str) -> dict:
 def check_thresholds(run, t: dict) -> dict | None:
     """After a failed verification: has the owner's current intelligence crossed a threshold?"""
     wid = t["owner_worker_id"]
-    card = performance.scorecard(run.store, wid, run.model_of(wid))
+    mid = run.model_for(wid, t["id"])
+    card = performance.scorecard(run.store, wid, mid)
     f = run.store.get("forecast", "current") or {}
     per_task = next((r["inference"] for r in f.get("tasks", []) if r["task_id"] == t["id"]), None)
     reasons = performance.below(card, per_task)
     if not reasons:
         return None
-    return evaluate(run, t, f"{wid} on {run.model_of(wid)}: " + "; ".join(reasons), forced=False)
+    return evaluate(run, t, f"{wid} on {mid}: " + "; ".join(reasons), forced=False)
 
 
 def model_failed(run, t: dict, exc) -> dict | None:
@@ -345,10 +329,14 @@ def model_failed(run, t: dict, exc) -> dict | None:
     involved = [actor(t), t.get("owner_worker_id"), t.get("handoff_from"), t.get("reviewed_by"),
                 (t.get("blocker") or {}).get("needs_from")]
     caller = next((w for w in involved if w and run.model_of(w) == exc.model_id), t.get("owner_worker_id"))
-    n = run.count("call_error") + 1
+    n = run.store.next_id("call_error")
     run.store.put("call_error", f"ce_{n:04d}", {"id": f"ce_{n:04d}", "worker_id": caller, "model_id": exc.model_id,
                                                 "task_id": t.get("id"), "error": str(exc)[:300], "cause": cause,
                                                 "at": now()})
+    if t.get("id", "").startswith("t_"):  # evidence: a provider's failure is recorded and never learned as the AI's
+        controller.record_attempt_failure(run, run.task(t["id"]), attr.call_failure(str(exc)),
+                                          kind="call_failure", idempotency_key=f"call_error:{run.cid}:ce_{n:04d}",
+                                          intelligence=(exc.model_id, None), severity="minor", caller=caller)
     reg = run.registry
     reg.record_call(exc.model_id, role="", purpose="error", task_kind=t.get("kind", ""), usage=exc.usage, run_id=run.cid,
                     error="" if cause == "reply" else str(exc))  # the provider answered: it is not down
@@ -391,7 +379,7 @@ def _rebind(run, t: dict, wid: str, m: dict, why: str) -> dict:
     given the best other intelligence for its role's work that passes a check first."""
     reg, s = run.registry, project_settings.get(run.store)
     w = run.worker(wid)
-    _, rows = router.choose(reg, s, roles.staffing_kinds(w["role"]), exclude={m["id"]})
+    _, rows = alternatives(run, t, roles.staffing_kinds(w["role"]), {m["id"]}, why, worker=w)
     kind = "assign" if roles.is_cofounder(w["role"]) else "answer"  # the coordination work it failed at
     for r in [r for r in rows if r["fits_budget"]]:
         check = regression_check(run.supply, r["model_id"], kind)
@@ -426,10 +414,11 @@ def _withdrawn(run, t: dict, m: dict, exc) -> dict:
         if target is not None:
             out = evaluate(run, target, f"{m['name']} {PLAIN['withdrawn']}: {exc}", forced=True)
         if run.model_of(w["id"]) == m["id"]:  # no open task, or its task went to a peer: the worker moves too
-            best, rows = router.choose(reg, s, roles.staffing_kinds(w["role"]), exclude={m["id"]})
+            _, rows = alternatives(run, target or t, roles.staffing_kinds(w["role"]), {m["id"]},
+                                   f"{m['name']} {PLAIN['withdrawn']}", worker=w)
             fb = _fallback_of(reg, m["id"])
             pick = next((r for r in rows if r["model_id"] == fb), None) if fb else None
-            pick = pick or best
+            pick = pick or next((r for r in rows if r["fits_budget"]), None)
             if pick:
                 binding.bind(run, w["id"], reg.get(pick["model_id"]), reason=f"{m['name']} {PLAIN['withdrawn']}",
                              by="intelligence_router", candidates=rows)
@@ -509,8 +498,7 @@ def _outage(run, t: dict, m: dict, cause: str, exc) -> dict:
     if policy == "wait":
         _park(run, t, {m["id"]}, cause, None, _down_until(run, m))
         return {"did": "waiting", "task": t["id"], "model": m["id"], "cause": cause}
-    s = project_settings.get(run.store)
-    _, rows = router.choose(run.registry, s, [kind], exclude={m["id"]})
+    _, rows = alternatives(run, t, [kind], {m["id"]}, f"{m['name']}: {PLAIN[cause]}")
     alt = rows[0] if rows else None
     waiting = sorted({people.label(w) for w in run.workers() if run.model_of(w["id"]) == m["id"]})
     if alt is None:
@@ -539,7 +527,7 @@ def _stand_in(run, t: dict, m: dict, cause: str, pick: str | None, kind: str, au
     """A stand-in for the time the AI is down: the fallback, or the best alternative that passes its regression
     check. Every worker on the down AI is bound to it for now; each returns to its own AI when it answers again."""
     reg, s = run.registry, project_settings.get(run.store)
-    _, rows = router.choose(reg, s, [kind], exclude={m["id"]})
+    _, rows = alternatives(run, t, [kind], {m["id"]}, f"stand-in while {m['name']} is down")
     options = ([pick] if pick else []) + [r["model_id"] for r in rows if r["model_id"] != pick]
     tried = []
     for mid in options:
@@ -677,7 +665,7 @@ def resume_waiting(run) -> None:
                       actor="replacement_engine")
 
 
-def version_changed(run, worker_id: str, exc) -> None:
+def version_changed(run, worker_id: str, exc, task_id: str | None = None) -> None:
     """The intelligence a worker is bound to reports a new version. It continues only after its regression check on
     the worker's kind of work passes; the binding then pins the new version. A failed check makes the intelligence
     unavailable, and the call fails like any model error, so the worker is rebound."""
@@ -695,6 +683,10 @@ def version_changed(run, worker_id: str, exc) -> None:
         reg.set_regression(exc.model_id, False, f"version {exc.current}: {check['evidence']}")
         raise IntelligenceError(f"{entry['name']} changed version to {exc.current or 'unversioned'} and failed its "
                                 f"regression check ({check['evidence']})", model_id=exc.model_id)
-    binding.bind(run, worker_id, entry, by="replacement_engine",
-                 reason=f"version {exc.pinned or 'unversioned'} to {exc.current or 'unversioned'}, regression check "
-                        f"passed: {check['evidence']}")
+    why = (f"version {exc.pinned or 'unversioned'} to {exc.current or 'unversioned'}, regression check passed: "
+           f"{check['evidence']}")
+    if (binding.current(run.store, worker_id) or {}).get("intelligence_id") == exc.model_id:
+        binding.bind(run, worker_id, entry, by="replacement_engine", reason=why)
+    tb = binding.task_binding(run.store, task_id) if task_id else None
+    if tb and tb["intelligence_id"] == exc.model_id and tb.get("version") != served_version(entry):
+        binding.bind_task(run, task_id, tb["worker_id"], entry, reason=why, by="replacement_engine")

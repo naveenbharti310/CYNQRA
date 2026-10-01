@@ -40,7 +40,7 @@ def check_endpoint(endpoint: str, auth_method: str) -> None:
                                "network could read it")
     # Never let a provider connection carrying credentials target a private, loopback, link-local, multicast or
     # otherwise non-public address. This blocks common SSRF and DNS-rebinding targets at connection setup.
-    if host not in LOCAL_HOSTS and host not in ("::1",):
+    if auth_method != "none" and host not in LOCAL_HOSTS:
         try:
             addresses = {item[4][0] for item in socket.getaddrinfo(host, u.port or (443 if u.scheme == "https" else 80),
                                                                   type=socket.SOCK_STREAM)}

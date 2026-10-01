@@ -10,12 +10,18 @@ self_checks             how many times an engineer may test and fix its own work
 cofounders_settle_reversible  governance: a decision that is easy to undo (a merge, a product rule outside money
                         and law) is settled by the cofounder accountable for it, and the founder is told instead of
                         asked; going live, money and legal choices always go to the founder
+objective_calibration   before the work starts, qualified candidates are measured on representative work derived
+                        from this objective (calibration.py), within the calibration policy's bounds; off: the
+                        first selections rest on the global prior and the run's own verified work
+intelligence_local_only the founder's constraint that the work stays on this computer: only local intelligence is
+                        eligible (a hard constraint, never traded against quality)
 """
 from __future__ import annotations
 
 DEFAULTS = {"budget_usd": 5.0, "time_value_per_hour": 10.0, "compute_usd_per_hour": 0.0, "infra_usd_per_day": 0.0,
             "reserve_min_pct": 0.15, "allow_workforce_override": False, "self_checks": 2,
-            "parallel_workers": 6, "cofounders_settle_reversible": True}
+            "parallel_workers": 6, "cofounders_settle_reversible": True, "objective_calibration": True,
+            "intelligence_local_only": False}
 NUMBERS = ("budget_usd", "time_value_per_hour", "compute_usd_per_hour", "infra_usd_per_day", "reserve_min_pct")
 
 
@@ -39,7 +45,8 @@ def update(store, changes: dict) -> dict:
                 raise SettingsError(f"{k} must be a number") from exc
             if v < 0:
                 raise SettingsError(f"{k} cannot be negative")
-        elif k in ("allow_workforce_override", "cofounders_settle_reversible"):
+        elif k in ("allow_workforce_override", "cofounders_settle_reversible", "objective_calibration",
+                   "intelligence_local_only"):
             v = bool(v)
         elif k == "self_checks":
             v = max(0, int(v))

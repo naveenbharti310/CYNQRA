@@ -146,6 +146,9 @@ class SeatTests(unittest.TestCase):
                     self.reg.record_outcome(ids[ref], role="probe", task_kind=kind, task_id=f"{kind}{i}",
                                             run_id="probe", attempt=1, verified=ok, usd=0, seconds=20, tokens=3000,
                                             source="probe")
+            # the gate settles as probe.py settles it: each qualifies for the family of work it passed
+            self.reg.set_regression(ids[ref], True, "probe", by_kind={"objective": "passed" if plans else "failed",
+                                                                      "code": "passed" if codes else "failed"})
         self.ids = ids
 
     def tearDown(self):

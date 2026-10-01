@@ -1,5 +1,7 @@
 import unittest
 
+import helpers  # noqa: F401  - puts poc/ on the path, as every test module does
+
 from cynqra.run_hosted_examination import select
 
 

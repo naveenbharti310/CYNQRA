@@ -132,6 +132,33 @@ class IntelligenceSupply:
                 continue  # its status says why; another source may still serve
         return out
 
+    def qualify(self, entries: list[dict] | None = None, limit: int = 3, log=lambda s: None) -> list[dict]:
+        """Global qualification for discovered intelligence that has none yet (mandate 16): a discovered model is
+        not qualified until its qualification work passes (probe.py). Bounded: at most limit candidates, fair across
+        providers and diverse across families (candidates.py), and only ones that can be reached now. A provider
+        failure leaves a model unverified (inconclusive), never failed. Returns the probe results."""
+        from ..probe import probe  # the probe drives a model source; imported here to keep the layer acyclic
+        from .candidates import select
+        pool = entries if entries is not None else self.registry.models()
+        pending = []
+        for m in pool:
+            m = self.registry.get(m["id"])
+            if m.get("status") == "retired" or m.get("runtime") == "scripted":
+                continue
+            if (m.get("regression") or {}).get("status") != "unverified" or not self._reachable(m)[0]:
+                continue
+            pending.append(m)
+        local = [m for m in pending if m.get("local")][:1]  # a model on this computer loads gigabytes: one at a time
+        chosen = select([m for m in pending if not m.get("local")] + local, limit) if pending else []
+        out = []
+        for m in chosen:
+            try:
+                out.append(probe(self, m["id"], log=log))
+            except Exception as exc:  # noqa: BLE001 - a probe that cannot run leaves the model unverified
+                out.append({"model_id": m["id"], "passed": False, "qualification_status": "inconclusive",
+                            "error": str(exc)[:300]})
+        return out
+
     def remove_connection(self, connection_id: str) -> None:
         for m in self.registry.models():
             if m["connection_id"] == connection_id:

@@ -17,7 +17,8 @@ import json
 import shutil
 from pathlib import Path
 
-from . import budget, deploy, people, replacement, roles, verifier
+from . import attribution as attr
+from . import budget, controller, deploy, objective, people, replacement, roles, verifier
 from . import settings as project_settings
 from .db import digest, now
 from .protocol import ProtocolError
@@ -58,13 +59,21 @@ def perf(run, wid: str, key: str) -> None:
 
 
 def frozen_during_call(run, t: dict) -> dict:
-    """The kill switch went on while the model was answering: the answer is dropped, the task stays where it was."""
+    """The kill switch went on while the model was answering: the answer is dropped, the task stays where it was.
+    A cancellation, recorded as such: never a failure of the intelligence that was answering."""
     run.event("action.denied", "task", t["id"], {"task_id": t["id"], "reason": "kill switch on when the model answered; "
               "the answer was discarded"}, actor="policy", correlation_id=t["id"], policy_decision="DENY")
+    controller.record_attempt_failure(run, t, attr.failure("cancelled", "the kill switch stopped the work mid-call"),
+                                      kind="cancelled", idempotency_key=f"cancel:{t['id']}:{t.get('work_calls')}:"
+                                      f"{run.count('intervention')}")
     return {"did": "paused", "task": t["id"], "why": "kill switch"}
 
 
 def assign(run, t: dict) -> dict:
+    # the work is about to start: when the objective's evidence moved on since its intelligence was chosen, the
+    # choice is checked again (a challenger takes it only on verified superiority); history is never rewritten
+    controller.revalidate(run, t)
+    t = run.task(t["id"])
     owner, sender = t["owner_worker_id"], t["handoff_from"]
     if sender == "orchestrator":  # a cofounder's own task: the platform hands it over from the approved roadmap
         arts = [a["id"] for a in run.store.all("artifact") if a["task_id"] in t["dependencies"]]
@@ -100,8 +109,12 @@ def _inbox(run, t: dict) -> dict[str, str]:
 def work(run, t: dict) -> dict:
     owner = t["owner_worker_id"]
     if t["work_calls"] == 0:
-        run.event("task.started", "task", t["id"], {"owner": owner}, actor=owner, actor_type="worker",
+        run.event("task.started", "task", t["id"], {"owner": owner, "intelligence": run.model_for(owner, t["id"]),
+                  "objective_version": (run.objective() or {}).get("version")}, actor=owner, actor_type="worker",
                   correlation_id=t["id"])
+    if not t.get("attempt_open"):  # the attempt keeps the objective version it started under
+        t.update(attempt_open=True, attempt_objective_version=(run.objective() or {}).get("version"))
+        run.save_task(t)
     out = run.workspace(owner, t["id"]) / "out"
     previous = {p.relative_to(out).as_posix(): p.read_text(encoding="utf-8", errors="replace")
                 for p in sorted(out.rglob("*")) if p.is_file()}
@@ -130,27 +143,52 @@ def work(run, t: dict) -> dict:
         if not isinstance(calls, list) or len(calls) > 8:
             raise ProtocolError("a worker may request at most eight tools in one round")
         observations = []
+        use = t.setdefault("tool_use", {"calls": 0, "executed": 0, "denied_intelligence": 0, "denied_environment": 0,
+                                        "malformed": 0, "failed_runs": 0, "recovered": 0})
         for call in calls:
+            use["calls"] += 1
             if not isinstance(call, dict) or not isinstance(call.get("action"), str):
+                use["malformed"] += 1
+                run.save_task(t)
                 raise ProtocolError("every tool call needs an action")
             action = call["action"]
             if action not in {"read_artifact", "search_files", "write_file", "delete_data", "install_package", "run_command",
                               "run_tests"}:
+                use["malformed"] += 1
+                run.save_task(t)
                 raise ProtocolError(f"worker requested an unsupported tool: {action}")
             target = str(call.get("target") or "")
             content = call.get("content")
             if content is not None and not isinstance(content, str):
+                use["malformed"] += 1
+                run.save_task(t)
                 raise ProtocolError("tool write content must be text")
             g = run.gateway(owner, t["id"], action, target=target, content=content)
+            # tool use is evidence too: a request the rules refuse is the intelligence's; a broken tool is not
+            if g.get("status") == "executed":
+                use["executed"] += 1
+                if use.get("_last_failed"):
+                    use["recovered"] += 1
+                use["_last_failed"] = bool((g.get("result") or {}).get("passed") is False)
+                use["failed_runs"] += int(use["_last_failed"])
+            else:
+                cause = attr.tool_failure(g.get("status"), (g.get("policy") or {}).get("reason") or "")
+                use["denied_intelligence" if cause["attributable_to_intelligence"] else "denied_environment"] += 1
+                use["_last_failed"] = True
             observations.append({"action": action, "target": target,
                                  "status": g.get("status"), "result": g.get("result"),
                                  "policy": g.get("policy")})
+        run.save_task(t)
         tool_feedback = "\n\nTool results from Cynqra:\n" + json.dumps(observations, ensure_ascii=False)[:12000]
         previous = {p.relative_to(out).as_posix(): p.read_text(encoding="utf-8", errors="replace")
                     for p in sorted(out.rglob("*")) if p.is_file()}
     else:
         raise ProtocolError("worker exhausted its six tool rounds without producing a final result")
     if result.get("result") == "blocked":
+        # a fact it needed is missing: a specification failure, recorded and never learned as the AI's fault
+        controller.record_attempt_failure(run, t, attr.failure("specification", "a fact the work needs is missing",
+                                          str(result.get("description") or "")), kind="blocker",
+                                          idempotency_key=f"blocker:{t['id']}:{t['work_calls']}")
         needs = result.get("needs_from") if result.get("needs_from") in who else who[0]
         blocker = run.send("Blocker", {"category": result.get("category", "missing_input"),
                                        "description": result.get("description", ""), "needs_from": needs},
@@ -179,6 +217,9 @@ def work(run, t: dict) -> dict:
         if g["status"] != "executed":
             if budget.ledger(run.store)["state"] == "breaker":
                 return {"did": "paused", "task": t["id"], "why": "budget breaker open"}
+            cause = attr.tool_failure(g["status"], g["policy"]["reason"])
+            controller.record_attempt_failure(run, t, cause, kind="write_refused", severity="major",
+                                              idempotency_key=f"write:{t['id']}:{t['work_calls']}:{name}")
             t["attempts"] += 1
             t.update({"status": "REWORK", "feedback": f"write refused: {g['policy']['reason']}"})
             run.save_task(t)
@@ -199,7 +240,7 @@ def work(run, t: dict) -> dict:
                                 "acceptance_check": result.get("acceptance_check") or result.get("summary") or "done"},
                     {"from_worker": owner, "to_worker": "verification", "task_id": t["id"]}, t["id"], owner)
     t.update({"status": "REVIEW", "outputs": written, "summary": result.get("summary", ""),
-              "completed_hash": done["object_hash"]})
+              "completed_hash": done["object_hash"], "attempt_open": False})
     run.save_task(t)
     run.event("task.completed", "task", t["id"], {"files": [w["file"] for w in written],
               "note": "completed by the worker, not yet verified"}, actor=owner, actor_type="worker",
@@ -442,9 +483,20 @@ def answer(run, t: dict) -> dict:
     return {"did": "blocker_cleared", "task": t["id"], "by": who}
 
 
+def _rework(run, t: dict, why: str, by: str, ref: str | None) -> None:
+    """Structured rework: what failed, by which check, on which attempt, kept with the task."""
+    t["rework_history"] = (t.get("rework_history") or []) + [{"attempt": t["attempts"], "by": by, "ref": ref,
+                                                              "why": why[:300], "at": now()}]
+    run.save_task(t)
+    run.event("rework.created", "task", t["id"], {"attempt": t["attempts"], "by": by, "ref": ref,
+              "why": why[:200]}, actor=by, correlation_id=t["id"])
+
+
 def verify(run, t: dict) -> dict:
     owner = t["owner_worker_id"]
     r = verifier.verify(run, t)
+    if r.get("integrity") is False:  # the bar moved after it was frozen: the founder decides, nothing is measured
+        return escalate(run, t, f"{t['id']}: {r['feedback']}")
     if r["passed"]:
         t["verification_id"] = r["verification"]["id"]
         if t.get("reviewed_by"):  # checked by the platform; now its cofounder reviews it before it counts
@@ -463,6 +515,7 @@ def verify(run, t: dict) -> dict:
     run.event("task.failed", "task", t["id"], {"attempt": t["attempts"], "rework": True,
               "verification": r["verification"]["id"]}, actor="verification", correlation_id=t["id"],
               test_ids=r["verification"]["test_ids"])
+    _rework(run, t, r["feedback"], "verification", r["verification"]["id"])
     moved = replacement.check_thresholds(run, t)  # evidence, not only the third failure, can move the work
     if moved and moved["did"] in ("replaced", "rerouted"):
         return moved
@@ -506,9 +559,18 @@ def lead_review(run, t: dict) -> dict:
     if g["status"] != "executed":
         return _after_review(run, t, lead, "skipped", f"the review was not allowed: {g['policy']['reason']}")
     rounds = t.get("review_rounds", 0)
-    content, usage = run.intel.review(t, worker=lead, objective=run.objective_ctx(), rules=run.rules(),
-                                      owner=(run.worker(owner) or {}).get("title", owner), work=_review_material(run, t),
-                                      persona=run.persona(lead), round_index=rounds)
+    producer, _ = controller.producer(run, t)
+    run._tls.review_for = t["id"]  # an independent review where the policy asks for one (controller.reviewer)
+    try:
+        reviewer = run.intelligence_for(lead)
+        run.event("review.started", "task", t["id"], {"by": lead, "round": rounds, "reviewer_intelligence": reviewer,
+                  "producer_intelligence": producer, "independent": reviewer != producer}, actor=lead,
+                  actor_type="worker", correlation_id=t["id"])
+        content, usage = run.intel.review(t, worker=lead, objective=run.objective_ctx(), rules=run.rules(),
+                                          owner=(run.worker(owner) or {}).get("title", owner),
+                                          work=_review_material(run, t), persona=run.persona(lead), round_index=rounds)
+    finally:
+        run._tls.review_for = None
     run.record_call(t["id"], lead, "review", usage)
     if run.meta["frozen"]:
         return frozen_during_call(run, t)
@@ -525,7 +587,21 @@ def lead_review(run, t: dict) -> dict:
     rec = run.send("Review", {"verdict": verdict, "note": note.strip()},
                    {"reviewed_by": lead, "owner": owner, "task_id": t["id"]}, t["id"], lead)
     t["reviews"] = t.get("reviews", []) + [{"by": lead, "verdict": verdict, "note": rec["note"],
-                                           "hash": rec["object_hash"]}]
+                                           "hash": rec["object_hash"], "reviewer_intelligence": usage.get("model_id"),
+                                           "independent": usage.get("model_id") != producer}]
+    # the review is evidence about the producer; one by its own intelligence is not independent and counts little
+    independent = usage.get("model_id") != producer
+    controller.record_task_evidence(
+        run, t, verified=verdict == "approve", verifier_kind="independent_intelligence" if independent else "self_review",
+        failure=None if verdict == "approve" else attr.failure(attr.INTELLIGENCE, "the accountable cofounder sent it "
+                                                               "back", rec["note"]),
+        idempotency_key=f"review:{t['id']}:{rec['object_hash']}",
+        extra={"source": "lead_review", "reviewer": lead, "reviewer_intelligence": usage.get("model_id"),
+               "verification": {"verification_id": None, "method": "cofounder review", "independent": independent,
+                                "verifier_kind": "independent_intelligence" if independent else "self_review",
+                                "verifier_intelligence": usage.get("model_id"), "record_hash": None,
+                                "test_ids_count": 0, "quality": controller.policies.body("verification")["quality"][
+                                    "independent_intelligence" if independent else "self_review"]}})
     if verdict == "approve":
         return _after_review(run, t, lead, "approved", rec["note"])
     if rounds >= MAX_SEND_BACKS:  # the platform's checks decide; the concern stays on the record
@@ -536,6 +612,7 @@ def lead_review(run, t: dict) -> dict:
     t.update({"status": "REWORK" if t["kind"] in roles.FILE_TYPES else "ASSIGNED",
               "feedback": f"Your cofounder, the {title}, sent it back: {rec['note']}", "pending_proposal": None})
     run.save_task(t)
+    _rework(run, t, rec["note"], lead, rec["object_hash"])
     run.event("task.sent_back", "task", t["id"], {"by": lead, "round": t["review_rounds"]}, actor=lead,
               actor_type="worker", correlation_id=t["id"], protocol_hash=rec["object_hash"])
     return {"did": "sent_back", "task": t["id"], "by": lead}
@@ -609,7 +686,7 @@ def execute_approved(run, t: dict) -> dict:
         method, checks, reviewer = "health check and smoke test on the live URL", {"url": res["url"]}, "verification"
     v = verifier.record(run, t, verdict="VERIFIED", method=method, checks=checks, test_ids=test_ids, reviewer=reviewer,
                         seconds=None)
-    verifier.outcome(run, t, True)
+    verifier.outcome(run, t, True, verification=v)
     t["status"] = "VERIFIED"
     run.save_task(t)
     perf(run, owner, "verified")
@@ -625,8 +702,19 @@ def after_proposal(run, d: dict, action: str) -> None:
     if action == "approve":
         t["status"] = "APPROVED"
     else:
+        # a person's verdict on the proposal: a rejection is evidence about the intelligence that wrote it; asking
+        # for more evidence is a human request, not a failure
+        cause = attr.failure(attr.INTELLIGENCE, "the founder rejected the proposal", d.get("note") or "") \
+            if action == "reject" else attr.failure("human", "the founder asked for more evidence", d.get("note") or "")
+        controller.record_task_evidence(run, t, verified=False if action == "reject" else None, failure=cause,
+                                        verifier_kind="human", idempotency_key=f"founder:{d['id']}",
+                                        extra={"source": "founder_decision", "autonomy": "human_rejected"
+                                               if action == "reject" else "autonomous"})
         t["attempts"] += 1
         t.update({"status": "REWORK", "feedback": f"Founder: {d['outcome_label']}. {d.get('note', '')}".strip()})
+        run.save_task(t)
+        _rework(run, t, t["feedback"], "founder", d["id"])
+        return
     run.save_task(t)
 
 
@@ -636,7 +724,8 @@ def after_escalation(run, d: dict, action: str) -> None:
         back = t.get("failed_from")
         if back not in ("PLANNED", "BLOCKED", "LEAD_REVIEW"):
             back = "REWORK" if t["kind"] in roles.FILE_TYPES else "ASSIGNED"
-        t.update({"status": back, "attempts": 0, "cut_offs": 0})
+        t.update({"status": back, "attempts": 0, "cut_offs": 0, "human_retry": True})  # human-directed retry
         run.save_task(t)
     else:
         run.set_meta(phase="stopped", notice=f"You stopped the run at {t['id']}.")
+        objective.transition(run, "OBJECTIVE_CANCELLED", f"the founder stopped the run at {t['id']}", by="founder")

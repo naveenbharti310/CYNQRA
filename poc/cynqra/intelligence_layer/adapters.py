@@ -74,6 +74,9 @@ def _family(ref: str) -> tuple[str, tuple]:
             continue
         nums = re.findall(r"\d+(?:\.\d+)?", part)
         if nums and not re.fullmatch(r"\d+(?:\.\d+)?", part):
+            # a version inside a name (k2.6, qwen3.5): the family is the name, the number its version; without the
+            # number every release of the family would tie and the first listed would win, not the newest
+            version.extend(float(x) for x in nums)
             family_parts.append(re.sub(r"\d+(?:\.\d+)?", "#", part))
         elif nums:
             version.extend(float(x) for x in nums)

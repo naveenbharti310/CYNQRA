@@ -89,6 +89,20 @@ class ProviderAddresses(unittest.TestCase):
                                                "auth": auth, "models": ["m"]})
 
     def test_a_key_travels_only_encrypted_and_only_to_a_web_address(self):
+        import socket
+        from unittest import mock
+        real = socket.getaddrinfo
+        public = {"models.example.com": "93.184.216.34", "lan.example.com": "192.168.1.20"}  # DNS, held fixed
+
+        def resolve(host, *a, **kw):
+            if host in public:
+                return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (public[host], 443))]
+            return real(host, *a, **kw)
+        patch = mock.patch.object(socket, "getaddrinfo", resolve)
+        patch.start()
+        self.addCleanup(patch.stop)
+        with self.assertRaises(SupplyError):  # a name that resolves into the private network, with a key: refused
+            self.connect("https://lan.example.com/v1", {"method": "secret", "secret": "sk-test-not-real"})
         key = {"method": "secret", "secret": "sk-test-not-real"}
         for bad, auth in (("file:///etc/passwd", {"method": "none"}), ("ftp://example.com/v1", {"method": "none"}),
                           ("http://models.example.com/v1", key), ("http://192.168.1.20:8080/v1", key)):

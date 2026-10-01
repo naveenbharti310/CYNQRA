@@ -20,6 +20,10 @@ POST /api/run/auto                  {on, delay}
 POST /api/killswitch                {on}
 POST /api/run/resume                retry after a model or network error
 GET  /api/replay/<task_id>
+GET  /api/explain/<task_id>          why that work item's intelligence was chosen, and why it changed (controller.py)
+GET  /api/decisions/<sd_id>/replay   a selection decision reproduced from its own immutable snapshot
+GET  /api/intelligence/decisions     the run's selection decisions (?work_item=t_03 for one work item)
+GET  /api/policies                   every policy the control plane decides by, with its version and hash
 GET  /api/graph?q=approves|owns|depends&subject=...
 GET  /api/intelligence              the Intelligence Layer: provider connections (credentials described, never
                                     revealed), the registry, the provider types, running probes
@@ -62,6 +66,7 @@ from urllib.parse import parse_qs, urlparse
 from .deploy import stop_all
 from .engine import Engine, EngineError
 from .intelligence import IntelligenceError
+from . import policies
 from .probe import probe
 from .protocol import ProtocolError
 from .intelligence_layer import IntelligenceSupply, SupplyError
@@ -369,6 +374,17 @@ def make_server(app: App, port: int = 8750) -> ThreadingHTTPServer:
             m = re.match(r"^/api/replay/(t_\w+)$", path)
             if m:
                 return self._guard(lambda: app.engine.replay(m.group(1)))
+            m = re.match(r"^/api/explain/(t_\w+)$", path)
+            if m:  # why this work item's intelligence was chosen, and why it changed, from the record
+                return self._guard(lambda: app.engine.explain(m.group(1)))
+            m = re.match(r"^/api/decisions/(sd_\d+)/replay$", path)
+            if m:
+                return self._guard(lambda: app.engine.replay_decision(m.group(1)))
+            if path == "/api/intelligence/decisions":
+                q = parse_qs(u.query)
+                return self._guard(lambda: {"decisions": app.engine.decisions(q.get("work_item", [None])[0])[-200:]})
+            if path == "/api/policies":
+                return self._guard(lambda: {"policies": policies.catalog()})
             if path == "/api/intelligence":
                 return self._guard(lambda: {**app.supply.snapshot(), "probes": app.probes})
             if path == "/api/update":

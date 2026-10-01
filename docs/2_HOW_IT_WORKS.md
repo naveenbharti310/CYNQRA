@@ -13,7 +13,7 @@ stated. The example throughout is the Bluedip demo.
 | 1. Describe the idea | The founder describes what they want in their own words. Cynqra turns it into a brief: product, customers, outcomes, success criteria, limits, priorities. What Cynqra filled in itself is marked for the founder to check. The brief becomes the requirements the team is built from, each in an area (product, AI and data, design, deployment, business, ...), and the risks that must not happen. | The founder confirms it and sets the budget | `objective.py` |
 | 2. Approve the plan | Cynqra shows what it will build, the capabilities it takes and the organisation it proposes: the **AI cofounders** the idea needs (Bluedip: a CTO, a Chief Product Officer and a CFO), and the team **each cofounder chooses** for its own area. Every seat has to earn its place (below). A lean team is shown beside the recommended one, with an estimated budget. | **The founder approves** the plan, or asks for a different one | `synthesis.py`, `seats.py`, `roles.py` |
 | 3. Define yourself | The founder says what they bring: background, the areas they lead, their hours. In live mode Cynqra then constructs the organisation again around them: the cofounders and every team are drafted anew with the founder's background, checked and challenged as before, and replace the step 2 organisation before anyone is staffed; what changed is shown at step 4. A cofounder seat the founder leads is not filled by an AI cofounder: that area becomes a lead who reports to the founder, and what that cofounder would have settled comes to the founder. A technical founder gets no CTO. A team the founder edited by hand at step 2 is kept, and a demo's organisation is part of its script. | The founder | `engine.py` (`define_founder`, `_fit_founder`), `synthesis.py` (`refit`) |
-| 4. Approve the team and budget | Each member is bound to the AI that measured best for its kind of work. The plan sets milestones, tasks, owners, dependencies, how each task is checked and a dollar budget per task. A member with no work leaves before anything starts. | **The founder approves** the team and budget | `intelligence_layer/router.py`, `binding.py`, `planner.py`, `budget.py` |
+| 4. Approve the team and budget | Qualified AIs first do a bounded trial of this objective's own work; then each piece of work is bound to the AI with the strongest evidence for it, and every choice is recorded with why. The plan sets milestones, tasks, owners, dependencies, how each task is checked and a dollar budget per task. A member with no work leaves before anything starts. | **The founder approves** the team and budget | `calibration.py`, `controller.py`, `intelligence_layer/router.py`, `binding.py`, `planner.py`, `budget.py` |
 | 5. Watch it being built | Everyone works at the same time and cofounders run their areas (below). Every piece of work is checked by Cynqra, then reviewed by its cofounder, before it counts. A member that stops is diagnosed first, and its AI is replaced only if it cannot do the work. | The team; **the founder** only for what cannot be undone, such as a rule about money and putting the product live | `engine.py` (`step`), `execution.py`, `verifier.py`, `replacement.py` |
 | 6. Receive the working product | The product is merged, put live and checked after it goes live. The founder opens it, uses it, or downloads everything. | The founder | `delivery.py`, `deploy.py` |
 | 7. Audit, rework and refine | Cynqra audits the product against the original objective: every requirement, the work that answers it, and whether that work passed its checks. The founder accepts it, or says what should change; the same team plans only that work, which is priced, approved once, built, checked and released. The release before it stays as the way back. | **The founder** accepts, or asks for a rework | `engine.py` (`audit`, `rework`, `start_cycle`), `planner.py` |
@@ -159,6 +159,27 @@ The screen searches the registry itself: "coding", "OCR", "fast", "reasoning", "
 provider. It filters by access provider, publisher, capability, speed, cost, context and input. Each model opens to
 its details and its measured record, and can be evaluated, taken offline, given a stand-in or stopped. Access
 providers are listed below it, in customer words: the credential is "Securely stored" and never shown again.
+
+## How Cynqra chooses the intelligence for each piece of work
+
+**What.** No model is "the best". For every piece of work, Cynqra chooses the intelligence with the strongest
+verified evidence for that work, on this objective, at this version, and keeps choosing as the work produces
+evidence. Five steps:
+
+| Step | What happens | Code |
+| --- | --- | --- |
+| Qualify | A discovered model is unknown until it does Cynqra's qualification work; it then takes part only in the families of work it passed (planning, code). | `probe.py`, `intelligence_layer/__init__.py` (`qualify`) |
+| Calibrate | Before the first bindings, at most three qualified candidates per important kind of work do a frozen piece of this objective's own plan; the platform's own checks judge them; the trial stops when the evidence is enough, the candidates are clearly apart, no one else could catch up, the rounds or the calibration budget run out. | `calibration.py` |
+| Decide | Hard constraints first (qualified, available, enough context, the founder's local-only rule); then the evidence, strongest level first: this objective's verified work, then its weaker evidence, then other projects' (capped), then qualification work. Risky work goes to the strongest evidence; routine work to the cheapest candidate that clears a quality floor. Every decision is recorded with its inputs and the rules it used, and can be replayed. | `controller.py`, `intelligence_layer/router.py`, `intelligence_layer/evidence.py`, `policies.py` |
+| Bind | The worker keeps its seat; the binding says which AI does this piece of its work. The same worker can do two tasks on two AIs when the evidence says so. | `binding.py` |
+| Learn | Every check, review, founder verdict and failure becomes evidence, with its cause: a provider outage, a broken tool or a missing input teaches nothing about the AI. New evidence re-decides the work that has not started; a working AI is replaced only by one that is verifiably better. | `objective_evidence.py`, `attribution.py`, `verifier.py`, `execution.py`, `replacement.py` |
+
+**Why.** The founder cares about the verified result, not a model's reputation. A model can be strong on one
+objective and weak on another, and only the work shows which.
+
+**How.** Ask the run why a task's AI was chosen, and why it changed: `Engine.explain(task_id)` walks the record from
+the objective to the next decision; `Engine.replay_decision(id)` reproduces a decision from its own snapshot. The
+budget is reserved before each call, so parallel workers never spend past the cap.
 
 ## When a team member stops
 

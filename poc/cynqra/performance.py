@@ -16,18 +16,12 @@ Replacement Engine must look at the alternatives.
 """
 from __future__ import annotations
 
+from . import policies
 from .binding import all_bindings
 from .budget import dollars
 from .roles import BUILD_TYPES
 
-THRESHOLDS = {
-    "min_verifications": 2,     # judge quality only after this many verifications on this worker and model
-    "acceptance_rate": 0.5,     # below this, alternatives are evaluated
-    "protocol_violations": 3,   # invalid protocol objects in this run
-    "min_calls": 2,
-    "failure_rate": 0.5,        # failed calls / calls
-    "cost_vs_forecast": 3.0,    # cost per verified task over this multiple of the forecast per task
-}
+THRESHOLDS = policies.body("replacement")["thresholds"]  # the replacement policy (policies.py) owns them
 
 
 def _rate(a, b):

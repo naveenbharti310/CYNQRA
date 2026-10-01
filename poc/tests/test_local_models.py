@@ -11,9 +11,10 @@ import os
 import unittest
 
 from fake_ollama import FakeOllama
-from helpers import SCENARIO, TempDir, engine_to_running, env_source, no_model_env, restore_env, run_journey
+from helpers import SCENARIO, TempDir, engine_to_gates, engine_to_running, env_source, no_model_env, restore_env, run_journey
 
 from cynqra import model_adapter
+from cynqra.engine import Engine
 from cynqra.intelligence import _file_blocks, _parse_json
 
 
@@ -324,13 +325,18 @@ class JourneyTests(Base):
         # rest is asked for; the follow-up here sends only the file that was cut, so the journey passes only if the
         # engine kept the others.
         self.o.mode = "cut"
-        e = engine_to_running(self.tmp.path, mode="live")
+        e = Engine(self.tmp.path)
+        e.create_company("Harbor Recruiting", "live")  # the model does its qualification work here, cut off too
+        first = len(self.o.requests)  # what follows is the run's own work
+        e.draft_objective(SCENARIO["messy"])
+        e.submit_objective()
+        engine_to_gates(e)
         run_journey(e)
         self.assertEqual(e.meta["phase"], "accepted")
         self.assertEqual([t["status"] for t in e.tasks()], ["VERIFIED"] * 6)
         cuts = [x["payload"] for x in e.store.events() if x["event_type"] == "task.reply_cut_off"]
         self.assertTrue(cuts and all(c["saved"] and c["file"] not in c["saved"] for c in cuts), cuts)
-        asks = [r["body"]["messages"][0]["content"] for r in self.o.requests
+        asks = [r["body"]["messages"][0]["content"] for r in self.o.requests[first:]
                 if "was cut off while writing" in r["body"]["messages"][-1]["content"]]
         self.assertEqual(len(asks), len(cuts))
         self.assertIn("These files were saved: ", asks[0])

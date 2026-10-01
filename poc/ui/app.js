@@ -153,6 +153,11 @@ function toasts(events) {
     else if (e.event_type === "task.rerouted") { msg = `${e.aggregate_id} rerouted from ${wt(p.from_worker)} to ${wt(p.to_worker)}`; kind = "warn"; }
     else if (e.event_type === "deployment.verified") { msg = "Live and verified"; kind = "good"; }
     else if (e.event_type === "budget.threshold_reached") { msg = `Budget passed ${p.threshold} percent`; kind = p.threshold >= 100 ? "bad" : "warn"; }
+    else if (e.event_type === "budget.reservation_refused") { msg = `An AI call waited: it would have taken spending past the cap`; kind = "warn"; }
+    else if (e.event_type === "intelligence.calibration.completed") { msg = p.status === "skipped" ? `No calibration needed: ${p.reason || ""}`.slice(0, 160) : `Calibration on this objective's own work: ${p.trials} trial${p.trials === 1 ? "" : "s"}, ${p.verified} passed`; kind = "info"; }
+    else if (e.event_type === "intelligence.reselection.triggered") { msg = `${e.aggregate_id}: new evidence moved it from ${modelName(p.from)} to ${modelName(p.to)}`; kind = "info"; }
+    else if (e.event_type === "acceptance.integrity_violation") { msg = `${p.task_id}: its acceptance criteria changed after they were frozen; nothing was verified against them`; kind = "bad"; }
+    else if (e.event_type === "production.verification.completed") { msg = p.passed ? "Production verification passed: every mandatory criterion is met" : `Production verification found open criteria: ${(p.open || []).join(", ")}`; kind = p.passed ? "good" : "bad"; }
     if (msg) toast(msg, kind);
   }
 }
@@ -679,11 +684,20 @@ const PTYPE = { openai_compatible: "OpenAI-compatible API", anthropic: "Anthropi
 
 function candTable(rows, chosen, compact) {
   if (!rows || !rows.length) return "";
-  return `<div class="tscroll"><table class="tbl"><thead><tr><th>Model</th><th>P(verified)</th><th>Expected cost</th><th>Expected time</th><th>Score</th><th>${compact ? "Samples" : "Evidence"}</th></tr></thead><tbody>
+  const evidence = (r) => r.maturity ? `${r.maturity} (${String(r.decisive_level || "prior").replace("_", " ")})`
+    : compact ? (r.by_kind || []).reduce((a, k) => a + (k.samples || 0), 0) : (r.by_kind || []).map((k) => `${k.kind}: ${k.basis}`).join("; ");
+  return `<div class="tscroll"><table class="tbl"><thead><tr><th>Model</th><th>P(verified)</th><th>Expected cost</th><th>Expected time</th><th>Score</th><th>Evidence</th></tr></thead><tbody>
     ${rows.map((r) => `<tr class="${r.model_id === chosen ? "chosen" : ""}${r.fits_budget === false ? " over" : ""}"><td>${esc(r.model)}${r.model_id === chosen ? " ✓" : ""}</td>
       <td class="mono">${pctx(r.p_task)}</td><td class="mono">${usd(r.expected_usd)}</td><td class="mono">${esc(r.expected_minutes)} min</td>
-      <td class="mono">${esc(r.score)}</td><td class="small">${compact ? esc((r.by_kind || []).reduce((a, k) => a + (k.samples || 0), 0))
-        : esc((r.by_kind || []).map((k) => `${k.kind}: ${k.basis}`).join("; "))}</td></tr>`).join("")}</tbody></table></div>`;
+      <td class="mono">${esc(r.score)}</td><td class="small">${esc(evidence(r))}</td></tr>`).join("")}</tbody></table></div>`;
+}
+
+function controlCard() {
+  const c = S.st.intelligence_control;
+  if (!c || !c.decisions) return "";
+  const rows = (c.latest || []).slice().reverse().map((d) => `<div class="list-row small"><span><b>${esc(d.work_item_id)}</b> → ${esc(d.selected || "none")} <span class="muted">(${esc(String(d.selection_mode || "").replace("_", " "))}, ${esc(d.status)})</span><br><span class="muted">${esc((d.selection_reason || "").slice(0, 260))}</span></span><span class="mono">${esc(d.decision_id)}</span></div>`).join("");
+  return `<div class="card stack"><h2 style="font-size:17px">How each piece of work got its AI</h2>
+    <span class="small muted">${esc(c.decisions)} recorded decisions, ${esc(c.evidence)} pieces of evidence from this objective (${esc(c.contaminated_evidence)} not the AI's fault, kept out of its record). Each decision keeps everything it was made from and can be replayed.</span>${rows}</div>`;
 }
 
 function vWorkforce() {
@@ -714,6 +728,7 @@ function vWorkforce() {
   const reuse = Object.entries(wf.models_in_use || {}).map(([m, ws]) => `<div class="kv"><span>${esc(modelName(m))}</span><span>${esc(ws.map(wt).join(", "))}</span></div>`).join("");
   return `<div class="tiles">${tile(usd(s.budget_usd), "Budget")}${tile(usd(alloc), "Allocated to tasks")}${tile(usd(L.spent_total), "Spent")}
       ${tile(usd(L.reserve), "Reserve for retries and replacements")}${tile(`$${esc(s.time_value_per_hour)}/h`, "Value of an hour")}${tile((wf.replacements || []).length, "Replacements")}</div>
+    ${controlCard()}
     <div class="card stack"><h2 style="font-size:17px">Models in use</h2><span class="small muted">Worker is not model: one model can power many workers, and workers with the same title can run on different models.</span>${reuse}</div>
     <div class="grid2">${workers}</div>
     <h2 style="font-size:17px;margin:10px 0 4px">What Cynqra told you</h2><p class="small muted" style="margin:0 0 6px">A worker's AI is replaced only when it cannot do the role's work. A provider's outage or an account problem is waited out or brought to you. You are told each time, with the cost.</p>${notes}

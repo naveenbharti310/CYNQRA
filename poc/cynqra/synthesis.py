@@ -600,4 +600,8 @@ def approve(run, edited_roles=None, option: str = "recommended", keep_names: dic
         run.store.put("worker", w["id"], w)
         run.event("worker.hired", "worker", w["id"], {"role": w["role"], "reports_to": w["reports_to"],
                                                       "person": w["name"]})
+    run.event("workforce.created", "organization", "org_1", {
+        "workers": len(hired), "cofounders": [w["id"] for w in hired if w["tier"] == "cofounder"],
+        "roles": {r["role"]: r["quantity"] for r in prop["roles"]}, "option": option,
+        "objective_version": (run.objective() or {}).get("version")})
     return org

@@ -26,6 +26,7 @@ import time
 from datetime import date, timedelta
 from pathlib import Path
 
+from . import attribution as attr
 from . import budget, deploy, numbers, roles
 from .db import digest, now
 from .testrunner import NO_WINDOW, clean_env, failure_summary, python_exe, run_unittests
@@ -228,26 +229,55 @@ def candidate(run, t: dict, dest: Path) -> Path:
 
 def record(run, t: dict, *, verdict: str, method: str, checks: dict, test_ids: list, reviewer: str,
            seconds: float | None, work_hash: str | None = None) -> dict:
-    n = run.count("verification") + 1
+    """A verification record, about the intelligence that produced the work (its last work call, at the version
+    that answered), with a hash of its material fields: a verdict changed afterwards no longer matches it."""
+    from . import controller
+    n = run.store.next_id("verification")
+    mid, ver = controller.producer(run, t)
     v = {"id": f"v_{n:03d}", "company_id": run.cid, "task_id": t["id"], "attempt": t["attempts"] + 1,
          "risk_tier": t["risk_tier"], "method": method, "checks": checks,
          "reviewer_type": "human" if reviewer == "founder" else "service", "reviewer_id": reviewer, "verdict": verdict,
          "test_ids": test_ids, "output_hash": digest(json.dumps(checks, sort_keys=True, default=str)),
-         "work_hash": work_hash, "worker_id": t["owner_worker_id"], "model_id": run.model_of(t["owner_worker_id"]),
+         "work_hash": work_hash, "worker_id": t["owner_worker_id"], "model_id": mid, "model_version": ver,
+         "acceptance_hash": t.get("acceptance_hash"),
+         "criteria": [{"criterion_id": c["criterion_id"], "verification_method": c["verification_method"],
+                       "status": "verified" if verdict == "VERIFIED" else "not_met"} for c in t.get("acceptance") or []],
          "seconds": seconds, "created_at": now()}
+    v["record_hash"] = controller.verification_hash(v)
     run.store.put("verification", v["id"], v)
-    run.event("verification.completed", "verification", v["id"], {"task_id": t["id"], "verdict": verdict,
-              "method": method, "attempt": v["attempt"]}, actor="verification", correlation_id=t["id"], test_ids=test_ids)
+    ev = run.event("verification.completed", "verification", v["id"], {"task_id": t["id"], "verdict": verdict,
+                   "method": method, "attempt": v["attempt"], "model_id": mid}, actor="verification",
+                   correlation_id=t["id"], test_ids=test_ids)
+    v["_event_id"] = ev["event_id"]
     return v
 
 
-def outcome(run, t: dict, verified: bool, failure: str = "") -> None:
-    """One verification of one attempt: counted in the registry for the model that did it, on its kind of work."""
-    wid = t["owner_worker_id"]
-    meter = run.store.get("meter", t["id"]) or {"usd": 0.0, "seconds": 0.0, "tokens": 0}
-    run.registry.record_outcome(run.model_of(wid), role=run.worker(wid)["role"], task_kind=t["kind"], task_id=t["id"],
-                                run_id=run.cid, attempt=t["attempts"] + 1, verified=verified, usd=meter["usd"],
-                                seconds=meter["seconds"], tokens=meter["tokens"], failure=failure)
+def verifier_kind(v: dict | None) -> str:
+    """What kind of check a verification was, as evidence about the intelligence that produced the work."""
+    if not v:
+        return "deterministic_platform"
+    if v.get("reviewer_type") == "human" or v.get("reviewer_id") not in (None, "verification"):
+        return "human" if v.get("reviewer_type") == "human" or v.get("reviewer_id") == "founder" else \
+            "deterministic_platform"
+    m = v.get("method") or ""
+    if any(k in m for k in ("backtest", "delivery contract", "document verifier", "live URL", "on main")):
+        return "deterministic_platform"
+    return "deterministic_with_own_tests"
+
+
+def outcome(run, t: dict, verified: bool, failure: str = "", verification: dict | None = None,
+            attribution: dict | None = None) -> None:
+    """One verification of one attempt: objective evidence for the intelligence that produced it, on its kind of
+    work (controller.record_task_evidence), and, when the intelligence caused the result, the registry's record."""
+    from . import controller
+    if attribution is None and not verified:
+        attribution = attr.verification_failure(failure, (verification or {}).get("checks"))
+    clean = attr.clean(attribution)
+    controller.record_task_evidence(
+        run, t, verified=bool(verified) if clean else None, failure=attribution, verification=verification if clean
+        else None, verifier_kind=verifier_kind(verification),
+        causation={"event_id": (verification or {}).get("_event_id")},
+        idempotency_key=f"verification:{t['id']}:{(verification or {}).get('id') or 'attempt' + str(t['attempts'] + 1)}")
     run.store.put("meter", t["id"], {"usd": 0.0, "seconds": 0.0, "tokens": 0})
 
 
@@ -268,9 +298,28 @@ def integrate(run, t: dict) -> None:
               actor="verification", correlation_id=t["id"])
 
 
+def acceptance_intact(t: dict) -> bool:
+    """The task's acceptance criteria are still the ones frozen when its plan was made."""
+    from .objective import acceptance_hash
+    return not t.get("acceptance_hash") or acceptance_hash(t) == t["acceptance_hash"]
+
+
 def verify(run, t: dict) -> dict:
-    """Verify a file-delivering task. Returns {passed, verdict, feedback, verification}."""
+    """Verify a file-delivering task. Returns {passed, verdict, feedback, verification}. The task's frozen
+    acceptance criteria are checked first: criteria that changed after the plan was approved are a specification
+    failure, never measured against."""
     owner = t["owner_worker_id"]
+    if not acceptance_intact(t):
+        from . import controller
+        run.event("acceptance.integrity_violation", "task", t["id"], {"task_id": t["id"],
+                  "frozen": t.get("acceptance_hash")}, actor="verification", correlation_id=t["id"],
+                  policy_decision="DENY")
+        controller.record_attempt_failure(run, t, attr.failure("specification", "the task's acceptance criteria "
+                                          "changed after they were frozen"), kind="acceptance_tampered",
+                                          idempotency_key=f"integrity:{t['id']}:{t['attempts']}")
+        return {"passed": False, "verdict": "REQUIRES_HUMAN", "integrity": False, "verification": None,
+                "feedback": "the task's acceptance criteria changed after the plan was approved; nothing is "
+                            "verified against criteria that moved"}
     t0 = time.time()
     out = run.workspace(owner, t["id"]) / "out"
     cand = candidate(run, t, run.paths["verify"] / f"{t['id']}_{t['attempts'] + 1}")
@@ -279,10 +328,11 @@ def verify(run, t: dict) -> dict:
     run.spend("verification", t["id"], budget.machine_usd(run.store, seconds), "verification")
     verdict = "VERIFIED" if r["passed"] else ("REQUIRES_REWORK" if t["attempts"] + 1 < MAX_ATTEMPTS else "REQUIRES_HUMAN")
     work = digest({p.relative_to(out).as_posix(): digest(p.read_bytes()) for p in sorted(out.rglob("*")) if p.is_file()})
-    outcome(run, t, r["passed"], r["feedback"])
     v = record(run, t, verdict=verdict, method=r["method"], checks=r["checks"], test_ids=r["test_ids"],
                reviewer="verification", seconds=seconds, work_hash=work)
+    outcome(run, t, r["passed"], r["feedback"], verification=v)
     if r["passed"]:  # the same work failed before and passes now: that earlier verdict was a false rejection
+        from . import objective_evidence
         for old in run.store.all("verification"):
             if old["task_id"] == t["id"] and old["id"] != v["id"] and old.get("work_hash") == work \
                     and old["verdict"] != "VERIFIED" and not old.get("false_rejection"):
@@ -290,6 +340,10 @@ def verify(run, t: dict) -> dict:
                 run.store.put("verification", old["id"], old)
                 run.event("verification.false_rejection", "verification", old["id"], {"task_id": t["id"],
                           "confirmed_by": v["id"]}, actor="verification", correlation_id=t["id"])
+                for e in run.store.all(objective_evidence.KIND):  # the verifier was wrong: no evidence about the AI
+                    if (e.get("verification") or {}).get("verification_id") == old["id"] and e["status"] == "active":
+                        objective_evidence.annotate(run.store, e["evidence_id"], "invalidated",
+                                                    f"false rejection, confirmed by {v['id']}: a verification failure")
     return {"passed": r["passed"], "verdict": verdict, "feedback": r["feedback"], "verification": v}
 
 
@@ -302,10 +356,16 @@ def escaped(run, failed_ids: list[str], where: str, found_by: str) -> None:
         if x["status"] != "VERIFIED" or x["kind"] not in roles.BUILD_TYPES or not (files & mods or (not mods and "app" in files)):
             continue
         v = [y for y in run.store.all("verification") if y["task_id"] == x["id"] and y["verdict"] == "VERIFIED"]
-        n = run.count("escape") + 1
+        n = run.store.next_id("escape")
         rec = {"id": f"esc_{n:03d}", "task_id": x["id"], "worker_id": x["owner_worker_id"],
                "model_id": v[-1].get("model_id") if v else None, "where": where, "found_by": found_by,
                "tests": sorted(failed_ids or [])[:20], "at": now()}
         run.store.put("escape", rec["id"], rec)
         run.event("verification.defect_escaped", "task", x["id"], {"where": where, "found_by": found_by},
                   actor="verification", correlation_id=x["id"])
+        if rec["model_id"]:  # a defect its verification missed: evidence against the intelligence that wrote it
+            from . import controller
+            controller.record_attempt_failure(run, x, attr.failure(attr.INTELLIGENCE, f"a defect escaped "
+                                              f"verification and was found in {where}"), kind="defect_escape",
+                                              idempotency_key=f"escape:{rec['id']}",
+                                              intelligence=(rec["model_id"], (v[-1] if v else {}).get("model_version")))

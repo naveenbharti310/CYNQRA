@@ -26,6 +26,7 @@ Layer of its own. Everything the founder does is a labelled decision (D-10).
 from __future__ import annotations
 
 import json
+import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 import time
@@ -33,10 +34,10 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from . import binding, budget, delivery, deploy, execution, gateway, numbers, objective, performance, planner, policy
-from . import people, replacement, roles, seats, synthesis
+from . import binding, budget, calibration, controller, delivery, deploy, execution, gateway, numbers, objective
+from . import objective_evidence, people, performance, planner, policies, policy, replacement, roles, seats, synthesis
 from . import settings as project_settings
-from .db import IST, Store, now
+from .db import IST, Store, digest, now
 from .intelligence import SCENARIOS, IntelligenceError, ModelSource, ScriptedSource
 from .intelligence_layer import IntelligenceSupply, SupplyError, VersionChanged, router
 from .intelligence_layer.registry import RegistryError
@@ -57,6 +58,15 @@ class EngineError(RuntimeError):
     pass
 
 
+class BudgetHold(RuntimeError):
+    """A model call did not start: spent plus in-flight reservations plus its own upper bound would pass the cap.
+    The work waits; it is not a failure of anyone's intelligence."""
+
+    def __init__(self, message: str, reservation: dict):
+        super().__init__(message)
+        self.reservation = reservation
+
+
 def scenarios() -> list[dict]:
     """The prepared demos: each one a scenario folder with a scenario.json."""
     out = []
@@ -71,7 +81,7 @@ class Engine:
     """The run. It implements the run contract (run.Run) for the engines, and the founder's controls for the app."""
 
     def __init__(self, data_dir: Path, intelligence=None, supply: IntelligenceSupply | None = None,
-                 memory: Path | None = None):
+                 memory: Path | None = None, tenant: str | None = None, workspace: str | None = None):
         self.dir = Path(data_dir).resolve()  # workers' tests run from inside it: a relative path would break them
         # what Cynqra learns across projects (lessons.py): the app keeps it beside every run; a lone run keeps its own
         self.memory = Path(memory) if memory else self.dir / "lessons.json"
@@ -88,9 +98,14 @@ class Engine:
         self.supply: IntelligenceSupply | None = None
         self.intel = None
         self.live_proc = None
+        self._tls = threading.local()  # the task a worker thread is acting on, and the budget it has reserved
         if self.store.get("meta", "run") is None:
+            # the tenant and workspace this run's evidence belongs to: another tenant's evidence is never this one's
             self.store.put("meta", "run", {"company_id": "co_" + uuid.uuid4().hex[:8], "phase": "new", "mode": "demo",
-                                           "scenario": None, "frozen": False, "created_at": now(), "notice": ""})
+                                           "scenario": None, "frozen": False, "created_at": now(), "notice": "",
+                                           "objective_id": "obj_" + uuid.uuid4().hex[:12],
+                                           "tenant_id": tenant or os.environ.get("CYNQRA_TENANT_ID") or "local",
+                                           "workspace_id": workspace or os.environ.get("CYNQRA_WORKSPACE_ID") or "local"})
         if self.meta["phase"] != "new":
             self._attach(strict=False)  # a run reopened after a restart opens even if its model is gone for now
             self._refuse_outdated()
@@ -157,46 +172,120 @@ class Engine:
             if not sup.registry.available():
                 sup.connect_environment()
             if strict and not sup.registry.available():
+                # discovered is not qualified: what is connected does its qualification work first (bounded), and
+                # only what passes may be assigned
+                sup.qualify()
+            if strict and not sup.registry.available():
                 raise EngineError("live mode needs intelligence: connect a provider (OpenAI-compatible, Anthropic or "
-                                  "a model on this machine), or name one in the environment")
+                                  "a model on this machine), or name one in the environment; what is connected must "
+                                  "pass its qualification work first")
             source = self._injected or ModelSource()
         source.bind(self)
         self.supply, self.intel = sup, source
+        reg = sup.registry
+        models = reg.models()
+        found = {"available": sorted(m["id"] for m in models if reg.availability(m)[0]),
+                 "unverified": sorted(m["id"] for m in models if (m.get("regression") or {}).get("status") == "unverified"),
+                 "failed": sorted(m["id"] for m in models if (m.get("regression") or {}).get("status") == "failed")}
+        self.event("intelligence.discovered", "company", self.cid, {"models": len(models), **{k: v[:40] for k, v in
+                   found.items()}, "counts": {k: len(v) for k, v in found.items()}}, actor="intelligence_supply",
+                   idempotency_key=f"discovered:{self.cid}:{digest(found)}")
 
-    def intelligence_for(self, worker_id: str) -> str:
-        """The intelligence bound to a worker. Work that belongs to no worker (structuring the objective,
-        synthesizing the workforce) runs on the intelligence the Router bound to the control plane for it."""
-        b = binding.current(self.store, worker_id) if worker_id.startswith("w_") else None
-        if b is not None:
-            return b["intelligence_id"]
+    def _task_ctx(self) -> str | None:
+        return getattr(self._tls, "task_id", None)
+
+    def _resolve(self, worker_id: str) -> tuple[str, str | None]:
+        """The intelligence and pinned version for a worker's call now: the task's own binding when the worker owns
+        the task being worked on and it is the newer decision, else the worker's binding; a review the policy wants
+        independent goes to an intelligence other than the producer's (controller.reviewer)."""
+        tid = self._task_ctx()
+        review = getattr(self._tls, "review_for", None)
+        if review and worker_id.startswith("w_"):
+            got = controller.reviewer(self, self.task(review), worker_id)
+            if got:
+                return got
+        if worker_id.startswith("w_") and binding.current(self.store, worker_id):
+            eff = binding.effective(self, worker_id, tid)
+            if eff:
+                return eff
         sys_ = binding.current(self.store, binding.SYSTEM)
         if sys_ is not None:
             try:
                 if self.registry.availability(self.registry.get(sys_["intelligence_id"]))[0]:
-                    return sys_["intelligence_id"]
+                    return sys_["intelligence_id"], sys_.get("version")
             except RegistryError:
                 pass
-        best, rows = router.choose(self.registry, project_settings.get(self.store), ["objective"])
-        if best is None:
-            raise IntelligenceError("no available intelligence in the registry")
-        binding.bind(self, binding.SYSTEM, self.registry.get(best["model_id"]), by="intelligence_router",
-                     reason="objective intelligence and workforce synthesis", candidates=rows)
-        return best["model_id"]
+        mid = controller.system_intelligence(self)
+        return mid, (binding.current(self.store, binding.SYSTEM) or {}).get("version")
+
+    def intelligence_for(self, worker_id: str) -> str:
+        """The intelligence that does a worker's call now (its task's binding, or its own). Work that belongs to no
+        worker (structuring the objective, synthesizing the workforce) runs on the intelligence the controller
+        decided for the control plane."""
+        return self._resolve(worker_id)[0]
+
+    def model_for(self, worker_id: str, task_id: str | None) -> str | None:
+        eff = binding.effective(self, worker_id, task_id)
+        return eff[0] if eff else self.model_of(worker_id)
 
     def invoke(self, worker_id: str, request: dict) -> dict:
         """One call for a worker, through the Intelligence Gateway to the intelligence it is bound to, at the
-        version its binding pinned. A new version continues only after its regression check passes."""
+        version its binding pinned. A new version continues only after its regression check passes. During
+        governed execution the call first reserves its upper-bound cost: one that would pass the cap with what is
+        already spent and in flight does not start."""
         who = worker_id if worker_id.startswith("w_") and binding.current(self.store, worker_id) else binding.SYSTEM
-        mid = self.intelligence_for(worker_id)
-        pin = (binding.current(self.store, who) or {}).get("version")
+        mid, pin = self._resolve(worker_id)
+        self._reserve(worker_id, mid, request)
         try:
             return self._call(mid, request, pin)
         except VersionChanged as exc:
-            replacement.version_changed(self, who, exc)  # kept after its regression check, or rebound
-            b = binding.current(self.store, who)
-            return self._call(b["intelligence_id"], request, b["version"])
+            replacement.version_changed(self, who, exc, task_id=self._task_ctx())  # kept after its check, or rebound
+            mid, pin = self._resolve(worker_id)
+            return self._call(mid, request, pin)
         except SupplyError as exc:
             raise IntelligenceError(str(exc), model_id=mid) from exc
+
+    def _reserve(self, worker_id: str, mid: str, request: dict) -> None:
+        tid = self._task_ctx()
+        if not tid or self.meta["phase"] not in policies.body("budget")["reserve_in_phases"]:
+            return
+        entry = self.registry.get(mid)
+        usd = budget.call_upper_bound(entry, request, self.registry.stats(mid).get("write_tps"))
+        res = budget.reserve(self.store, worker_id=worker_id, task_id=tid, model_id=mid, usd=usd,
+                             purpose="model_call")
+        if res["status"] == "held":
+            self._tls.reservations = getattr(self._tls, "reservations", []) + [res["id"]]
+            return
+        self._budget_hold(res)
+        raise BudgetHold(res["why"], res)
+
+    def _budget_hold(self, res: dict) -> None:
+        """A refused reservation: while other work is in flight, this work waits for it to settle; when nothing is in
+        flight, the breaker opens and the founder decides, as when the cap is reached."""
+        self.event("budget.reservation_refused", "company", self.cid, {"task_id": res["task_id"], "usd": res["usd"],
+                   "spent_usd": res["spent_before"], "reserved_usd": res["reserved_before"],
+                   "in_flight": res.get("in_flight", 0)}, actor="budget_engine", policy_decision="DENY",
+                   correlation_id=res["task_id"])
+        if res.get("in_flight"):
+            return
+        with self.store.atomic():
+            L = budget.ledger(self.store)
+            if L["state"] == "breaker" or any(d["kind"] == "budget_breaker" for d in self.pending_decisions()):
+                return
+            L["state"] = "breaker"
+            self.store.put("budget", "ledger", L)
+        cap = project_settings.get(self.store)["budget_usd"]
+        need = round((res["spent_before"] + res["usd"]) * 1.5, 4)
+        self.decision("budget_breaker", problem="The next AI call would take spending past the budget cap. All work is "
+                      "paused before it is spent.",
+                      recommendation=f"Raise the budget from ${cap:.2f} to ${max(cap * 1.5, need):.2f}, or stop the run.",
+                      risk="HIGH", confidence="high", cost="none until work resumes",
+                      evidence=[f"spent {budget.dollars(res['spent_before'])}, in flight "
+                                f"{budget.dollars(res['reserved_before'])}, the next call up to "
+                                f"{budget.dollars(res['usd'])}, cap {budget.dollars(cap)}"],
+                      change="Nothing: the cap is yours to set.", severity="SEV-2", source="budget_engine",
+                      extra={"needed_cap": max(cap * 1.5, need), "reservation": res["id"]})
+        objective.transition(self, "OBJECTIVE_BLOCKED", "the budget cap would be passed", by="budget_engine")
 
     def _call(self, mid: str, request: dict, pin: str | None) -> dict:
         """The model call itself, the slow part, made without holding the run: while one worker waits for its
@@ -229,27 +318,32 @@ class Engine:
                     if who and who.startswith("w_") and kind not in workload.setdefault(who, []):
                         workload[who].append(kind)
         try:
-            staffing = router.staff(self.registry, project_settings.get(self.store), self.workers(), workload)
+            staffing = controller.staff(self, self.workers(), workload, refine=refine)
         except router.RouterError as exc:
             raise IntelligenceError(str(exc)) from exc
         for wid, s in staffing.items():
             if refine and self.model_of(wid) == s["model_id"]:
+                controller.bind_worker(self, self.worker(wid), s, "")
                 continue
             why = ("refined to the roadmap's workload: " if refine else
-                   "lowest expected cost per verified task for its role's work: ") + ", ".join(s["kinds"])
-            binding.bind(self, wid, self.registry.get(s["model_id"]), reason=why, by="intelligence_router",
-                         candidates=s["candidates"])
+                   "the strongest evidenced intelligence for its role's work: ") + ", ".join(s["kinds"]) + ". " + \
+                s["decision"]["selection_reason"]
+            controller.bind_worker(self, self.worker(wid), s, why)
 
     # --- the run contract: the audit trail and the founder's inbox ---------------------------------------------
     def event(self, event_type: str, aggregate_type: str, aggregate_id: str, payload: dict, *,
               actor: str = "orchestrator", actor_type: str = "service", correlation_id: str | None = None,
               policy_decision: str = "ALLOW", authority: str = "platform", protocol_hash: str | None = None,
-              test_ids: list | None = None, context_refs: list | None = None) -> dict:
+              test_ids: list | None = None, context_refs: list | None = None, causation_id: str | None = None,
+              idempotency_key: str | None = None, aggregate_version: int | None = 1) -> dict:
+        """An event in the run's log: its causation (the event that caused it, else the one before), an idempotency
+        key (a retried write returns the event already there) and the aggregate's own version when asked for."""
         return self.store.append(
             company_id=self.cid, event_type=event_type, aggregate_type=aggregate_type, aggregate_id=aggregate_id,
             actor_type=actor_type, actor_id=actor, payload=payload, correlation_id=correlation_id or aggregate_id,
             policy_decision=policy_decision, authority_snapshot=authority, protocol_hash=protocol_hash,
-            test_ids=test_ids, context_refs=context_refs)
+            test_ids=test_ids, context_refs=context_refs, causation_id=causation_id, idempotency_key=idempotency_key,
+            aggregate_version=aggregate_version)
 
     def decision(self, kind: str, *, problem: str, recommendation: str, risk: str, confidence: str, cost: str,
                  evidence: list, change: str, task_id: str | None = None, action_type: str | None = None,
@@ -379,15 +473,20 @@ class Engine:
         role = (self.worker(worker) or {}).get("role", worker)
         c = self.registry.record_call(model_id, role=role, purpose=purpose, task_kind=kind, usage=usage,
                                       run_id=self.cid)
-        n = self.count("call") + 1
-        rec = {"id": f"call_{n:04d}", "task_id": task_id, "worker": worker, "purpose": purpose, **usage,
-               "usd": c["usd"], "at": now()}
-        self.store.put("call", rec["id"], rec)
-        if task_id.startswith("t_") and purpose == "work":
-            m = self.store.get("meter", task_id) or {"usd": 0.0, "seconds": 0.0, "tokens": 0}
-            self.store.put("meter", task_id, {"usd": m["usd"] + c["usd"], "seconds": m["seconds"] + c["seconds"],
-                                              "tokens": m["tokens"] + c["tokens_in"] + c["tokens_out"]})
+        with self.store.atomic():  # numbered and metered as one: concurrent workers never share a record
+            n = self.store.next_id("call")
+            rec = {"id": f"call_{n:04d}", "task_id": task_id, "worker": worker, "purpose": purpose, **usage,
+                   "usd": c["usd"], "model_version": c.get("model_version"), "at": now()}
+            self.store.put("call", rec["id"], rec)
+            if task_id.startswith("t_") and purpose == "work":
+                m = self.store.get("meter", task_id) or {"usd": 0.0, "seconds": 0.0, "tokens": 0}
+                self.store.put("meter", task_id, {"usd": m["usd"] + c["usd"], "seconds": m["seconds"] + c["seconds"],
+                                                  "tokens": m["tokens"] + c["tokens_in"] + c["tokens_out"]})
         self.spend(worker, task_id, c["usd"], "inference")
+        held = getattr(self._tls, "reservations", None)
+        if held:  # what the call really cost is charged: its reservation ends
+            budget.release(self.store, held)
+            self._tls.reservations = []
         return rec
 
     def spend(self, worker_id: str, task_id: str, usd: float, layer: str) -> None:
@@ -401,6 +500,7 @@ class Engine:
         if crossed["breaker"]:
             self.event("budget.threshold_reached", "company", self.cid, {"threshold": 100, "spent_usd": L["spent_total"],
                        "cap_usd": cap}, actor="budget_engine", policy_decision="DENY", correlation_id=corr)
+            objective.transition(self, "OBJECTIVE_BLOCKED", "the budget cap is reached", by="budget_engine")
             self.decision("budget_breaker", problem="The project's budget cap is reached. All work is paused.",
                           recommendation=f"Raise the budget from ${cap:.2f} to ${max(cap, L['spent_total']) * 1.5:.2f}, "
                                          "or stop the run.",
@@ -530,6 +630,7 @@ class Engine:
                 obj = self.objective()
                 obj["status"] = "draft"
                 self.store.put("objective", "obj_1", obj)
+                objective.transition(self, "OBJECTIVE_CREATED", f"returned to draft: {exc}"[:200])
                 self.set_meta(notice=f"Objective intelligence failed: {exc}. Nothing was invented. Submit again to retry.")
                 raise
             self.set_meta(phase="workforce", notice="")
@@ -688,7 +789,9 @@ class Engine:
         try:
             p = planner.plan(self, note, cycle=n)
             wc = self._work_check(p, release=n == 1)
+            cal = self._calibrate()  # representative work from this objective, before the initial bindings
             self._staff(refine=True)
+            controller.bind_tasks(self, [t for t in self.tasks() if int(t.get("cycle") or 1) == n])
         except IntelligenceError as exc:
             self._stage_failed("roadmap", exc)
         new = [t for t in self.tasks() if int(t.get("cycle") or 1) == n]
@@ -715,6 +818,10 @@ class Engine:
                       + ("" if a["early"] or a["risk"] != "high" else " It is tested late: a wrong answer here is found "
                          "only after most of the money is spent.")
                       + (f" Only you can test the rest: {a['founder_step']}" if a["founder_step"] else ""))
+        ev += calibration.summary(cal)
+        ev += [f"{t['id']} on {(binding.task_binding(self.store, t['id']) or {}).get('intelligence') or '?'}: "
+               f"{(controller.get_decision(self, (binding.task_binding(self.store, t['id']) or {}).get('decision_id') or '') or {}).get('selection_mode', '')}"
+               for t in new if binding.task_binding(self.store, t["id"])][:30]
         ev += [f"{people.label(self.worker(wid))} joins with {j['task']} ({j['milestone']})" for wid, j in wc["joins"].items()]
         ev += ([f"{people.label(x)} had no work in this plan and was removed before anything started" for x in wc["idle"]]
                if n == 1 else [f"{people.label(x)} has no work in this cycle and costs nothing in it" for x in wc["idle"]])
@@ -732,6 +839,20 @@ class Engine:
                                           "that looks wrong.", source="execution_planner",
                       extra={"released": [x["worker"] for x in wc["idle"]] if n == 1 else [], "cycle": n})
         self.set_meta(phase="planning", failed_stage=None, notice="")
+
+    def _calibrate(self) -> dict:
+        """Cold-start objective calibration (calibration.py). A trial that cannot run is recorded and the roadmap
+        goes on from the global prior; nothing is invented."""
+        try:
+            return calibration.calibrate(self)
+        except (IntelligenceError, objective_evidence.EvidenceError, OSError, RegistryError, SupplyError) as exc:
+            p = calibration.plan_id(self)
+            rec = {"plan_id": p, "objective_id": controller.objective_id(self), "status": "skipped", "items": [],
+                   "trials": [], "stopping": {}, "spent_usd": 0.0, "reason": f"calibration could not run: {exc}"[:300]}
+            self.store.put(calibration.KIND, p, rec)
+            self.event("intelligence.calibration.completed", "calibration", p, {"status": "skipped",
+                       "reason": rec["reason"][:200]}, actor="intelligence_controller")
+            return rec
 
     def _work_check(self, p: dict, release: bool = True) -> dict:
         """Every member joins with its first task; a member with no work in the plan leaves before anything starts,
@@ -794,14 +915,19 @@ class Engine:
         self.event("state.changed", "company", self.cid, {"stage": "MVP", "phase": "running"}, actor="founder",
                    actor_type="human", authority="founder")
         self.set_meta(phase="running", started_at=time.time(), notice="")
+        objective.transition(self, "OBJECTIVE_EXECUTING", "the founder approved the roadmap and budget", by="founder")
 
     def _after_breaker(self, d: dict, action: str) -> None:
         if action != "approve":
             self.set_meta(phase="stopped", notice="You stopped the run at the budget cap.")
+            objective.transition(self, "OBJECTIVE_CANCELLED", "the founder stopped the run at the budget cap",
+                                 by="founder")
             return
         cap = project_settings.get(self.store)["budget_usd"]
-        new = float(d["edited"].get("budget_usd") or max(cap, budget.ledger(self.store)["spent_total"]) * 1.5)
+        new = float(d["edited"].get("budget_usd") or (d.get("extra") or {}).get("needed_cap")
+                    or max(cap, budget.ledger(self.store)["spent_total"]) * 1.5)
         budget.raise_cap(self.store, new)
+        objective.transition(self, "OBJECTIVE_EXECUTING", "the founder raised the budget", by="founder")
         self.event("budget.changed", "company", self.cid, {"budget_usd": round(new, 4)}, actor="founder",
                    actor_type="human", authority="founder")
 
@@ -876,6 +1002,7 @@ class Engine:
         lease = self.store.task_lease(tid)
         if not lease:
             return None
+        self._tls.task_id, self._tls.reservations, self._tls.review_for = tid, [], None
         try:
             with self.lock:
                 m = self.meta
@@ -887,6 +1014,8 @@ class Engine:
                 return None
             try:
                 return self.ACTIONS[s](self, t)
+            except BudgetHold as exc:  # nothing was spent and nothing failed: the work waits for the budget
+                return {"did": "paused", "task": tid, "why": f"budget: {exc}"}
             except ProtocolError as exc:
                 return self._violation(self.task(tid), s, exc)
             except IntelligenceError as exc:
@@ -896,8 +1025,13 @@ class Engine:
                 self.set_meta(phase="stopped_error", failed_stage="run",
                               notice=f"Stopped on {tid}: the intelligence failed ({exc}). Nothing was invented.")
                 self.event("task.failed", "task", tid, {"reason": "intelligence_error"}, correlation_id=tid)
+                objective.transition(self, "OBJECTIVE_BLOCKED", "the intelligence failed and nothing could replace it")
                 return {"did": "error", "task": tid, "why": str(exc)}
         finally:
+            left = getattr(self._tls, "reservations", None)
+            if left:  # a call that failed or never recorded: its reservation ends, nothing was charged for it
+                budget.release(self.store, left, outcome="released")
+            self._tls.task_id, self._tls.reservations, self._tls.review_for = None, [], None
             self.store.release_task(tid, lease["lease_id"])
 
     def _violation(self, t: dict, state: str, exc: ProtocolError) -> dict:
@@ -905,12 +1039,18 @@ class Engine:
         t["attempts"] += 1
         self.save_task(t)
         culprit = execution.actor(t) or t["owner_worker_id"]
-        n = self.count("violation") + 1
+        n = self.store.next_id("violation")
         self.store.put("violation", f"pv_{n:04d}", {"id": f"pv_{n:04d}", "worker_id": culprit,
                        "model_id": self.model_of(culprit) if culprit else None, "task_id": t["id"],
                        "error": str(exc)[:300], "at": now()})
         self.event("protocol.violation", "task", t["id"], {"worker": culprit, "error": str(exc)[:200]},
                    actor=culprit or "orchestrator", actor_type="worker", correlation_id=t["id"], policy_decision="DENY")
+        # protocol compliance is intelligence evidence: three on the same work make it ineligible for that work
+        controller.record_attempt_failure(self, t, controller.attr.failure(controller.attr.INTELLIGENCE,
+                                          "the reply was not a valid protocol object", str(exc)),
+                                          kind="protocol_violation", protocol_violation=True, caller=culprit,
+                                          idempotency_key=f"violation:{self.cid}:pv_{n:04d}",
+                                          intelligence=(self.model_for(culprit, t["id"]), None) if culprit else None)
         if t["attempts"] >= execution.MAX_ATTEMPTS:
             return replacement.evaluate(self, t, f"{t['id']}: the worker kept returning invalid protocol objects "
                                                  f"({exc})", forced=True)
@@ -935,6 +1075,10 @@ class Engine:
         # The store serializes the writes; the step checks frozen when its call returns and discards the result.
         self.set_meta(frozen=bool(on))
         self.intervention("kill_switch", "on" if on else "off")
+        if on:
+            objective.transition(self, "OBJECTIVE_PAUSED", "the kill switch is on", by="founder")
+        elif self.meta["phase"] == "running":
+            objective.transition(self, "OBJECTIVE_EXECUTING", "the kill switch is off", by="founder")
         self.event("state.changed", "company", self.cid, {"frozen": bool(on), "control": "kill_switch"},
                    actor="founder", actor_type="human", authority="founder", policy_decision="DENY" if on else "ALLOW")
         return self.meta
@@ -960,6 +1104,7 @@ class Engine:
                 self._roadmap(note=self.meta.get("cycle_note", "") if self.cycle() > 1 else "")
             else:
                 self.set_meta(phase="running", failed_stage=None, notice="")
+                objective.transition(self, "OBJECTIVE_EXECUTING", "resumed after an intelligence error", by="founder")
             return self.meta
 
     def request_objective_change(self, fields: dict) -> dict:
@@ -979,20 +1124,32 @@ class Engine:
                           risk="HIGH", confidence="medium", cost="depends on the change",
                           evidence=[f"fields: {', '.join(changes)}", f"open tasks affected: {', '.join(affected) or 'none'}"],
                           change="Keep the old version if the change was a mistake.", source="orchestrator",
-                          extra={"changes": changes, "previous_phase": self.meta["phase"]})
+                          extra={"changes": changes, "previous_phase": self.meta["phase"],
+                                 "previous_state": objective.state(self),
+                                 "classification": objective.classify_change(obj["structured"],
+                                                                             {**obj["structured"], **changes})})
             self.set_meta(phase="paused_objective")
+            objective.transition(self, "OBJECTIVE_PAUSED", "a change of objective waits for the founder", by="founder")
             return obj
 
     def _after_objective_change(self, d: dict, action: str) -> None:
+        """Approved: a new objective version. Work in flight keeps the version it started under, so its evidence
+        is that version's; open work continues against the new one, and earlier evidence carries over only as the
+        inheritance policy allows. Rejected: the version stays."""
         if action == "approve":
+            rec = objective.new_version(self, d["extra"]["changes"], by="founder")
             obj = self.objective()
-            obj["structured"].update(d["extra"]["changes"])
-            obj["version"] += 1
-            self.store.put("objective", "obj_1", obj)
             self.event("objective.changed", "objective", "obj_1", {"version": obj["version"], "status": "confirmed",
-                       "fields_changed": sorted(d["extra"]["changes"])}, actor="founder", actor_type="human",
-                       authority="founder")
+                       "fields_changed": sorted(d["extra"]["changes"]), "inheritance": rec["inheritance"]["mode"]},
+                       actor="founder", actor_type="human", authority="founder")
+            for t in self.tasks():
+                if t["status"] != "VERIFIED":
+                    t.update(objective_version=obj["version"], context=f"objective v{obj['version']}")
+                    self.save_task(t)
         self.set_meta(phase=d["extra"].get("previous_phase", "running"))
+        back = d["extra"].get("previous_state") or "OBJECTIVE_EXECUTING"
+        objective.transition(self, back if back != "OBJECTIVE_PAUSED" else "OBJECTIVE_EXECUTING",
+                             "the founder answered the change of objective", by="founder")
 
     # --- after launch: the company keeps running --------------------------------------------------------------
     def feedback(self, text: str, source: str = "founder") -> dict:
@@ -1050,6 +1207,7 @@ class Engine:
                 self.store.put("feedback", f["id"], f)
             self.set_meta(cycle=n, cycle_note=full)  # kept: a failed plan is retried with the same ask
             self.intervention("cycle", f"started cycle {n}")
+            objective.transition(self, "OBJECTIVE_REOPENED", f"cycle {n}: {ask[:120]}", by="founder")
             self.event("cycle.started", "company", self.cid, {"cycle": n, "feedback": [f["id"] for f in unused]},
                        actor="founder", actor_type="human", authority="founder")
             self._roadmap(note=full)
@@ -1175,6 +1333,21 @@ class Engine:
         with self.lock:
             return delivery.export(self)
 
+    # --- the intelligence control plane, read --------------------------------------------------------------------
+    def explain(self, task_id: str) -> dict:
+        """Why this task's intelligence was selected, and why it changed: the causal audit from persisted records."""
+        self.task(task_id)
+        return controller.explain(self, task_id)
+
+    def replay_decision(self, decision_id: str) -> dict:
+        try:
+            return controller.replay(self, decision_id)
+        except controller.ControlError as exc:
+            raise EngineError(str(exc)) from exc
+
+    def decisions(self, work_item_id: str | None = None) -> list[dict]:
+        return controller.decisions(self, work_item_id)
+
     def workforce_view(self) -> dict:
         """Which intelligence each worker is bound to and why, what each may spend and has spent, and every change
         to a binding. Workers and intelligence stay separate records; the binding joins them."""
@@ -1188,6 +1361,7 @@ class Engine:
             if w["id"] in bound:
                 in_use.setdefault(bound[w["id"]]["intelligence_id"], []).append(w["id"])
         return {"active": bool(workers), "registry": self.registry.snapshot(),
+                "task_bindings": binding.all_task_bindings(self.store),
                 "settings": project_settings.get(self.store), "ledger": L, "system": bound.get(binding.SYSTEM),
                 "replacements": self.store.all("replacement"), "models_in_use": in_use,
                 "ceo_notices": self.store.all("ceo_notice"),
@@ -1208,6 +1382,8 @@ class Engine:
         forecast = self.store.get("forecast", "current")
         workers = self.workers()
         company = self.store.get("company", self.cid)
+        cards = performance.all_cards(self.store, self.registry) if workers else []
+        control = controller.summary(self) if company else None
         return {
             "meta": m,
             "scenarios": scenarios(),
@@ -1237,10 +1413,13 @@ class Engine:
             "economics": budget.actual(self.store, forecast) if forecast else None,
             "workforce": self.workforce_view(),
             "supply": self.supply.snapshot() if self.supply else None,
-            "performance": performance.all_cards(self.store, self.registry) if workers else [],
+            "performance": cards,
             "evaluations": self.store.all("evaluation"),
+            "intelligence_control": control,
+            "objective_lifecycle": (self.objective() or {}).get("lifecycle"),
             "catalog": roles.catalog(),
-            "final": self.final_report() if m["phase"] in ("delivered", "accepted") else None,
+            "final": delivery.final_report(self, cards=cards, control=control)
+            if m["phase"] in ("delivered", "accepted") else None,
             "metrics": self.metrics() if company else {},
             "rules": self.rules(),
             "live_url": self.live_url(),

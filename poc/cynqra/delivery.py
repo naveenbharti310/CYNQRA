@@ -63,7 +63,67 @@ def metrics(run) -> dict:
     }
 
 
+def production_verification(run) -> dict:
+    """The objective is not done when the workers say so (mandate 24): every mandatory acceptance criterion needs
+    verified work behind it, and the released product must be live and answer its health check now. A failure
+    blocks completion and says which criterion is open."""
+    from . import deploy, objective
+    n = int(run.meta.get("cycle") or 1)
+    pid = f"pv_{n}"
+    run.event("production.verification.started", "objective", objective.objective_id(run), {"cycle": n},
+              actor="verification")
+    req = run.requirements() or {}
+    tasks = run.tasks()
+    results = []
+    for c in req.get("acceptance_criteria") or []:
+        if not c.get("mandatory"):
+            continue
+        if c["criterion_id"] == "ac_prod_live":
+            url = live_url(run)
+            h = deploy.health(url, wait=3) if url else {"ok": False, "why": "nothing is live"}
+            results.append({"criterion_id": c["criterion_id"], "met": bool(h.get("ok")), "method": "live health",
+                            "evidence": {k: h.get(k) for k in ("status", "ms", "why")} | {"url": url}})
+            continue
+        if c["criterion_id"] == "ac_prod_complete":
+            continue
+        mine = [t for t in tasks if c.get("requirement_id") in (t.get("requirement_ids") or [])]
+        met = bool(mine) and all(t["status"] == "VERIFIED" for t in mine)
+        ver = [v["id"] for v in run.store.all("verification") if v["task_id"] in {t["id"] for t in mine}
+               and v["verdict"] == "VERIFIED"]
+        results.append({"criterion_id": c["criterion_id"], "met": met, "method": c.get("verification_method"),
+                        "evidence": {"tasks": [t["id"] for t in mine], "verifications": ver}})
+    rest = [r for r in results if r["criterion_id"] != "ac_prod_live"]
+    results.append({"criterion_id": "ac_prod_complete", "met": all(r["met"] for r in rest), "method": "audit",
+                    "evidence": {"open": [r["criterion_id"] for r in rest if not r["met"]]}})
+    ok = all(r["met"] for r in results) if results else bool(live_url(run))
+    rec = {"id": pid, "cycle": n, "passed": ok, "criteria": results, "at": now(),
+           "open": [r["criterion_id"] for r in results if not r["met"]]}
+    run.store.put("production_verification", pid, rec)
+    run.event("production.verification.completed", "objective", objective.objective_id(run), {
+        "cycle": n, "passed": ok, "criteria": len(results), "open": rec["open"][:20]}, actor="verification")
+    return rec
+
+
 def deliver(run) -> dict:
+    from . import objective
+    objective.transition(run, "OBJECTIVE_COMPLETED", "every task is verified", by="verification")
+    pv = production_verification(run)
+    if not pv["passed"]:
+        objective.transition(run, "OBJECTIVE_BLOCKED", "production verification found open criteria: "
+                             + ", ".join(pv["open"][:6]), by="verification")
+        run.decision("escalation", problem="Every task is verified, but production verification is not: "
+                     + ", ".join(pv["open"][:6]) + " are not met.",
+                     recommendation="Check the live product; reject to stop, or start a cycle to close what is open.",
+                     risk="HIGH", confidence="high", cost="none", evidence=[f"{r['criterion_id']}: "
+                     f"{'met' if r['met'] else 'not met'}" for r in pv["criteria"]][:20],
+                     change="The open criteria met.", source="verification", severity="SEV-2",
+                     task_id=f"production_{pv['id']}")
+        run.set_meta(phase="delivered", notice="Production verification found open criteria.")
+        return {"did": "production_verification_failed", "open": pv["open"]}
+    objective.transition(run, "OBJECTIVE_VERIFIED", "production verification passed", by="verification")
+    run.event("objective.completed", "objective", objective.objective_id(run), {
+        "cycle": int(run.meta.get("cycle") or 1), "version": (run.objective() or {}).get("version"),
+        "production_verification": pv["id"]}, actor="verification")
     export_path = export(run)
     ec = budget.actual(run.store, run.store.get("forecast", "current"))
     n = int(run.meta.get("cycle") or 1)
@@ -101,6 +161,8 @@ def after_accept(run, d: dict, action: str) -> None:
         run.event("transition.executed", "transition", tid, {})
         run.event("outcome.recorded", "outcome", "out_" + tid[3:], {"transition": tid, "live": bool(live_url(run))})
         lessons.record(run)
+        from . import objective
+        objective.transition(run, "OBJECTIVE_CLOSED", "the founder accepted the delivery", by="founder")
         company = run.store.get("company", run.cid)
         company["stage"] = "PILOT"
         run.store.put("company", run.cid, company)
@@ -112,7 +174,8 @@ def after_accept(run, d: dict, action: str) -> None:
                                                "record. Start a new cycle with what to change.")
 
 
-def final_report(run) -> dict:
+def final_report(run, cards: list | None = None, control: dict | None = None) -> dict:
+    """cards, control: the scorecards and the control plane's summary when the caller already has them."""
     src = run.paths["main"] if any(run.paths["main"].iterdir()) else run.paths["integration"]
     files = sorted(p.relative_to(src).as_posix() for p in src.rglob("*") if p.is_file() and "__pycache__" not in p.parts)
     forecast = run.store.get("forecast", "current")
@@ -121,9 +184,16 @@ def final_report(run) -> dict:
             "requirements": {"total": len((run.requirements() or {}).get("requirements", [])),
                              "uncovered_by_tasks": (run.store.get("plan", "plan_1") or {}).get("uncovered_requirements", [])},
             "economics": budget.actual(run.store, forecast), "forecast": forecast,
-            "performance": performance.all_cards(run.store, run.registry),
+            "performance": cards if cards is not None else performance.all_cards(run.store, run.registry),
             "intelligence_changes": run.store.all("replacement"), "evaluations": run.store.all("evaluation"),
+            "intelligence_control": control if control is not None else _control(run),
+            "production_verification": run.store.get("production_verification", f"pv_{int(run.meta.get('cycle') or 1)}"),
             "company_pack": company_pack(run), "metrics": metrics(run)}
+
+
+def _control(run) -> dict:
+    from . import controller
+    return controller.summary(run)
 
 
 FOUNDATIONS = [
@@ -271,6 +341,10 @@ def export(run) -> str:
                 rel = p.relative_to(src).as_posix()
                 add(f"repository/{rel}", p.read_bytes(), "documents_and_designs" if rel.startswith("docs/") else "repository")
         add("decisions.json", json.dumps(run.store.all("decision"), indent=1).encode(), "decision_history")
+        add("intelligence_decisions.json", json.dumps(run.store.all("selection_decision"), indent=1).encode(),
+            "decision_history")
+        add("intelligence_evidence.json", json.dumps(run.store.all("intel_evidence"), indent=1).encode(),
+            "decision_history")
         add("events.jsonl", "\n".join(json.dumps(e) for e in run.store.events()).encode(), "event_log")
         org = {"organization": run.store.get("organization", "org_1"), "workers": run.workers(),
                "intelligence_bindings": run.store.all("binding"),

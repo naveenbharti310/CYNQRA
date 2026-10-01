@@ -13,6 +13,14 @@ on:
         description: Maximum number of current candidates to probe
         required: true
         default: "4"
+      objective:
+        description: Optional objective to run through the objective intelligence loop to its first bindings
+        required: false
+        default: ""
+      budget_usd:
+        description: Hard cap for the objective run, in US dollars
+        required: false
+        default: "1"
 
 permissions:
   contents: read
@@ -57,10 +65,14 @@ jobs:
               ;;
           esac
       - name: Discover and examine candidates
+        env:
+          OBJECTIVE: ${{ inputs.objective }}
         run: |
           python3 poc/run_hosted_examination.py \
             --provider "${{ inputs.provider }}" \
             --max-models "${{ inputs.max_models }}" \
+            --objective "$OBJECTIVE" \
+            --budget-usd "${{ inputs.budget_usd }}" \
             --data-root "$RUNNER_TEMP/cynqra-hosted-examination"
       - name: Publish examination evidence
         if: always()

@@ -18,6 +18,7 @@ import sqlite3
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -67,6 +68,10 @@ CREATE TABLE IF NOT EXISTS task_leases (
   holder_id TEXT NOT NULL,
   expires_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS counters (
+  name TEXT PRIMARY KEY, value INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS events_aggregate ON events(aggregate_type, aggregate_id);
 """
 
 # Payload keys that must never appear: D-22, events carry references only.
@@ -98,14 +103,68 @@ def digest(obj) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+class ConcurrencyError(RuntimeError):
+    """An optimistic write lost the race: the record changed since the writer read it. Nothing was written."""
+
+
 class Store:
     def __init__(self, path: str):
         self.path = path
         self.lock = threading.RLock()
+        self._depth = 0  # nesting of atomic(); only the thread holding the lock changes it
         self.conn = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(SCHEMA)
         self._migrate_events()
+
+    # transactions ---------------------------------------------------------
+    @contextmanager
+    def atomic(self):
+        """One read-modify-write as a unit: other threads wait on the lock, other processes on SQLite's write lock
+        (BEGIN IMMEDIATE). Nested blocks join the outer one; an exception rolls the whole unit back."""
+        with self.lock:
+            outer = self._depth == 0
+            if outer:
+                self.conn.execute("BEGIN IMMEDIATE")
+            self._depth += 1
+            try:
+                yield self
+            except BaseException:
+                self._depth -= 1
+                if outer:
+                    self.conn.execute("ROLLBACK")
+                raise
+            self._depth -= 1
+            if outer:
+                self.conn.execute("COMMIT")
+
+    def next_seq(self, name: str, floor: int = 0) -> int:
+        """The next number of a named sequence, never handed out twice, even to concurrent workers. floor seeds a
+        sequence the first time it is used (the count of records an older database already holds)."""
+        with self.atomic():
+            r = self.conn.execute("SELECT value FROM counters WHERE name=?", (name,)).fetchone()
+            value = max(int(r[0]) if r else 0, int(floor)) + 1
+            self.conn.execute("INSERT INTO counters(name, value) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET "
+                              "value=excluded.value", (name, value))
+            return value
+
+    def next_id(self, kind: str) -> int:
+        """The next number for a record of this kind: seeded from the records already there."""
+        with self.atomic():
+            have = self.conn.execute("SELECT COUNT(*) FROM entities WHERE kind=?", (kind,)).fetchone()[0]
+            return self.next_seq("entity:" + kind, floor=have)
+
+    def compare_and_put(self, kind: str, id_: str, data: dict, expected_version: int, field: str = "_v") -> dict:
+        """Optimistic concurrency: write only if the stored record is still at expected_version (0: absent). The
+        written record carries expected_version + 1. Otherwise ConcurrencyError, and nothing is written."""
+        with self.atomic():
+            cur = self.get(kind, id_)
+            have = int((cur or {}).get(field) or 0)
+            if have != int(expected_version):
+                raise ConcurrencyError(f"{kind} {id_} is at version {have}, not {expected_version}")
+            data = dict(data)
+            data[field] = int(expected_version) + 1
+            return self.put(kind, id_, data)
 
     def _migrate_events(self) -> None:
         """Hash-chain legacy event rows once when opening an older POC database."""
@@ -144,7 +203,7 @@ class Store:
     def claim_task(self, task_id: str, holder_id: str, lease_seconds: float = 120.0) -> str | None:
         """Atomically claim a task. Expired leases are reclaimed; a live lease has exactly one holder."""
         now_ts = time.time()
-        with self.lock:
+        with self.atomic():
             self.conn.execute("DELETE FROM task_leases WHERE expires_at <= ?", (now_ts,))
             lease_id = "lease_" + uuid.uuid4().hex
             cur = self.conn.execute(
@@ -178,7 +237,7 @@ class Store:
                authority_snapshot: str = "platform", policy_decision: str = "ALLOW",
                causation_id: str | None = None, context_refs: list | None = None,
                protocol_hash: str | None = None, test_ids: list | None = None,
-               aggregate_version: int = 1, source_service: str = "cynqra_poc",
+               aggregate_version: int | None = 1, source_service: str = "cynqra_poc",
                command_id: str | None = None, idempotency_key: str | None = None) -> dict:
         bad = FORBIDDEN_PAYLOAD_KEYS & set(payload)
         if bad:
@@ -190,6 +249,10 @@ class Store:
                     names = [d[0] for d in self.conn.execute("SELECT * FROM events LIMIT 0").description]
                     return dict(zip(names, existing))
             last = self.conn.execute("SELECT event_id, event_hash, seq FROM events ORDER BY seq DESC LIMIT 1").fetchone()
+            if aggregate_version is None:  # the aggregate's own sequence: its events in causal order
+                top = self.conn.execute("SELECT MAX(aggregate_version) FROM events WHERE aggregate_type=? AND "
+                                        "aggregate_id=?", (aggregate_type, aggregate_id)).fetchone()[0]
+                aggregate_version = int(top or 0) + 1
             eid = "evt_" + uuid.uuid4().hex[:12]
             row = {
                 "event_id": eid,

@@ -210,6 +210,22 @@ def enrich(plan: dict, workers: list[dict]) -> dict:
     return plan
 
 
+def _refine_criteria(run, tasks: list[dict]) -> None:
+    """Each requirement's criterion learns how it is really verified: the verifiers of the tasks that cover it."""
+    from .objective import METHOD_BY_VERIFIER
+    req = run.requirements()
+    if not req or not req.get("acceptance_criteria"):
+        return
+    for c in req["acceptance_criteria"]:
+        mine = [t for t in tasks if c.get("requirement_id") in (t.get("requirement_ids") or [])]
+        if not mine:
+            continue
+        c["verified_by_tasks"] = sorted(set(c.get("verified_by_tasks") or []) | {t["id"] for t in mine})
+        c["verification_method"] = "+".join(sorted({METHOD_BY_VERIFIER[roles.TASK_TYPES[t["kind"]]["verifier"]]
+                                                    for t in mine}))
+    run.store.put("requirements", "req_1", req)
+
+
 def plan(run, note: str = "", cycle: int = 1) -> dict:
     """Stage 5 for the approved organization. Tasks keep their ids across a revised roadmap; the new plan replaces
     the old one before any work starts. A later cycle plans only the new work, numbered after what is done, and keeps
@@ -226,11 +242,18 @@ def plan(run, note: str = "", cycle: int = 1) -> dict:
     run.record_call("plan", boss, "plan", usage)
     p = enrich(p, workers)
     order = []
+    from . import objective as objective_engine
+    version = run.objective()["version"]
+    oid = objective_engine.objective_id(run)
     for i, t in enumerate(p["tasks"]):
-        t.update({"company_id": run.cid, "objective_id": "obj_1", "context": f"objective v{run.objective()['version']}",
-                  "cycle": cycle,
+        t.update({"company_id": run.cid, "objective_id": oid, "objective_version": version,
+                  "context": f"objective v{version}", "cycle": cycle,
                   "status": "PLANNED", "attempts": 0, "work_calls": 0, "blockers": 0, "feedback": "", "handoff_hash": None,
-                  "answers": [], "outputs": [], "decision_id": None, "seq": len(earlier) + i, "created_at": now()})
+                  "answers": [], "outputs": [], "decision_id": None, "seq": len(earlier) + i, "created_at": now(),
+                  "work_class": f"{t['kind']}:{(run.worker(t['owner_worker_id']) or {}).get('role')}",
+                  "rework_history": []})
+        t["acceptance"] = objective_engine.task_acceptance(t, version)
+        t["acceptance_hash"] = objective_engine.acceptance_hash(t)
         run.save_task(t)
         order.append(t["id"])
         run.event("task.created", "task", t["id"], {"kind": t["kind"], "risk_tier": t["risk_tier"],
@@ -241,6 +264,15 @@ def plan(run, note: str = "", cycle: int = 1) -> dict:
     record["assumption_tests"] = assumption_tests(p["tasks"], p["milestones"],
                                                   run.requirements().get("assumptions") or []) if cycle == 1 else \
         (run.store.get("plan", "plan_1") or {}).get("assumption_tests", [])
+    _refine_criteria(run, p["tasks"])
+    graph = {"nodes": [t["id"] for t in p["tasks"]],
+             "edges": [[d, t["id"]] for t in p["tasks"] for d in t["dependencies"]],
+             "requirements": {t["id"]: t["requirement_ids"] for t in p["tasks"]}}
+    record["work_graph"] = {**graph, "hash": run.store.put_object("json", graph)}
+    run.event("workgraph.created", "plan", "plan_1", {"objective_id": oid, "version": version, "cycle": cycle,
+              "work_items": len(graph["nodes"]), "dependencies": len(graph["edges"]),
+              "critical_path": p["critical_path"], "graph_hash": record["work_graph"]["hash"]}, actor=boss,
+              actor_type="worker" if (boss or "").startswith("w_") else "service")
     before = run.store.get("plan", "plan_1") if cycle > 1 else None
     history = (before or {}).get("earlier_cycles", []) + ([{"cycle": cycle - 1, "milestones": before["milestones"],
                                                            "critical_path": before["critical_path"]}] if before else [])

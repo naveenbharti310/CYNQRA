@@ -92,7 +92,8 @@ function loadPlaywright() {
         await shot(`04_decision_${i}`);
         await page.click('[data-step="refine"] button[data-decide="approve"]');
         steps.push("founder accepted the product");
-        await page.waitForTimeout(600);
+        // wait for the state the click leads to, not a fixed time: a slower machine must not read the old header
+        await page.waitForFunction(() => /Delivered and accepted/.test(document.querySelector("header.top")?.textContent || ""), null, { timeout: 30000 });
         continue;
       }
       await page.click('button[data-view="decisions"]');

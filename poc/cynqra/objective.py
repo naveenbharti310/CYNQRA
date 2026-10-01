@@ -205,14 +205,19 @@ def draft(run, messy: str) -> dict:
     inferred = [k for k in _slug_list(data.get("inferred_fields")) if k in FIELDS]
     prev = run.objective()
     version = prev["version"] + 1 if prev else 1
-    obj = {"id": "obj_1", "company_id": run.cid, "statement": messy.strip(), "structured": structured,
-           "inferred_fields": inferred, "missing_fields": [k for k in FIELDS if not structured[k]],
+    oid = (prev or {}).get("objective_id") or run.meta.get("objective_id") or f"obj_{run.cid}"
+    obj = {"id": "obj_1", "objective_id": oid, "company_id": run.cid, "statement": messy.strip(),
+           "structured": structured, "inferred_fields": inferred, "missing_fields": [k for k in FIELDS if not structured[k]],
            "founder_constraints": (prev or {}).get("founder_constraints") or {}, "status": "draft", "version": version,
-           "notice": str(data.get("notice") or ""), "intelligence": usage["label"], "created_at": now()}
+           "notice": str(data.get("notice") or ""), "intelligence": usage["label"], "created_at": now(),
+           "lifecycle": (prev or {}).get("lifecycle") or {"state": None, "history": []}}
     run.store.put("objective", "obj_1", obj)
     run.event("objective.created" if version == 1 else "objective.changed", "objective", "obj_1",
               {"version": version, "status": "draft", "statement_hash": digest(messy.strip()),
-               "inferred_fields": inferred, "missing_fields": obj["missing_fields"]}, actor="objective_intelligence")
+               "inferred_fields": inferred, "missing_fields": obj["missing_fields"], "objective_id": oid},
+              actor="objective_intelligence")
+    transition(run, "OBJECTIVE_CREATED", "the founder's words, structured", by="objective_intelligence")
+    record_version(run, "draft")
     return obj
 
 
@@ -251,6 +256,8 @@ def submit(run) -> dict:
     run.event("objective.changed", "objective", "obj_1", {"version": obj["version"], "status": "submitted",
               "constraints": sorted(obj["founder_constraints"])}, actor="founder", actor_type="human",
               authority="founder")
+    transition(run, "OBJECTIVE_ACCEPTED", "the founder handed the objective over", by="founder")
+    record_version(run, "active")
     return obj
 
 
@@ -262,10 +269,228 @@ def decompose(run, note: str = "") -> dict:
     pkg, usage = ask(lambda feedback: run.intel.decompose(run.objective_ctx(), feedback=feedback, note=note),
                      lambda d: validate_requirements(d, founder))
     run.record_call("objective", "objective_intelligence", "decompose", usage)
-    rec = {"id": "req_1", **pkg, "objective_version": run.objective()["version"], "intelligence": usage["label"],
-           "note": note, "created_at": now()}
+    version = run.objective()["version"]
+    rec = {"id": "req_1", **pkg, "objective_version": version, "objective_id": objective_id(run),
+           "acceptance_criteria": acceptance_criteria(pkg, version), "intelligence": usage["label"], "note": note,
+           "created_at": now()}
     run.store.put("requirements", "req_1", rec)
     run.event("objective.decomposed", "objective", "obj_1", {"requirements": len(pkg["requirements"]),
               "workstreams": len(pkg["workstreams"]), "critical_path": pkg["critical_path"]},
               actor="objective_intelligence")
+    run.event("requirements.created", "objective", objective_id(run), {
+        "version": version, "requirements": len(pkg["requirements"]), "risks": len(pkg.get("risks") or []),
+        "acceptance_criteria": len(rec["acceptance_criteria"]),
+        "machine_verifiable": sum(1 for c in rec["acceptance_criteria"] if c["verification_method"] != "audit")},
+        actor="objective_intelligence")
+    transition(run, "OBJECTIVE_DECOMPOSED", "outcomes, requirements, risks and acceptance criteria",
+               by="objective_intelligence")
+    record_version(run, "active")
     return rec
+
+
+# --- objective identity, lifecycle and versions (mandate 5, 36) ---------------------------------------------------
+# The founder's objective has a first-class identity (objective_id) and a version. Its lifecycle is persisted and
+# every move is checked against the allowed transitions; a move that is not allowed is refused and recorded, never
+# made. A material change to the objective or its acceptance criteria makes a new version, and the version before it
+# is superseded; what evidence the new version may inherit is decided by the inheritance policy, never silently.
+from . import policies as _policies  # noqa: E402
+
+TRANSITIONS = {
+    "OBJECTIVE_CREATED": {"OBJECTIVE_ACCEPTED", "OBJECTIVE_CANCELLED"},
+    "OBJECTIVE_ACCEPTED": {"OBJECTIVE_DECOMPOSED", "OBJECTIVE_CREATED", "OBJECTIVE_CANCELLED"},
+    "OBJECTIVE_DECOMPOSED": {"OBJECTIVE_EXECUTING", "OBJECTIVE_BLOCKED", "OBJECTIVE_CANCELLED", "OBJECTIVE_PAUSED"},
+    "OBJECTIVE_EXECUTING": {"OBJECTIVE_PAUSED", "OBJECTIVE_BLOCKED", "OBJECTIVE_COMPLETED", "OBJECTIVE_CANCELLED"},
+    "OBJECTIVE_PAUSED": {"OBJECTIVE_EXECUTING", "OBJECTIVE_DECOMPOSED", "OBJECTIVE_BLOCKED", "OBJECTIVE_CANCELLED"},
+    "OBJECTIVE_BLOCKED": {"OBJECTIVE_EXECUTING", "OBJECTIVE_PAUSED", "OBJECTIVE_DECOMPOSED", "OBJECTIVE_CANCELLED",
+                          "OBJECTIVE_COMPLETED"},
+    "OBJECTIVE_COMPLETED": {"OBJECTIVE_VERIFIED", "OBJECTIVE_BLOCKED", "OBJECTIVE_REOPENED"},
+    "OBJECTIVE_VERIFIED": {"OBJECTIVE_CLOSED", "OBJECTIVE_REOPENED"},
+    "OBJECTIVE_CLOSED": {"OBJECTIVE_REOPENED"},
+    "OBJECTIVE_REOPENED": {"OBJECTIVE_EXECUTING", "OBJECTIVE_DECOMPOSED", "OBJECTIVE_BLOCKED", "OBJECTIVE_CANCELLED"},
+    "OBJECTIVE_CANCELLED": set(),
+    "OBJECTIVE_SUPERSEDED": set(),
+}
+assert set(TRANSITIONS) == set(_policies.body("objective")["states"])
+
+
+def objective_id(run) -> str:
+    obj = run.objective() or {}
+    return obj.get("objective_id") or run.meta.get("objective_id") or f"obj_{run.cid}"
+
+
+def state(run) -> str | None:
+    return ((run.objective() or {}).get("lifecycle") or {}).get("state")
+
+
+def can(frm: str | None, to: str) -> bool:
+    return frm is None and to == "OBJECTIVE_CREATED" or frm == to or to in TRANSITIONS.get(frm or "", set())
+
+
+def transition(run, to: str, reason: str, by: str = "orchestrator", strict: bool = False) -> bool:
+    """Move the objective's lifecycle to the state to, if the lifecycle allows it. Not allowed: refused, recorded,
+    and the state stays (strict: ObjectiveError)."""
+    obj = run.objective()
+    if obj is None:
+        return False
+    life = obj.get("lifecycle") or {"state": None, "history": []}
+    frm = life.get("state")
+    if frm == to:
+        return True
+    if not can(frm, to):
+        run.event("objective.transition_refused", "objective", obj["objective_id"], {"from": frm, "to": to,
+                  "reason": reason[:200], "version": obj["version"]}, actor=by, policy_decision="DENY")
+        if strict:
+            raise ObjectiveError(f"the objective cannot move from {frm} to {to}")
+        return False
+    life["history"] = (life.get("history") or []) + [{"from": frm, "to": to, "at": now(), "by": by,
+                                                       "reason": reason[:200], "version": obj["version"]}]
+    life.update(state=to, since=now())
+    obj["lifecycle"] = life
+    run.store.put("objective", "obj_1", obj)
+    run.event("objective.state_changed", "objective", obj["objective_id"], {"from": frm, "to": to,
+              "reason": reason[:200], "version": obj["version"]}, actor=by, aggregate_version=None)
+    return True
+
+
+def _hashes(obj: dict, req: dict | None) -> dict:
+    return {"statement_hash": digest(obj.get("statement") or ""), "structured_hash": digest(obj.get("structured") or {}),
+            "requirements_hash": digest([{k: r.get(k) for k in ("id", "area", "text", "verification")}
+                                          for r in (req or {}).get("requirements", [])]) if req else None,
+            "acceptance_hash": digest([{k: c.get(k) for k in ("criterion_id", "description", "verification_method",
+                                                               "mandatory")}
+                                        for c in (req or {}).get("acceptance_criteria", [])]) if req else None}
+
+
+def record_version(run, status: str, change: dict | None = None) -> dict:
+    """The version record: what this version is (hashes of its statement, fields, requirements and acceptance
+    criteria), what changed from the one before, and what evidence it may inherit."""
+    obj = run.objective()
+    req = run.requirements() if (run.requirements() or {}).get("objective_version") == obj["version"] else None
+    key = f"{obj['objective_id']}@{obj['version']}"
+    old = run.store.get("objective_version", key) or {}
+    rec = {**old, "id": key, "objective_id": obj["objective_id"], "version": obj["version"], "status": status,
+           **_hashes(obj, req), "updated_at": now()}
+    rec.setdefault("created_at", now())
+    if change is not None:
+        rec["change"] = change
+        rec["parent_version"] = change.get("from_version")
+        rec["inheritance"] = change.get("inheritance")
+    run.store.put("objective_version", key, rec)
+    return rec
+
+
+def versions(run) -> list[dict]:
+    oid = objective_id(run)
+    return sorted([v for v in run.store.all("objective_version") if v.get("objective_id") == oid],
+                  key=lambda v: v["version"])
+
+
+def classify_change(before: dict, after: dict, requirements_changed: bool = False) -> dict:
+    """Material or editorial, and what the new version inherits: none when what is being built or for whom
+    changed, a prior only when the success criteria, constraints or acceptance changed, all of it when only an
+    editorial field did."""
+    ip = _policies.body("inheritance")
+    op = _policies.body("objective")
+    changed = sorted(k for k in set(before) | set(after) if str(before.get(k) or "") != str(after.get(k) or ""))
+    if requirements_changed:
+        changed = sorted(set(changed) | {"requirements"})
+    material = bool(set(changed) & (set(op["material_fields"]) | {"requirements", "acceptance_criteria"}))
+    if set(changed) & set(ip["none_if_changed"]):
+        mode = "none"
+    elif set(changed) & set(ip["prior_only_if_changed"]):
+        mode = "prior_only"
+    else:
+        mode = "full"
+    return {"fields": changed, "material": material, "inheritance": {"mode": mode, "relevance": ip["prior_relevance"]
+            if mode == "prior_only" else (1.0 if mode == "full" else 0.0), "policy": _policies.version("inheritance")}}
+
+
+def inheritance_map(run) -> dict:
+    """For every earlier version: what authority its evidence has in the current one, combined along the chain of
+    changes (none dominates, then a prior, then all of it)."""
+    vs = {v["version"]: v for v in versions(run)}
+    cur = int((run.objective() or {}).get("version") or 1)
+    out, mode, rel = {}, "full", 1.0
+    for v in range(cur, 1, -1):
+        inh = (vs.get(v) or {}).get("inheritance") or {"mode": "full", "relevance": 1.0}
+        if inh["mode"] == "none" or mode == "none":
+            mode, rel = "none", 0.0
+        elif inh["mode"] == "prior_only" or mode == "prior_only":
+            mode, rel = "prior_only", rel * float(inh.get("relevance") or 0.5)
+        out[str(v - 1)] = {"mode": mode, "relevance": round(rel, 4)}
+    return out
+
+
+def new_version(run, changes: dict, by: str = "founder") -> dict:
+    """A change of the objective during a run, approved: the next version. The one before is superseded, kept, and
+    its evidence carries over only as the inheritance policy says."""
+    obj = run.objective()
+    before = dict(obj["structured"])
+    after = {**before, **changes}
+    info = classify_change(before, after)
+    prev = obj["version"]
+    record_version(run, "superseded")
+    run.event("objective.state_changed", "objective_version", f"{obj['objective_id']}@{prev}", {
+              "from": "active", "to": "OBJECTIVE_SUPERSEDED", "version": prev, "superseded_by": prev + 1},
+              actor=by, aggregate_version=None)
+    obj["structured"] = after
+    obj["version"] = prev + 1
+    run.store.put("objective", "obj_1", obj)
+    rec = record_version(run, "active", change={"from_version": prev, **info})
+    run.event("objective.version_created", "objective", obj["objective_id"], {
+        "version": obj["version"], "from_version": prev, "fields": info["fields"], "material": info["material"],
+        "inheritance": info["inheritance"]["mode"]}, actor=by, aggregate_version=None)
+    return rec
+
+
+# --- machine-readable acceptance criteria (mandate 43) ---------------------------------------------------------------
+METHOD_BY_VERIFIER = {"document": "document_verifier", "tests": "automated_tests", "backtest": "backtest",
+                      "founder": "founder_review", "merge": "tests_on_main", "release": "live_health_and_smoke"}
+DOC_AREAS = ("market", "finance", "legal", "business", "domain", "product")
+
+
+def acceptance_criteria(pkg: dict, version: int) -> list[dict]:
+    """Every requirement's acceptance criterion, with how it is verified: the method expected from its area now,
+    refined from the tasks that cover it once there is a plan. The founder's own requirements are theirs, not
+    mandatory for the team. Two criteria for the product as a whole close the list: it is live and healthy, and every
+    mandatory criterion has verified work."""
+    crit_areas = set(_policies.body("risk")["critical_areas"])
+    risky = {k["area"] for k in pkg.get("risks") or []}
+    out = []
+    for r in pkg["requirements"]:
+        method = "document_verifier" if r["area"] in DOC_AREAS else "automated_tests"
+        out.append({"criterion_id": f"ac_{r['id']}", "requirement_id": r["id"],
+                    "description": r.get("verification") or r["text"], "type": r["area"],
+                    "verification_method": method, "verified_by_tasks": [], "mandatory": r.get("owner") != "founder",
+                    "severity": "critical" if r["area"] in crit_areas or r["area"] in risky else "major",
+                    "required_evidence": ["verification_record", "task_verified"], "objective_version": version})
+    out.append({"criterion_id": "ac_prod_live", "requirement_id": None, "type": "production",
+                "description": "The released product is live, answers its health check and passes its smoke checks.",
+                "verification_method": "live_health_and_smoke", "mandatory": True, "severity": "critical",
+                "required_evidence": ["deployment_verified", "live_check"], "objective_version": version,
+                "verified_by_tasks": []})
+    out.append({"criterion_id": "ac_prod_complete", "requirement_id": None, "type": "production",
+                "description": "Every mandatory acceptance criterion has verified work behind it.",
+                "verification_method": "audit", "mandatory": True, "severity": "critical",
+                "required_evidence": ["audit"], "objective_version": version, "verified_by_tasks": []})
+    return out
+
+
+def task_acceptance(t: dict, version: int) -> list[dict]:
+    """A task's acceptance criteria as the verification layer reads them: each with the verifier that evaluates it
+    (from the task type, never the worker's choice), whether it is mandatory and how severe a miss is."""
+    method = METHOD_BY_VERIFIER[roles.TASK_TYPES[t["kind"]]["verifier"]]
+    sev = {"LOW": "major", "MEDIUM": "major", "HIGH": "critical"}[roles.risk(t["kind"])]
+    return [{"criterion_id": f"ac_{t['id']}_{i}", "description": text, "type": "task", "verification_method": method,
+             "mandatory": True, "severity": sev, "required_evidence": ["verification_record"],
+             "requirement_ids": list(t.get("requirement_ids") or []), "objective_version": version}
+            for i, text in enumerate(t.get("acceptance_criteria") or [], start=1)]
+
+
+def acceptance_hash(t: dict) -> str:
+    """The identity of what a task must meet: frozen when the plan is approved, checked before every verification,
+    so neither a worker nor a candidate under calibration can move the bar it is measured against."""
+    return digest({"criteria": [{k: c.get(k) for k in ("criterion_id", "description", "verification_method",
+                                                        "mandatory", "severity")} for c in t.get("acceptance") or []],
+                   "texts": list(t.get("acceptance_criteria") or []), "kind": t.get("kind"),
+                   "requirement_ids": list(t.get("requirement_ids") or [])})

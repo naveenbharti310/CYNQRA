@@ -109,9 +109,12 @@ class _Run:
                 if ok:
                     return True, rounds
                 previous = files
-                if cut:
-                    feedback = (f"Your reply was longer than the output limit and was cut off while writing {cut}. "
-                                "Send only the files still missing or unfinished, each one complete and short.")
+                if cut:  # the engine's own words (execution._cut_off), so the probe tests the protocol the work uses
+                    saved = sorted(files)
+                    feedback = (f"Your last reply was longer than the model's output limit and was cut off while "
+                                f"writing {cut}, which was not saved. "
+                                + (f"These files were saved: {', '.join(saved)}. " if saved else "No file was finished. ")
+                                + "Send only the files still missing or unfinished, each one complete and short.")
                 elif not out.get("files"):
                     feedback = "Your reply contained no files. Every file must be in the === FILE: name === layout."
                 else:
@@ -155,11 +158,17 @@ def probe(supply, model_id: str, log=print) -> dict:
     try:
         ok_obj, result["objective"] = run.objective(say)
         ok_code, result["code_rounds"] = run.code(result["objective"].pop("fields"), say)
+        # Global qualification asks whether the intelligence is safe and reliable enough to take part, family by
+        # family: one that structures objectives well but cannot code takes part in planning work only. Which one
+        # is best for this objective's work is never decided here (controller.py).
+        by_kind = {"objective": "passed" if ok_obj else "failed", "code": "passed" if ok_code else "failed"}
         result.update(passed=ok_obj and ok_code, objective_passed=ok_obj, code_passed=ok_code,
-                      qualification_status="passed" if ok_obj and ok_code else "failed")
-        reg.set_regression(model_id, ok_obj and ok_code,
+                      qualification_status="passed" if ok_obj and ok_code else
+                      ("partially_passed" if ok_obj or ok_code else "failed"), qualified_for=by_kind)
+        reg.set_regression(model_id, ok_obj or ok_code,
                            f"probe: objective {'filled' if ok_obj else 'incomplete'}, code "
-                           f"{'passed' if ok_code else 'failed'} in {len(result['code_rounds'])} round(s)")
+                           f"{'passed' if ok_code else 'failed'} in {len(result['code_rounds'])} round(s)",
+                           by_kind=by_kind)
     except IntelligenceError as exc:
         reg.record_call(model_id, role="probe", purpose="error", task_kind="probe", usage=exc.usage, run_id=run.run_id,
                         error=str(exc))
@@ -200,5 +209,5 @@ def regression_check(supply, model_id: str, kind: str, log=lambda s: None) -> di
                         run_id=run.run_id, error=str(exc))
         return {"passed": False, "evidence": f"model error: {exc}", "ran": True, "usd": run.usd}
     if status == "unverified" and kind in roles.BUILD_TYPES:
-        reg.set_regression(model_id, ok, evidence)
+        reg.set_regression(model_id, ok, evidence, by_kind={"code": "passed" if ok else "failed"})
     return {"passed": ok, "evidence": evidence, "ran": True, "usd": round(run.usd, 6)}

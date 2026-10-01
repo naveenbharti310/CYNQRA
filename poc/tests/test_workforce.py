@@ -143,7 +143,14 @@ class WorkforceTests(unittest.TestCase):
         self.assertEqual(e.meta["phase"], "accepted")
         calls = self.reg.calls("model-a")
         self.assertTrue(calls and all(c["usd"] > 0 for c in calls), "every call is priced from its real tokens")
-        self.assertAlmostEqual(e.workforce_view()["ledger"]["spent_total"], sum(c["usd"] for c in calls), places=4)
+        # every dollar is metered: the work on Model A, and the calibration of all three on this objective's own work
+        mine = [c for c in self.reg.calls() if c["run_id"] == e.cid]
+        self.assertAlmostEqual(e.workforce_view()["ledger"]["spent_total"], sum(c["usd"] for c in mine), places=4)
+        cal = [c for c in mine if c["purpose"] == "calibration"]
+        self.assertEqual({c["model_id"] for c in cal}, {"model-a", "model-b", "model-c"},
+                         "no history: every qualified candidate is measured on the objective's work before binding")
+        self.assertAlmostEqual(sum(c["usd"] for c in mine if c["purpose"] != "calibration"),
+                               sum(c["usd"] for c in calls if c["purpose"] != "calibration"), places=6)
         outs = self.reg.outcomes("model-a")
         self.assertEqual({o["task_kind"] for o in outs} >= {"document", "code"}, True)
         self.assertTrue(all(o["run_id"] == e.cid for o in outs))
@@ -337,7 +344,11 @@ class WorkforceTests(unittest.TestCase):
         self.assertEqual(self.reg.availability(self.reg.get("versioned")), (False, "failed its regression check"))
         m = self.reg.register({"ref": "fake-v", "name": "Versioned", "version": "2"}, connection_id=cid)
         self.assertEqual((m["regression"]["status"], m["regression"]["previous_version"]), ("unverified", "1"))
-        self.assertTrue(self.reg.availability(m)[0], "a new version gets its own chance")
+        # a new version gets its own chance: unknown, not condemned by the old version's failure, and assignable
+        # only once it qualifies (the P1 gate: unverified intelligence is never assigned)
+        self.assertEqual(self.reg.availability(m), (False, "not qualified for assignment yet"))
+        self.reg.set_regression("versioned", True, "version 2 passed its calibration code")
+        self.assertTrue(self.reg.availability(self.reg.get("versioned"))[0], "qualified, the new version may work")
 
     def test_a_model_that_cannot_finish_is_replaced_and_its_successor_inherits_the_work(self):
         e = self.engine()

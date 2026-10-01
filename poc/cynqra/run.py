@@ -28,6 +28,7 @@ class Run(Protocol):
 
     # intelligence: through each worker's binding and the Intelligence Gateway
     def intelligence_for(self, worker_id: str) -> str: ...
+    def model_for(self, worker_id: str, task_id: str | None) -> str | None: ...  # the task's binding, or the worker's
     def invoke(self, worker_id: str, request: dict) -> dict: ...
 
     # the audit trail and the founder's inbox

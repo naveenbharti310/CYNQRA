@@ -64,7 +64,12 @@ cd poc
 python3 -m unittest discover -s tests -t tests
 ```
 
-The suite size changes as the implementation evolves; use the test runner output as the current count. **What they prove:** the machinery works end to end, including all three demos and the
+The suite size changes as the implementation evolves; use the test runner output as the current count.
+`poc/tests/test_objective_intelligence.py` covers the objective intelligence control loop: the evidence model and the
+selection rule (pure), the evidence store's isolation, idempotency and concurrency, budget reservations under
+concurrent workers, the objective lifecycle, acceptance integrity, adversarial guards (false verification, stale
+decisions and bindings, duplicates, races, a calibration candidate moving its own bar), and a closed-loop live run on
+test-double models that really differ. **What they prove:** the machinery works end to end, including all three demos and the
 failure paths. **What they do not prove:** the quality of real AI output; that is what the real-model runs are for.
 The browser test runs only if Node and Playwright are installed; otherwise it is skipped and says so.
 `poc/TEST_REPORT.md` describes every test module.
@@ -91,6 +96,7 @@ Details in `desktop/README.md`. The version number is in `desktop/VERSION`.
 | `cynqra-workforce` | `[workforce]` in a `main` commit message, or **Run workflow** (choose `local`, `hf` or `both`) | **The Bluedip idea, run by real AI models**, nothing scripted: the test of whether real models can do what the demo shows. `hf` uses the newest Hugging Face models; `local` uses three open models on a machine and is slow for a full company. |
 | `cynqra-model-race` | `[race]` in a `main` commit message | Which laptop model is fastest without losing quality |
 | `cynqra-model-scan` | When its workflow file changes on `main` | Which open models Hugging Face offers |
+| `cynqra-hosted-intelligence` | **Run workflow** only (choose the provider, how many models, and optionally an objective and a budget) | Discovery and qualification of hosted models from `GEMINI_API_KEY` / `NVIDIA_API_KEY`; with an objective, that objective run through the objective intelligence loop to its first bindings (requirements, workforce, plan, calibration, a decision per work item) on real models, with a hard cap. Evidence is uploaded as an artifact. It shows what those providers did on that objective in that run, nothing more. |
 | `cynqra-spikes`, `cynqra-hf` | `[spikes]`, `[hf]` in a `main` commit message | Earlier experiments, kept for reference (code in `archive/02_harness`) |
 
 **Secret:** `HF_TOKEN` (Settings → Secrets and variables → Actions) lets the Hugging Face runs call models. It needs

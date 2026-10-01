@@ -134,6 +134,10 @@ class SupplyTests(SupplyBase):
         out = self.supply.connect({"type": "mirror", "name": "Mirror", "auth": {"method": "none"}})
         mid = out["intelligence"][0]["id"]
         self.assertIsNone(self.supply.gateway.invoke(mid, {"prompt": "Plan the work for this organization"})["error"])
+        self.assertNotIn("Mirror 1", [r["model"] for r in rank(self.reg, ["code"], 10.0)],
+                         "discovered is not qualified: nothing is assigned before its qualification work")
+        done = self.supply.qualify([self.reg.get(mid)])
+        self.assertEqual([r["model_id"] for r in done], [mid])
         self.assertIn("Mirror 1", [r["model"] for r in rank(self.reg, ["code"], 10.0)], "the router ranks it as is")
 
     def test_discovery_retires_what_is_gone_and_keeps_its_record(self):
@@ -145,6 +149,8 @@ class SupplyTests(SupplyBase):
         self.assertEqual(old["status"], "retired")
         self.assertFalse(self.reg.availability(old)[0])
         self.assertEqual(len(self.reg.outcomes("model-a")), 2, "its measured record is kept")
+        self.assertNotIn("Model A2", [m["name"] for m in self.reg.available()], "discovered, not yet qualified")
+        self.supply.qualify()
         self.assertIn("Model A2", [m["name"] for m in self.reg.available()])
         out = self.supply.gateway.invoke("model-a", {"prompt": "x"})
         self.assertIn("retired", out["error"], "the gateway does not call a retired intelligence")

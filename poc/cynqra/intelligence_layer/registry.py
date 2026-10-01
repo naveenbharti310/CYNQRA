@@ -158,18 +158,38 @@ class IntelligenceRegistry:
             return m
 
     def availability(self, m: dict) -> tuple[bool, str]:
-        """Can a worker bound to this intelligence make a call now? Its own state, then its connection's."""
+        """Can a worker bound to this intelligence make a call now? Its own state, its connection's, then the
+        global qualification gate: a discovered intelligence is unknown, not usable, until it qualifies. A missing
+        key is said before the gate, because nothing can be qualified without it."""
         if m.get("status") == "retired":
             return False, m.get("status_note") or "retired"
         regression = (m.get("regression") or {}).get("status")
         if regression == "failed":
             return False, "failed its regression check"
-        if regression == "unverified":
-            return False, "not qualified for assignment yet"
         h = m.get("health") or {}
         if h.get("down_until", 0) > time.time():
             return False, f"down after {h.get('errors')} failed calls in a row"
-        return self.reachable(m)
+        ok, why = self.reachable(m)
+        if not ok:
+            return ok, why
+        if regression == "unverified":
+            return False, "not qualified for assignment yet"
+        return ok, why
+
+    @staticmethod
+    def qualified_for(m: dict, kind: str) -> tuple[bool, str]:
+        """Global qualification for one family of work: building work (code) or the rest (structured planning). A
+        model that passed one family and failed the other takes part only in the one it passed."""
+        reg = m.get("regression") or {}
+        if reg.get("status") in ("not applicable",):
+            return True, ""
+        if reg.get("status") != "passed":
+            return False, f"not qualified ({reg.get('status') or 'unverified'})"
+        family = "code" if kind in ("code", "forecast") else "objective"
+        verdict = (reg.get("by_kind") or {}).get(family)
+        if verdict == "failed":
+            return False, f"failed its {family} qualification"
+        return True, ""
 
     def available(self) -> list[dict]:
         return [m for m in self.models() if self.availability(m)[0]]
@@ -189,10 +209,11 @@ class IntelligenceRegistry:
                 raise RegistryError(f"no intelligence {model_id!r} in the registry")
             secs = float(usage.get("latency_s") or 0)
             tin, tout = int(usage.get("tokens_in") or 0), int(usage.get("tokens_out") or 0)
-            c = {"id": f"c_{self._n('call') + 1:06d}", "model_id": model_id, "role": role, "purpose": purpose,
+            c = {"id": f"c_{self.store.next_id('call'):06d}", "model_id": model_id, "role": role, "purpose": purpose,
                  "task_kind": task_kind, "run_id": run_id, "tokens_in": tin, "tokens_out": tout,
                  "seconds": round(secs, 1), "usd": self.cost(m, tin, tout, secs), "write_tps": usage.get("write_tps"),
-                 "error": error[:300], "served_by": m.get("served_by") or "", "at": now()}
+                 "error": error[:300], "served_by": m.get("served_by") or "", "model_version": served_version(m),
+                 "tenant_id": usage.get("tenant_id") or "local", "at": now()}
             self.store.put("call", c["id"], c)
             h = m.get("health") or {"errors": 0, "down_until": 0}
             h["errors"] = h.get("errors", 0) + 1 if error else 0
@@ -206,23 +227,33 @@ class IntelligenceRegistry:
 
     def record_outcome(self, model_id: str, *, role: str, task_kind: str, task_id: str, run_id: str, attempt: int,
                        verified: bool, usd: float, seconds: float, tokens: int, failure: str = "",
-                       source: str = "project") -> dict:
-        """One verification of one attempt at a task: the unit Cynqra learns from."""
+                       source: str = "project", tenant_id: str = "local", objective_id: str | None = None,
+                       objective_version: int | None = None, attribution: str | None = None,
+                       model_version: str | None = None) -> dict:
+        """One verification of one attempt at a task: the unit Cynqra learns from. Every outcome names its tenant,
+        so another tenant's work never becomes this one's evidence, and the version that actually did the work."""
         with self.lock:
-            version = served_version(self.store.get("intelligence", model_id) or {})
-            o = {"id": f"o_{self._n('outcome') + 1:06d}", "model_id": model_id, "model_version": version,
+            version = model_version if model_version is not None else \
+                served_version(self.store.get("intelligence", model_id) or {})
+            o = {"id": f"o_{self.store.next_id('outcome'):06d}", "model_id": model_id, "model_version": version,
                  "role": role, "task_kind": task_kind, "task_id": task_id, "run_id": run_id, "attempt": attempt,
                  "verified": bool(verified), "first_pass": bool(verified and attempt == 1), "usd": round(usd, 6),
                  "seconds": round(seconds, 1), "tokens": int(tokens), "failure": failure[:400], "source": source,
+                 "tenant_id": tenant_id or "local", "objective_id": objective_id, "objective_version": objective_version,
+                 "attribution": attribution or ("intelligence" if not verified else None), "clean": True,
                  "at": now()}
             self.store.put("outcome", o["id"], o)
             return o
 
-    def set_regression(self, model_id: str, passed: bool, evidence: str) -> dict:
+    def set_regression(self, model_id: str, passed: bool, evidence: str, by_kind: dict | None = None) -> dict:
+        """Settle the global qualification gate for the current served version. by_kind: the verdict per family of
+        work ({"objective": "passed", "code": "failed"}): it takes part only in the families it passed."""
         with self.lock:
             m = self.get(model_id)
             m["regression"] = {"status": "passed" if passed else "failed", "version": served_version(m),
                                "at": now(), "evidence": evidence[:300]}
+            if by_kind:
+                m["regression"]["by_kind"] = {k: v for k, v in by_kind.items() if v in ("passed", "failed")}
             self.store.put("intelligence", model_id, m)
             self._audit("intelligence.regression_checked", model_id, {"passed": passed, "evidence": evidence[:200],
                         "version": served_version(m)})
@@ -231,9 +262,11 @@ class IntelligenceRegistry:
     def _n(self, kind: str) -> int:
         return len(self.store.all(kind))
 
-    def outcomes(self, model_id: str | None = None, task_kind: str | None = None) -> list[dict]:
+    def outcomes(self, model_id: str | None = None, task_kind: str | None = None,
+                 tenant_id: str | None = None) -> list[dict]:
         return [o for o in self.store.all("outcome") if (model_id is None or o["model_id"] == model_id)
-                and (task_kind is None or o["task_kind"] == task_kind)]
+                and (task_kind is None or o["task_kind"] == task_kind)
+                and (tenant_id is None or (o.get("tenant_id") or "local") == tenant_id)]
 
     def calls(self, model_id: str | None = None) -> list[dict]:
         return [c for c in self.store.all("call") if model_id is None or c["model_id"] == model_id]

@@ -13,7 +13,7 @@ been proven end to end on strong real AI models in its current form.
 
 | Area | Status |
 | --- | --- |
-| The seven-step journey: describe the idea, approve the plan, define yourself, approve the team and budget, watch it being built, receive the product, audit and refine | ✅ Built. Every screen follows it. 321 automated tests pass. |
+| The seven-step journey: describe the idea, approve the plan, define yourself, approve the team and budget, watch it being built, receive the product, audit and refine | ✅ Built. Every screen follows it. The automated suite passes (see `poc/TEST_REPORT.md` for the current count). |
 | Define yourself: the organisation is constructed again around the founder's background (live mode); an area the founder leads gets no AI cofounder and reports to the founder | ✅ Built and tested with stand-in AIs; not yet tried on a real model. In a demo the founder and the organisation are part of the script. A domain expert still gets a Specialist for their own field when the platform's coverage rule needs one. |
 | Every AI team member has a real name, shown as "Name, AI seat", renamable; a replacement brings a new person into the seat, with the one before kept in the history with their record; an outage replaces no one | ✅ Built and tested. |
 | Audit and rework: every requirement of the objective checked against the delivered product; a rework plans, builds and releases only what should change | ✅ Built and tested. |
@@ -27,6 +27,7 @@ been proven end to end on strong real AI models in its current form.
 | Cofounders run their areas: hand out, answer doubts, review before work counts, endorse proposals to the founder | ✅ Built and tested. |
 | Team works in parallel | ✅ Built and tested. |
 | Best AI per member, measured | ✅ Built and tested. |
+| **Objective-specific intelligence selection** (the control loop: objective identity, versions and lifecycle; machine-readable acceptance criteria; bounded calibration on the objective's own work; a persisted, replayable decision for every binding; per-task bindings; objective evidence with causes, levels and boundaries; reselection on evidence; budget reserved before every call; production verification before completion) | ✅ Built and tested with test doubles (`poc/tests/test_objective_intelligence.py`). ❌ **Not yet shown on real models**: whether its choices beat the global prior on real objectives is what the next real runs measure. See `docs/6_PHASED_ARCHITECTURE.md`. |
 | When a member stops: finds out why first; replaces only an AI that cannot do the work, and tells the founder the cost | ✅ Built and tested. |
 | Prediction models checked on data they have not seen | ✅ Built and tested (a backtest against last week's numbers). |
 | Connections to OpenAI-compatible, Anthropic, local models, Hugging Face | ✅ Built. Bedrock planned. |
@@ -56,7 +57,7 @@ Hugging Face PRO. Nothing in it is scripted: it is the test of whether real AI m
 
 | # | What | Why this, and why now |
 | --- | --- | --- |
-| 1 | **Objective-specific intelligence selection:** turn the current measured router into an objective-aware control loop, then prove it on Bluedip and unrelated real objectives. CYNQRA must compare available intelligence against the actual work and acceptance criteria, not merely qualify a small generic candidate set. | This is the central product promise: the founder gives the objective and CYNQRA finds, coordinates, verifies and continuously reselects the intelligence needed to produce the strongest verified outcome. |
+| 1 | **Prove objective-specific intelligence selection on real models.** The control loop is built (1 October 2026); run it on Bluedip and unrelated real objectives with several qualified hosted models (`cynqra-hosted-intelligence` with an objective, then full runs), and compare its choices and their verified outcomes against the global prior alone. Tune the evidence and selection policies only from that evidence. | This is the central product promise: the founder gives the objective and CYNQRA finds, coordinates, verifies and continuously reselects the intelligence needed to produce the strongest verified outcome. Built is not proven. |
 | 2 | **The Bluedip run on real models**, then **the exam:** 20 real ideas, run end to end, measuring CEO decisions, time, cost and quality across different intelligence assignments | Proof before more features. Every later change is measured against it. |
 | 3 | **Founder conversations:** show 10 to 20 target founders the Bluedip result; ask if they would pay, and how much | Confirms demand, price and the first buyer. |
 | 4 | **Speed:** online models by default; smaller tasks; faster rescue when a task fails twice | Real runs took hours. |
@@ -90,7 +91,15 @@ Hugging Face PRO. Nothing in it is scripted: it is the test of whether real AI m
   others wait. How much this slows a real run is to be measured on real models.
 - A cofounder's proposal of its own team is written in that cofounder's role by the AI Cynqra uses for planning;
   each cofounder gets its own AI once the organization is approved.
-- The evidence for choosing models is thin (1 to 3 trial tasks per model) until more projects run.
+- The evidence for choosing models is thin (1 to 3 trial tasks per model) until more projects run. Objective
+  calibration adds one bounded trial per important kind of work and candidate; its weights, caps and floors
+  (`poc/cynqra/policies.py`) are first settings, not tuned on real runs.
+- Calibration covers the work the platform can verify before it is real (code, forecasts, documents). Proposals,
+  merges and releases are chosen from the global prior until their own execution evidence arrives.
+- Evidence and decisions are scoped by tenant and workspace in every record, but the store is one machine's: a hosted,
+  multi-tenant control plane is not built (roadmap 11). Cross-tenant evidence is refused; no aggregation policy exists.
+- Every AI call during the run reserves its upper-bound cost before it starts (T5), so a long reply limit at a high
+  price can pause work near the cap earlier than its real cost would.
 - The desktop app keeps everything on one computer; there is no multi-user version.
 - The demo video (`poc/demo/`, recorded 29 September 2026, about 7 minutes 25 seconds) shows the Bluedip demo in demo
   mode; a video of a run on real AI models comes after that run.
@@ -117,3 +126,26 @@ These changes do not convert simulated tests into real-model evidence. The repos
 The current code was cross-checked against every P0-P8 implementation contract. P0 is implemented by the authoritative phased architecture and identity contract. P1 is implemented by provider adapters, connections, credential isolation, registry qualification/regression state, routing and binding. P2 is implemented by objective-driven workforce synthesis, requirement ownership, gap closure, validation, founder-fit and lean-team challenge. P3 is implemented through the governed worker runtime, scoped filesystem operations, command allowlisting, dependency installation, timeout/process cleanup, policy, budget breaker and kill switch; however, the runtime explicitly remains a capability boundary rather than an OS/container security sandbox, and worker network isolation is therefore not yet a complete implementation of the P3 production exit gate. P4 is implemented by the live end-to-end path creating a fresh company workspace and building from the supplied objective rather than a prepared application. P5 is implemented by structured handoffs, blockers, task leases and ThreadPoolExecutor-based parallel worker rounds. P6 is implemented by independent verification, rework, failure diagnosis, regression checks, rerouting, replacement and provider-outage handling. P7 is implemented by call-level latency/token/cost records, budget layers, worker/model scorecards, verification and intervention records; explicit broad examination of throughput/economics remains validation work. P8 is implemented by the fixed twenty-objective examination set and harness; execution remains validation work.
 
 Therefore the architecture is implemented across P0-P8, with one material implementation boundary remaining inside P3: production-grade OS/container/network isolation for generated code. Everything else is presently implemented as executable machinery and awaits empirical testing.
+
+
+## Objective intelligence control: 1 October 2026
+
+Implemented against the P1 mandate (objective-specific intelligence selection and closed-loop control). The loop is
+executable and tested: objective identity, versions with inheritance boundaries and a persisted lifecycle; machine-
+readable acceptance criteria with frozen hashes; a work graph; qualification per family of work (and a live run now
+qualifies what is connected before it starts, which restored the live paths that the "unverified cannot be assigned"
+gate had stopped); bounded cold-start calibration on representative work from the objective; a persisted, replayable
+SelectionDecision for every binding; per-task bindings that keep worker identity; objective evidence with causal
+attribution, strength, relevance, version and tenant boundaries; reselection on evidence and replacement only on
+verified superiority; atomic budget reservations; independent review for high-risk work; production verification
+before completion; and real events for every step. The causal audit of a task (`Engine.explain`) and the replay of
+any decision (`Engine.replay_decision`) read only persisted records.
+
+Also fixed on the way, each a genuine fault found by the suite on `main`: discovery kept the oldest release of a
+family when its version sat inside a name (Kimi K2.6 over K3); the hosted examination's family key never matched a
+digit; the private-address guard refused keyless servers on the local network, contrary to its own contract; the
+probe asked for cut-off files in words the engine does not use; the archived spike adapter had drifted from the
+product's; the budget ledger and several record counters could lose concurrent updates.
+
+What this does not show: that the loop picks better intelligence on real objectives. That needs real provider runs;
+none is claimed here.
