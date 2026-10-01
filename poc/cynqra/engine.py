@@ -850,9 +850,7 @@ class Engine:
                "APPROVED": execution.execute_approved}
 
     def _round(self) -> list[str]:
-        """The tasks that move this round: those whose inputs are ready, one per worker who has to act on them (the
-        owner's cofounder hands a task over and reviews it, the owner works on it, the colleague a Blocker names
-        answers it)."""
+        """Select ready work and atomically lease it before any slow model call can start."""
         tasks = self.tasks()
         by_id = {t["id"]: t for t in tasks}
         busy: set[str] = set()
@@ -867,13 +865,20 @@ class Engine:
                 if actor in busy:
                     continue
                 busy.add(actor)
-            out.append(t["id"])
+            if self.store.claim_task(t["id"], actor):
+                out.append(t["id"])
+            elif actor in busy:
+                busy.discard(actor)
         return out
 
     def _act(self, tid: str) -> dict | None:
-        """One worker's (or the platform's) piece of work on one task, as the step used to do it."""
-        with self.lock:
-            m = self.meta
+        """One leased task's piece of work. The lease prevents two concurrent step callers from acting on it."""
+        lease = self.store.task_lease(tid)
+        if not lease:
+            return None
+        try:
+            with self.lock:
+                m = self.meta
             if m["frozen"] or m["phase"] != "running" or budget.ledger(self.store)["state"] == "breaker":
                 return None
             t = self.task(tid)
@@ -892,6 +897,8 @@ class Engine:
                               notice=f"Stopped on {tid}: the intelligence failed ({exc}). Nothing was invented.")
                 self.event("task.failed", "task", tid, {"reason": "intelligence_error"}, correlation_id=tid)
                 return {"did": "error", "task": tid, "why": str(exc)}
+        finally:
+            self.store.release_task(tid, lease["lease_id"])
 
     def _violation(self, t: dict, state: str, exc: ProtocolError) -> dict:
         """A reply that is not a valid protocol object: counted against the worker whose reply it was."""
