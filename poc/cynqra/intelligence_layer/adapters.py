@@ -257,8 +257,14 @@ class OpenAICompatibleAdapter(ProviderAdapter):
         when = dated({r: listing[r] for r in chat}) if chat and not hf else {}
         if allow or hf or conn.get("_all"):
             refs = allow or chat
+        elif conn.get("origin") == "environment":
+            # Environment credentials are used for calibration and discovery, not the product's curated catalogue.
+            # Keep the provider's complete chat-capable listing so a newly released model cannot disappear before
+            # CYNQRA has had a chance to measure it. The examination scheduler decides what to probe.
+            refs = chat
+            conn["_listing_note"] = f"{len(chat)} chat-capable model(s) discovered from the provider"
         else:
-            # nothing named: the models released within a year, newest of each family; the rest stay searchable
+            # Founder connections keep the product-facing catalogue bounded to current model families.
             refs = current(chat, when)
             older = len(chat) - len(refs)
             if not any(when.values()):
