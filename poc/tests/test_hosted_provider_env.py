@@ -25,6 +25,19 @@ class HostedEnvironmentTests(unittest.TestCase):
         self.assertEqual(by_name["Google Gemini (environment)"]["models"], [])
         self.assertEqual(by_name["NVIDIA (environment)"]["models"], [])
 
+    def test_environment_discovery_keeps_the_complete_provider_chat_catalogue(self):
+        adapter = OpenAICompatibleAdapter()
+        listing = {"data": [
+            {"id": "moonshotai/kimi-k2.6", "created": 1000},
+            {"id": "moonshotai/kimi-k3", "created": 2000},
+            {"id": "z-ai/glm-5.3-flash", "created": 3000},
+        ]}
+        with mock.patch("cynqra.intelligence_layer.adapters._get_json", return_value=listing):
+            conn = {"endpoint": "https://integrate.api.nvidia.com/v1", "origin": "environment",
+                    "metadata": {"flavor": "nvidia"}, "models": []}
+            found = adapter.discover(conn, "not-a-real-secret")
+        self.assertEqual({m["ref"] for m in found},
+                         {"moonshotai/kimi-k2.6", "moonshotai/kimi-k3", "z-ai/glm-5.3-flash"})
     def test_hosted_routes_keep_the_provider_endpoint_and_key_per_connection(self):
         adapter = OpenAICompatibleAdapter()
         for endpoint, flavor in (
