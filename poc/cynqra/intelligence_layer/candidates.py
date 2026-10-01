@@ -15,9 +15,10 @@ USEFUL = {"reasoning", "coding", "agentic", "tool use", "long context", "structu
 
 def family_key(ref: str) -> str:
     """A model's family: its name without publisher, serving suffix or version numbers, so vendor/model-k2.6 and
-    vendor/model-k3 are one family and only the newest of them takes a place in a bounded set."""
+    vendor/model-k3 are one family, as are vendor-model-4-6 and vendor-model-5 (a version written with dashes, or
+    with a release date after it), and only the newest of them takes a place in a bounded set."""
     value = str(ref or "").lower().split("/")[-1].split(":")[0]
-    return re.sub(r"\d+(?:\.\d+)*", "#", value)
+    return re.sub(r"#(?:-#)+(?![a-z])", "#", re.sub(r"\d+(?:\.\d+)*", "#", value))
 
 
 def provider_key(m: dict) -> str:

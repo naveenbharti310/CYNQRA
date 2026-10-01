@@ -25,12 +25,23 @@ RETIRED = "claude-sonnet-4-20250514"
 class FakeProvider:
     def __init__(self):
         self.requests = []
+        self.listings = []
         self.mode = "ok"
         outer = self
 
         class H(BaseHTTPRequestHandler):
             def log_message(self, *a):
                 pass
+
+            def do_GET(self):  # Anthropic's model listing: the key reaches one model. Other formats list nothing.
+                if "anthropic-version" not in {k.lower() for k in self.headers}:
+                    return self.send_error(501)
+                outer.listings.append({"path": self.path, "headers": {k.lower(): v for k, v in self.headers.items()}})
+                if self.path.startswith("/v1/models"):
+                    return self._send(200, {"data": [{"type": "model", "id": "claude-sonnet-5",
+                                                      "display_name": "Claude Sonnet 5",
+                                                      "created_at": "2026-01-01T00:00:00Z"}], "has_more": False})
+                return self._send(404, {"type": "error", "error": {"type": "not_found_error", "message": self.path}})
 
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
@@ -103,6 +114,7 @@ class ProviderBase(unittest.TestCase):
         self.waits = model_adapter.RETRY_WAITS_S
         model_adapter.RETRY_WAITS_S = (0.0, 0.0)
         model_adapter.ANTHROPIC_URL = self.p.base + "/v1/messages"
+        os.environ["CYNQRA_ANTHROPIC_URL"] = self.p.base + "/v1/messages"  # the listing comes from the same server
         model_adapter.OPENAI_URL = self.p.base + "/v1/chat/completions"
 
     def tearDown(self):
@@ -137,6 +149,9 @@ class AnthropicWireTests(ProviderBase):
         self.assertGreaterEqual(r["body"]["max_tokens"], model_adapter.ANTHROPIC_MIN_MAX_TOKENS,
                                 "room for default thinking, so the answer is not truncated")
         self.assertNotIn("output_config", r["body"])
+        listing = self.p.listings[0]  # the model was discovered from the key's listing, not assumed
+        self.assertTrue(listing["path"].startswith("/v1/models"))
+        self.assertEqual(listing["headers"]["x-api-key"], "test-key-not-real")
         e.close()
 
     def test_truncated_reply_is_an_error_not_a_short_answer(self):

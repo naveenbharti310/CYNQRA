@@ -7,7 +7,7 @@ on:
         description: Hosted provider to examine
         required: true
         type: choice
-        options: [all, google, nvidia]
+        options: [all, google, nvidia, anthropic]
         default: all
       max_models:
         description: Maximum number of current candidates to probe
@@ -33,6 +33,8 @@ jobs:
     env:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+      # the Claude key, under either name it may have been saved as
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY || secrets.CLAUDE_API_KEY }}
       PYTHONUNBUFFERED: "1"
     steps:
       - uses: actions/checkout@v5
@@ -53,9 +55,15 @@ jobs:
                 exit 1
               fi
               ;;
+            anthropic)
+              if [ -z "$ANTHROPIC_API_KEY" ]; then
+                echo "ANTHROPIC_API_KEY is required when provider=anthropic."
+                exit 1
+              fi
+              ;;
             all)
-              if [ -z "$GEMINI_API_KEY" ] && [ -z "$NVIDIA_API_KEY" ]; then
-                echo "Add GEMINI_API_KEY and/or NVIDIA_API_KEY in repository Actions secrets before running this workflow."
+              if [ -z "$GEMINI_API_KEY" ] && [ -z "$NVIDIA_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ]; then
+                echo "Add GEMINI_API_KEY, NVIDIA_API_KEY and/or ANTHROPIC_API_KEY in repository Actions secrets before running this workflow."
                 exit 1
               fi
               ;;

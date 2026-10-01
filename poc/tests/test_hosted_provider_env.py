@@ -2,7 +2,8 @@ import os
 import unittest
 from unittest import mock
 
-from cynqra.intelligence_layer.adapters import OpenAICompatibleAdapter
+from cynqra.intelligence_layer.adapters import AnthropicAdapter, OpenAICompatibleAdapter
+from cynqra.intelligence_layer.candidates import family_key
 from cynqra import model_adapter
 
 
@@ -65,6 +66,111 @@ class HostedEnvironmentTests(unittest.TestCase):
                 route = adapter.route(conn, "not-a-real-secret", {"ref": "model-x"})
                 model_adapter.complete("hello", max_tokens=1, route=route)
                 self.assertEqual(post.call_args.args[0], endpoint + "/chat/completions")
+
+    def test_an_anthropic_key_alone_discovers_its_models_rather_than_assuming_one(self):
+        adapter = AnthropicAdapter()
+        primary = {"kind": "anthropic", "label": "claude-default"}
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-ant-test-not-real"}, clear=False):
+            os.environ.pop("CYNQRA_MODEL", None)
+            os.environ.pop("CYNQRA_ANTHROPIC_URL", None)
+            spec = adapter.environment_specs(primary)[0]
+            self.assertEqual(spec["name"], "Anthropic (environment)")
+            self.assertEqual(spec["models"], [], "with no model named, every model the key can reach is discovered")
+            self.assertEqual(spec["endpoint"], "")
+            self.assertEqual(spec["auth"], {"method": "env", "env_var": "ANTHROPIC_API_KEY"})
+            self.assertNotIn("sk-ant-test", str(spec), "the spec references the key, it never carries it")
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "set", "CYNQRA_MODEL": "claude-named",
+                                          "CYNQRA_ANTHROPIC_URL": "http://127.0.0.1:9/v1/messages"}, clear=False):
+            spec = adapter.environment_specs({"kind": "anthropic", "label": "claude-named"})[0]
+            self.assertEqual(spec["models"], ["claude-named"], "a model the environment names narrows it")
+            self.assertEqual(spec["endpoint"], "http://127.0.0.1:9", "listing and calls go to the same server")
+            spec = adapter.environment_specs({"kind": "openai", "label": "gpt-x"})[0]
+            self.assertEqual(spec["models"], [], "CYNQRA_MODEL names the primary provider's model, not this one's")
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("ANTHROPIC_API_KEY", None)
+            self.assertEqual(adapter.environment_specs(primary), [])
+
+    def test_anthropic_discovery_reads_every_page_with_release_dates(self):
+        adapter = AnthropicAdapter()
+        pages = [
+            {"data": [{"id": "claude-a-5", "display_name": "A 5", "created_at": "2026-02-01T00:00:00Z",
+                       "max_input_tokens": 1000000}], "has_more": True, "last_id": "claude-a-5"},
+            {"data": [{"id": "claude-a-4-6", "created_at": "2025-08-01T00:00:00Z"},
+                      {"id": "claude-b-4-5-20251001", "created_at": "not a date"}], "has_more": False},
+        ]
+        urls = []
+
+        def listing(url, headers):
+            urls.append(url)
+            self.assertEqual(headers["x-api-key"], "not-a-real-secret")
+            return pages[len(urls) - 1]
+
+        with mock.patch("cynqra.intelligence_layer.adapters._get_json", side_effect=listing):
+            conn = {"endpoint": "", "origin": "environment", "models": []}
+            found = adapter.discover(conn, "not-a-real-secret")
+        self.assertEqual(len(urls), 2)
+        self.assertIn("after_id=claude-a-5", urls[1])
+        by_ref = {m["ref"]: m for m in found}
+        self.assertEqual(set(by_ref), {"claude-a-5", "claude-a-4-6", "claude-b-4-5-20251001"})
+        self.assertEqual(by_ref["claude-a-5"]["released"], 1769904000.0)
+        self.assertEqual(by_ref["claude-a-5"]["context"], 1000000)
+        self.assertEqual(by_ref["claude-a-5"]["name"], "A 5")
+        self.assertIsNone(by_ref["claude-b-4-5-20251001"]["released"], "an unreadable date is unknown, not invented")
+        self.assertEqual(by_ref["claude-a-4-6"]["price_in"], 10.0, "an unlisted price is the safe default")
+        from cynqra.intelligence_layer.adapters import LIST_PRICES, _price
+        self.assertEqual(_price({}, "claude-haiku-4-5-20251001"), LIST_PRICES["claude-haiku-4-5"],
+                         "a dated snapshot is priced as the model it pins")
+        self.assertEqual(_price({}, "claude-unknown-20251001"), (10.0, 50.0))
+        self.assertIn("3 model(s) discovered", conn["_listing_note"])
+        self.assertNotIn("not-a-real-secret", str(found) + str(conn))
+
+    def test_a_version_written_with_dashes_or_a_date_is_still_one_family(self):
+        self.assertEqual(family_key("claude-a-4-6"), family_key("claude-a-5"))
+        self.assertEqual(family_key("claude-b-4-5-20251001"), family_key("claude-b-5"))
+        self.assertNotEqual(family_key("claude-a-5"), family_key("claude-b-5"))
+        self.assertEqual(family_key("vendor/model-k2.6"), family_key("vendor/model-k3"))
+        self.assertEqual(family_key("meta/llama-3.1-8b-instruct"), "llama-#-#b-instruct",
+                         "a parameter size stays part of the name")
+
+    def test_the_examination_can_be_limited_to_anthropic_and_requires_its_key(self):
+        from cynqra import run_hosted_examination as rhe
+        self.assertEqual(rhe.PROVIDERS["anthropic"], ("ANTHROPIC_API_KEY", "Anthropic (environment)"))
+        keys = ("GEMINI_API_KEY", "NVIDIA_API_KEY", "ANTHROPIC_API_KEY")
+        with mock.patch.dict(os.environ, {}, clear=False):
+            for k in keys:
+                os.environ.pop(k, None)
+            with self.assertRaises(SystemExit) as ctx:
+                rhe.main(["--provider", "anthropic"])
+            self.assertIn("ANTHROPIC_API_KEY", str(ctx.exception))
+            with self.assertRaises(SystemExit) as ctx:
+                rhe.main(["--provider", "all"])
+            self.assertIn("ANTHROPIC_API_KEY", str(ctx.exception))
+
+    def test_a_saved_environment_connection_follows_what_the_environment_now_names(self):
+        import tempfile
+        from pathlib import Path
+        from cynqra.intelligence_layer import IntelligenceSupply
+        listing = {"data": [{"id": "claude-a-5", "created_at": "2026-02-01T00:00:00Z"},
+                            {"id": "claude-b-5", "created_at": "2026-03-01T00:00:00Z"}], "has_more": False}
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch("cynqra.intelligence_layer.adapters._get_json", return_value=listing), \
+                mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-ant-test-not-real",
+                                             "CYNQRA_MODEL": "claude-a-5"}, clear=False):
+            for k in ("OPENAI_API_KEY", "GEMINI_API_KEY", "NVIDIA_API_KEY", "HF_TOKEN", "CYNQRA_LOCAL_BASE_URL",
+                      "CYNQRA_OLLAMA_MODEL", "CYNQRA_S1_MODEL_CMD", "CYNQRA_ANTHROPIC_URL"):
+                os.environ.pop(k, None)
+            supply = IntelligenceSupply(Path(d))
+            try:
+                self.assertEqual({m["ref"] for m in supply.connect_environment()}, {"claude-a-5"})
+                os.environ.pop("CYNQRA_MODEL")
+                found = supply.connect_environment()
+                self.assertEqual({m["ref"] for m in found}, {"claude-a-5", "claude-b-5"},
+                                 "with no model named any more, every model the key reaches is discovered")
+                conns = [c for c in supply.connections.all() if c["name"] == "Anthropic (environment)"]
+                self.assertEqual(len(conns), 1, "the saved connection is updated, not duplicated")
+                self.assertEqual(conns[0]["models"], [])
+            finally:
+                supply.close()
 
 if __name__ == "__main__":
     unittest.main()

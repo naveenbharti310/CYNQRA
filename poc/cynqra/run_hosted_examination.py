@@ -20,6 +20,12 @@ from .probe import probe
 _family_key, _candidate_score, _provider_key = family_key, priority, provider_key
 
 
+# The hosted providers an examination can be limited to: the key each needs and the environment connection it makes
+PROVIDERS = {"google": ("GEMINI_API_KEY", "Google Gemini (environment)"),
+             "nvidia": ("NVIDIA_API_KEY", "NVIDIA (environment)"),
+             "anthropic": ("ANTHROPIC_API_KEY", "Anthropic (environment)")}
+
+
 def select(entries: list[dict], limit: int) -> list[dict]:
     """A bounded, provider-fair, family-diverse calibration set. Metadata decides priority only."""
     return _select(entries, limit)
@@ -32,19 +38,18 @@ def selection_details(entries: list[dict], selected: list[dict], limit: int) -> 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--max-models", type=int, default=4)
-    ap.add_argument("--provider", choices=("all", "google", "nvidia"), default="all")
+    ap.add_argument("--provider", choices=("all", *PROVIDERS), default="all")
     ap.add_argument("--data-root", default="")
     ap.add_argument("--objective", default="", help="after qualification, run this objective through the objective "
                     "intelligence loop to its first bindings: requirements, workforce, plan, calibration, decisions")
     ap.add_argument("--budget-usd", type=float, default=1.0, help="the objective run's hard cap")
     args = ap.parse_args(argv)
 
-    if args.provider == "google" and not os.environ.get("GEMINI_API_KEY"):
-        raise SystemExit("provider=google requires GEMINI_API_KEY")
-    if args.provider == "nvidia" and not os.environ.get("NVIDIA_API_KEY"):
-        raise SystemExit("provider=nvidia requires NVIDIA_API_KEY")
-    if args.provider == "all" and not os.environ.get("GEMINI_API_KEY") and not os.environ.get("NVIDIA_API_KEY"):
-        raise SystemExit("provider=all requires GEMINI_API_KEY and/or NVIDIA_API_KEY")
+    keys = {p: env for p, (env, _) in PROVIDERS.items()}
+    if args.provider != "all" and not os.environ.get(keys[args.provider]):
+        raise SystemExit(f"provider={args.provider} requires {keys[args.provider]}")
+    if args.provider == "all" and not any(os.environ.get(k) for k in keys.values()):
+        raise SystemExit("provider=all requires at least one of " + ", ".join(keys.values()))
 
     root = Path(args.data_root or Path.cwd() / "hosted-examination")
     root.mkdir(parents=True, exist_ok=True)
@@ -52,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         entries = supply.connect_environment()
         if args.provider != "all":
-            needle = "Google Gemini (environment)" if args.provider == "google" else "NVIDIA (environment)"
+            needle = PROVIDERS[args.provider][1]
             allowed = {c["id"] for c in supply.connections.all() if c["name"] == needle}
             entries = [m for m in entries if m["connection_id"] in allowed]
         limit = max(1, args.max_models)

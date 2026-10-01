@@ -20,6 +20,7 @@ Workers, the registry, the router and the bindings never see any of this.
 """
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import re
@@ -159,7 +160,8 @@ def _allow(conn: dict) -> list[str]:
 def _price(conn: dict, ref: str) -> tuple[float, float]:
     if conn.get("price_per_m"):
         return tuple(float(x) for x in conn["price_per_m"])  # type: ignore[return-value]
-    return LIST_PRICES.get(ref, WORST_PRICE)
+    # a dated snapshot (claude-haiku-4-5-20251001) is priced as the model it pins
+    return LIST_PRICES.get(ref) or LIST_PRICES.get(re.sub(r"-\d{8}$", "", ref), WORST_PRICE)
 
 
 HOSTED_TIMEOUT_S = 1200  # a free hosted endpoint can write at 10 tokens/s (Kimi K3 on NVIDIA); after 20 min it is stuck
@@ -383,19 +385,50 @@ class AnthropicAdapter(ProviderAdapter):
         spec["endpoint"] = ep
         return spec
 
+    MAX_PAGES = 10  # the listing is paged a hundred at a time; a thousand models is far beyond any real account
+
+    def _listing(self, conn: dict, secret: str | None) -> dict[str, dict]:
+        """Every model the key can reach, by id, across the listing's pages."""
+        base = (conn.get("endpoint") or self.DEFAULT) + "/v1/models?limit=100"
+        headers = {"x-api-key": secret or "", "anthropic-version": self.VERSION}
+        out: dict[str, dict] = {}
+        after = None
+        for _ in range(self.MAX_PAGES):
+            data = _get_json(base + (f"&after_id={urllib.parse.quote(after)}" if after else ""), headers)
+            rows = [m for m in data.get("data") or [] if isinstance(m, dict) and m.get("id")]
+            out.update((m["id"], m) for m in rows)
+            if not data.get("has_more") or not rows:
+                break
+            after = data.get("last_id") or rows[-1]["id"]
+        return out
+
+    @staticmethod
+    def _released(row: dict) -> float | None:
+        """The listing's created_at (RFC 3339) as Unix time: the provider's own release date for the model."""
+        value = str(row.get("created_at") or "")
+        try:
+            return datetime.datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp() if value else None
+        except ValueError:
+            return None
+
     def discover(self, conn: dict, secret: str | None) -> list[dict]:
         allow = _allow(conn)
-        names: dict[str, str] = {}
-        if not allow:
-            data = _get_json((conn.get("endpoint") or self.DEFAULT) + "/v1/models?limit=100",
-                             {"x-api-key": secret or "", "anthropic-version": self.VERSION})
-            names = {m["id"]: m.get("display_name") or m["id"] for m in data.get("data") or [] if m.get("id")}
+        listing = {} if allow else self._listing(conn, secret)
+        if conn.get("origin") == "environment" and not allow:
+            # as for the other hosted providers: the complete listing, so a newly released model can be measured
+            # before anything is decided about it; the examination's bounded set decides what is probed
+            conn["_listing_note"] = f"{len(listing)} model(s) discovered from the provider"
         out = []
-        for ref in allow or list(names):
+        for ref in allow or list(listing):
+            row = listing.get(ref) or {}
             pin, pout = _price(conn, ref)
-            out.append({"ref": ref, "name": names.get(ref, ref), "provider": "Anthropic", "runtime": "anthropic_api",
-                        "local": False, "price_in": pin, "price_out": pout, "modalities": ["text", "image"],
-                        "json_schema": True, "tools": True, "mcp": True})
+            facts = {"ref": ref, "name": row.get("display_name") or ref, "provider": "Anthropic",
+                     "runtime": "anthropic_api", "local": False, "price_in": pin, "price_out": pout,
+                     "modalities": ["text", "image"], "json_schema": True, "tools": True, "mcp": True,
+                     "released": self._released(row)}
+            if isinstance(row.get("max_input_tokens"), int):
+                facts["context"] = row["max_input_tokens"]
+            out.append(facts)
         return out
 
     def route(self, conn: dict, secret: str | None, entry: dict) -> dict:
@@ -404,11 +437,17 @@ class AnthropicAdapter(ProviderAdapter):
                         **({"CYNQRA_ANTHROPIC_URL": ep + "/v1/messages"} if ep else {}), **_settings(conn)}, conn)
 
     def environment_specs(self, primary: dict | None) -> list[dict]:
+        """The key's models, discovered from the provider's listing; only a model the environment names
+        (CYNQRA_MODEL, when Anthropic is the primary provider) narrows it to that one. The endpoint is the one the
+        environment's calls go to (CYNQRA_ANTHROPIC_URL), so what is listed is what is called."""
         if not os.environ.get("ANTHROPIC_API_KEY"):
             return []
-        label = primary["label"] if primary and primary["kind"] == "anthropic" else "claude-sonnet-5"
-        return [{"type": self.type, "name": "Anthropic (environment)", "endpoint": "",
-                 "auth": {"method": "env", "env_var": "ANTHROPIC_API_KEY"}, "models": [label], **(_env_price())}]
+        named = primary["label"] if primary and primary["kind"] == "anthropic" and os.environ.get("CYNQRA_MODEL") \
+            else None
+        url = (os.environ.get("CYNQRA_ANTHROPIC_URL") or "").strip().rstrip("/")
+        return [{"type": self.type, "name": "Anthropic (environment)", "endpoint": url.removesuffix("/v1/messages"),
+                 "auth": {"method": "env", "env_var": "ANTHROPIC_API_KEY"}, "models": [named] if named else [],
+                 **(_env_price())}]
 
 
 class LocalInferenceAdapter(ProviderAdapter):

@@ -125,6 +125,10 @@ class IntelligenceSupply:
         out = []
         for spec in self.adapters.environment_specs():
             existing = self.connections.find(origin="environment", name=spec["name"])
+            if existing and list(existing.get("models") or []) != [m for m in spec.get("models") or [] if m]:
+                # the environment is what an environment connection offers: a model it names, or no longer names
+                # (every model the key reaches is then discovered), replaces what an earlier start saved
+                self.connections.update(existing["id"], {"models": [m for m in spec.get("models") or [] if m]})
             conn_id = existing["id"] if existing else self.connections.create(spec, origin="environment")["id"]
             try:
                 out += self.discover(conn_id)
