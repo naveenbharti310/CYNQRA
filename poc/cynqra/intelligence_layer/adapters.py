@@ -223,7 +223,12 @@ class OpenAICompatibleAdapter(ProviderAdapter):
     def _host(conn: dict) -> str:
         return urllib.parse.urlparse(conn.get("endpoint") or OpenAICompatibleAdapter.DEFAULT).hostname or ""
 
-    FLAVORS = {"router.huggingface.co": "hf", "api.openai.com": "openai"}
+    FLAVORS = {
+        "router.huggingface.co": "hf",
+        "api.openai.com": "openai",
+        "generativelanguage.googleapis.com": "gemini",
+        "integrate.api.nvidia.com": "nvidia",
+    }
 
     @classmethod
     def flavor(cls, conn: dict) -> str:
@@ -322,6 +327,10 @@ class OpenAICompatibleAdapter(ProviderAdapter):
             r.update({"kind": "openai", "OPENAI_API_KEY": secret,
                       **({"CYNQRA_OPENAI_URL": ep + "/chat/completions"} if ep else {})})
             _hosted(r, conn)
+        elif flavor in ("gemini", "nvidia"):
+            r.update({"kind": "local", "CYNQRA_LOCAL_BASE_URL": ep + "/chat/completions",
+                      "CYNQRA_LOCAL_API_KEY": secret})
+            _hosted(r, conn)
         else:
             r.update({"kind": "local", "CYNQRA_LOCAL_BASE_URL": ep, "CYNQRA_LOCAL_API_KEY": secret})
         return r
@@ -337,6 +346,16 @@ class OpenAICompatibleAdapter(ProviderAdapter):
             label = primary["label"] if primary and primary["kind"] == "openai" else "gpt-4o-mini"
             out.append({"type": self.type, "name": "OpenAI (environment)", "endpoint": "",
                         "auth": {"method": "env", "env_var": "OPENAI_API_KEY"}, "models": [label], **(_env_price())})
+        if os.environ.get("GEMINI_API_KEY"):
+            out.append({"type": self.type, "name": "Google Gemini (environment)",
+                        "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai",
+                        "auth": {"method": "env", "env_var": "GEMINI_API_KEY"}, "models": [],
+                        "metadata": {"flavor": "gemini"}, **(_env_price())})
+        if os.environ.get("NVIDIA_API_KEY"):
+            out.append({"type": self.type, "name": "NVIDIA (environment)",
+                        "endpoint": "https://integrate.api.nvidia.com/v1",
+                        "auth": {"method": "env", "env_var": "NVIDIA_API_KEY"}, "models": [],
+                        "metadata": {"flavor": "nvidia"}, **(_env_price())})
         return out
 
 
