@@ -35,10 +35,11 @@ from .connections import Connections, ConnectionsError
 from .contracts import SupplyError
 from .credentials import CredentialError, Credentials
 from .gateway import IntelligenceGateway, VersionChanged
+from .qualification import QualificationEngine
 from .registry import IntelligenceRegistry, RegistryError
 
 __all__ = ["IntelligenceSupply", "SupplyError", "CredentialError", "ConnectionsError", "RegistryError",
-           "VersionChanged", "adapter_types"]
+           "VersionChanged", "QualificationEngine", "adapter_types"]
 
 
 class IntelligenceSupply:
@@ -54,6 +55,7 @@ class IntelligenceSupply:
         self.connections = Connections(self.store, self.credentials, self.adapters)
         self.registry = IntelligenceRegistry(self.store, reachable=self._reachable)
         self.gateway = IntelligenceGateway(self.registry, self.connections, self.credentials, self.adapters)
+        self.qualification = QualificationEngine(self)
 
     # --- the intelligence supply flow: connect, discover, register -------------------------------------------
     def connect(self, spec: dict, origin: str = "founder") -> dict:
@@ -131,6 +133,12 @@ class IntelligenceSupply:
             except SupplyError:
                 continue  # its status says why; another source may still serve
         return out
+
+    def qualify(self, model_id: str, *, deep: bool = False, log=lambda _msg: None) -> dict:
+        return self.qualification.qualify(model_id, deep=deep, log=log)
+
+    def qualification_history(self, model_id: str | None = None) -> list[dict]:
+        return self.qualification.history(model_id)
 
     def remove_connection(self, connection_id: str) -> None:
         for m in self.registry.models():
