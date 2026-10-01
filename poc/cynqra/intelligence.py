@@ -673,7 +673,12 @@ class ModelSource:
                   f"{repo}Files handed to you:\n{files}\n{extra}\n"
                   "If a fact you need is missing and you would have to guess it, raise a Blocker instead; "
                   f"needs_from names who can answer it: {', '.join(who)}.\n"
-                  + (files_layout(who[0] if who else "") if delivers_files else f"Return one JSON object: {shape}"))
+                  + ("For build work you may inspect the workspace and use governed tools before producing files. "
+                     "To request tools, return only JSON in this shape: "
+                     '{"result":"tool_use","tool_calls":[{"action":"read_artifact","target":"path"},'
+                     '{"action":"search_files","target":"text"},{"action":"run_command","target":"[\\\"python\\\",\\\"-m\\\",\\\"unittest\\\"]"}]}. '
+                     "Use only actions the platform exposes. Tool results will be returned to you; then continue the task. "
+                     + files_layout(who[0] if who else "") if delivers_files else f"Return one JSON object: {shape}"))
         return self._call(prompt, max_tokens=8000 if kind in roles.BUILD_TYPES else 3000, files=delivers_files,
                           schema=None if delivers_files else SCHEMAS["proposal"], worker=worker,
                           needs_from=who[0] if who else "")
