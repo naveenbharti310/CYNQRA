@@ -55,7 +55,9 @@ class _Run:
         return self.model_id
 
     def invoke(self, worker: str, request: dict) -> dict:
-        return self.supply.gateway.invoke(self.model_id, request)
+        mode = "qualification" if self.source == "qualification_cheap" else (
+            "regression" if self.source == "regression" else "qualification")
+        return self.supply.gateway.invoke(self.model_id, request, mode=mode)
 
     def outcome(self, kind, verified, usage, attempt, failure=""):
         c = self.reg.record_call(self.model_id, role=self.source, purpose=kind, task_kind=kind, usage=usage,
