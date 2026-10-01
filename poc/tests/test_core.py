@@ -70,6 +70,28 @@ class EventStoreTests(unittest.TestCase):  # A11
         self._append(correlation_id="t_02")
         self.assertEqual(len(self.s.events(correlation_id="t_02")), 1)
 
+    def test_event_chain_is_verifiable_and_uses_full_sha256(self):
+        a = self._append()
+        b = self._append()
+        self.assertEqual(len(a["event_hash"]), 64)
+        self.assertEqual(b["prev_event_hash"], a["event_hash"])
+        self.assertTrue(self.s.verify_event_chain())
+
+    def test_event_append_is_idempotent_when_key_reused(self):
+        a = self._append(idempotency_key="same-command")
+        b = self._append(idempotency_key="same-command", payload={"x": 999})
+        self.assertEqual(a["event_id"], b["event_id"])
+        self.assertEqual(self.s.count_events(), 1)
+
+    def test_task_lease_allows_one_live_holder(self):
+        first = self.s.claim_task("t_01", "w_eng_a", lease_seconds=60)
+        second = self.s.claim_task("t_01", "w_eng_b", lease_seconds=60)
+        self.assertTrue(first)
+        self.assertIsNone(second)
+        self.assertEqual(self.s.task_lease("t_01")["holder_id"], "w_eng_a")
+        self.assertTrue(self.s.release_task("t_01", first))
+        self.assertTrue(self.s.claim_task("t_01", "w_eng_b", lease_seconds=60))
+
 
 class PolicyTests(unittest.TestCase):  # A13
     def ev(self, role, action, **kw):

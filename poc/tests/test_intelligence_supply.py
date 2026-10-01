@@ -56,6 +56,11 @@ class SupplyBase(unittest.TestCase):
                                           "endpoint": self.srv.urls[1] + "/v1", "auth": {"method": "none"},
                                           "models": ["Local B"], "machine_usd_per_hour": 0.1})
 
+        # Test doubles stand in for already-qualified providers. Production discovery remains unverified until
+        # the real qualification/probe completes.
+        for entry in self.supply.registry.models():
+            self.reg.set_regression(entry["id"], True, "test fixture: fake provider qualification")
+
     def tearDown(self):
         self.srv.close()
         self.anthropic.close()
@@ -210,6 +215,18 @@ class WorkforceOnTheSupplyTests(SupplyBase):
         ev = [x for x in e.store.events() if x["event_type"] == "worker.intelligence_bound"
               and x["aggregate_id"] == "w_eng_a"][-1]
         self.assertEqual((ev["payload"]["previous"], ev["payload"]["intelligence_id"]), (first, better))
+        e.close()
+
+    def test_unverified_version_is_not_assignable(self):
+        e = self.engine()
+        mid = e.model_of("w_eng_a")
+        entry = self.reg.get(mid)
+        self.reg.register({"ref": entry["ref"], "name": entry["name"], "version": "unqualified-2"},
+                           connection_id=entry["connection_id"])
+        fresh = self.reg.get(mid)
+        ok, why = self.reg.availability(fresh)
+        self.assertFalse(ok)
+        self.assertIn("not qualified", why)
         e.close()
 
     def test_a_new_version_is_regression_checked_before_the_worker_continues(self):

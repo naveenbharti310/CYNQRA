@@ -161,8 +161,11 @@ class IntelligenceRegistry:
         """Can a worker bound to this intelligence make a call now? Its own state, then its connection's."""
         if m.get("status") == "retired":
             return False, m.get("status_note") or "retired"
-        if (m.get("regression") or {}).get("status") == "failed":
+        regression = (m.get("regression") or {}).get("status")
+        if regression == "failed":
             return False, "failed its regression check"
+        if regression == "unverified":
+            return False, "not qualified for assignment yet"
         h = m.get("health") or {}
         if h.get("down_until", 0) > time.time():
             return False, f"down after {h.get('errors')} failed calls in a row"

@@ -142,9 +142,11 @@ def validate_plan(plan: dict, workers: list[dict], requirement_ids: list[str] | 
         own = [t for t in tasks if t["milestone_id"] == m["id"]]
         m["task_ids"] = [t["id"] for t in own]
         m["due_day"] = max([m["due_day"]] + [t["deadline_day"] for t in own])
+    uncovered = [r for r in (requirement_ids or []) if not any(r in t["requirement_ids"] for t in tasks)]
+    if uncovered:
+        raise IntelligenceError("plan leaves requirements uncovered: " + ", ".join(uncovered))
     return {"workstreams": ws, "milestones": [m for m in ms if m["task_ids"]], "tasks": tasks,
-            "uncovered_requirements": [r for r in (requirement_ids or [])
-                                       if not any(r in t["requirement_ids"] for t in tasks)]}
+            "uncovered_requirements": []}
 
 
 def assumption_tests(tasks: list[dict], milestones: list[dict], assumptions: list[dict]) -> list[dict]:
@@ -166,12 +168,19 @@ def assumption_tests(tasks: list[dict], milestones: list[dict], assumptions: lis
     return out
 
 
+DEFAULT_DURATION_MINUTES = {
+    "code": 45, "document": 30, "research": 30, "design": 45, "data": 45, "backtest": 45,
+    "review_merge": 20, "deploy": 20, "decision": 15, "accept_delivery": 10,
+}
+
 def critical_path(tasks: list[dict]) -> list[str]:
-    longest: dict[str, list[str]] = {}
-    for t in tasks:  # dependencies only name earlier tasks
-        best = max((longest[d] for d in t["dependencies"] if d in longest), key=len, default=[])
-        longest[t["id"]] = best + [t["id"]]
-    return max(longest.values(), key=len, default=[])
+    """Critical path by estimated elapsed minutes, not task count."""
+    best: dict[str, tuple[float, list[str]]] = {}
+    for t in tasks:
+        own = float(t.get("estimated_minutes") or DEFAULT_DURATION_MINUTES.get(t.get("kind"), 30))
+        dep = max((best[d] for d in t["dependencies"] if d in best), key=lambda x: x[0], default=(0.0, []))
+        best[t["id"]] = (dep[0] + own, dep[1] + [t["id"]])
+    return max(best.values(), key=lambda x: x[0], default=(0.0, []))[1]
 
 
 def coordination(owner: dict, workers: list[dict]) -> dict:
