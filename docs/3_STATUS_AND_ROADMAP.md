@@ -102,3 +102,10 @@ Hugging Face PRO. Nothing in it is scripted: it is the test of whether real AI m
   for where each input comes from; whether an assumption is realistic is for the founder and a professional to judge.
 - If the founder chooses the lean team in live mode and the plan for it cannot be made, the run stops like any failed
   planning step; going back to the recommended team means starting a new run.
+
+
+## Current phase-gate update: 1 October 2026
+
+The phased architecture contract is now in `docs/6_PHASED_ARCHITECTURE.md`. The repository now includes a scoped worker runtime, governed workspace read/search/write/delete actions, governed command execution, package installation, timeout process-group cleanup, a worker tool-request loop, and a reproducible twenty-objective examination harness.
+
+These changes do not convert simulated tests into real-model evidence. The repository's automated test runner must pass after the changes, and the real-model examination must execute in the configured Actions environment before the corresponding empirical phase can be called proven. The current Actions connector exposes no workflow runs for this repository, so no new run result is claimed here.
