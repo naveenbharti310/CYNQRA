@@ -9,6 +9,7 @@ place this runtime inside an OS/container sandbox before untrusted generated cod
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 from pathlib import Path
 from typing import Iterable
@@ -119,12 +120,24 @@ def run(root: Path, argv: list[str], *, timeout: int = DEFAULT_TIMEOUT,
     env["HOME"] = str(isolated_home)
     env["XDG_CONFIG_HOME"] = str(isolated_home / ".config")
     env["XDG_CACHE_HOME"] = str(isolated_home / ".cache")
+    kwargs = {"cwd": root, "env": env, "text": True, "stdout": subprocess.PIPE, "stderr": subprocess.PIPE}
+    if os.name == "nt":
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    else:
+        kwargs["start_new_session"] = True
+    proc = subprocess.Popen(command, **kwargs)
     try:
-        proc = subprocess.run(command, cwd=root, env=env, text=True, capture_output=True,
-                              timeout=timeout, check=False)
+        stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired as exc:
+        try:
+            if os.name == "nt":
+                proc.terminate()
+            else:
+                os.killpg(proc.pid, signal.SIGKILL)
+        finally:
+            stdout, stderr = proc.communicate()
         raise WorkerRuntimeError(f"command timed out after {timeout}s") from exc
-    stdout = (proc.stdout or "")[-MAX_OUTPUT:]
-    stderr = (proc.stderr or "")[-MAX_OUTPUT:]
+    stdout = (stdout or "")[-MAX_OUTPUT:]
+    stderr = (stderr or "")[-MAX_OUTPUT:]
     return {"argv": command, "returncode": proc.returncode, "passed": proc.returncode == 0,
             "stdout": stdout, "stderr": stderr}
