@@ -82,7 +82,7 @@ def fits(m: dict, workload: dict | None = None) -> tuple[bool, str]:
     if m.get("context") and m["context"] < MIN_CONTEXT:
         return False, f"context {m['context']} tokens, the work needs {MIN_CONTEXT}"
     required = {str(x).strip().lower() for x in ((workload or {}).get("required_capabilities") or []) if str(x).strip()}
-    if required:
+    if required and m.get("capabilities"):
         have = {str(x).strip().lower() for x in (m.get("capabilities") or [])}
         aliases = {
             "coding": {"coding", "code", "programming"},
