@@ -69,6 +69,10 @@ class WorkforceTests(unittest.TestCase):
                                        "models": [name], "price_per_m": [price, price * 4]})
             self.conns.append(out["connection"]["id"])
 
+        # Test doubles represent already-qualified provider entries. Production entries remain unverified until calibration.
+        for entry in self.reg.models():
+            self.reg.set_regression(entry["id"], True, "test fixture: fake provider qualification")
+
     def tearDown(self):
         self.srv.close()
         self.supply.close()
