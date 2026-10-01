@@ -93,7 +93,8 @@ class IntelligenceRegistry:
             m["context"] = int(m["context"] or 0)
             conn = self.store.get("connection", connection_id) or {"id": connection_id}
             m.update(ensure_identity(self.store, m, conn))
-            same = old is not None and served_version(old) == served_version(m)
+            same = (old is not None and served_version(old) == served_version(m)
+                    and old.get("execution_profile_id") == m.get("execution_profile_id"))
             regression = (old or {}).get("regression") if same and (old or {}).get("regression") else {
                 "status": "unverified", "version": served_version(m), "at": now(),
                 "previous_version": served_version(old) if old and not same else None}
