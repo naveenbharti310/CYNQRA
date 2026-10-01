@@ -25,7 +25,7 @@ ROLES        for each role:
 from __future__ import annotations
 
 E, P = "execute", "propose"
-BASE = {"write_file": E, "read_artifact": E, "run_tests": E, "send_protocol": E}
+BASE = {"write_file": E, "read_artifact": E, "run_tests": E, "send_protocol": E, "search_files": E}
 
 AREAS = ["product", "functional", "non_functional", "ai_ml", "data", "design", "security", "qa", "devops",
          "deployment", "business", "market", "finance", "legal", "domain"]
