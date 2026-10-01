@@ -245,9 +245,15 @@ def outcome(run, t: dict, verified: bool, failure: str = "") -> None:
     """One verification of one attempt: counted in the registry for the model that did it, on its kind of work."""
     wid = t["owner_worker_id"]
     meter = run.store.get("meter", t["id"]) or {"usd": 0.0, "seconds": 0.0, "tokens": 0}
-    run.registry.record_outcome(run.model_of(wid), role=run.worker(wid)["role"], task_kind=t["kind"], task_id=t["id"],
-                                run_id=run.cid, attempt=t["attempts"] + 1, verified=verified, usd=meter["usd"],
-                                seconds=meter["seconds"], tokens=meter["tokens"], failure=failure)
+    work_calls = [x for x in run.store.all("call")
+                   if x.get("task_id") == t["id"] and x.get("worker") == wid and x.get("purpose") == "work"]
+    last_call = work_calls[-1] if work_calls else {}
+    run.registry.record_outcome(
+        run.model_of(wid), role=run.worker(wid)["role"], task_kind=t["kind"], task_id=t["id"],
+        run_id=run.cid, attempt=t["attempts"] + 1, verified=verified, usd=meter["usd"],
+        seconds=meter["seconds"], tokens=meter["tokens"], failure=failure,
+        execution_profile_id=last_call.get("execution_profile_id"),
+        binding_epoch_id=last_call.get("binding_epoch_id"))
     run.store.put("meter", t["id"], {"usd": 0.0, "seconds": 0.0, "tokens": 0})
 
 
