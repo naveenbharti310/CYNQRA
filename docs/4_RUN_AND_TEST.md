@@ -64,7 +64,7 @@ cd poc
 python3 -m unittest discover -s tests -t tests
 ```
 
-About 8 minutes, 321 tests. **What they prove:** the machinery works end to end, including all three demos and the
+The suite size changes as the implementation evolves; use the test runner output as the current count. **What they prove:** the machinery works end to end, including all three demos and the
 failure paths. **What they do not prove:** the quality of real AI output; that is what the real-model runs are for.
 The browser test runs only if Node and Playwright are installed; otherwise it is skipped and says so.
 `poc/TEST_REPORT.md` describes every test module.
@@ -87,15 +87,15 @@ Details in `desktop/README.md`. The version number is in `desktop/VERSION`.
 
 | Workflow | Runs when | What it proves |
 | --- | --- | --- |
-| `cynqra-desktop` | Every push to `cynqra`: tests only. Add `[build]` to the commit message, or use **Run workflow**, to build and install on all three systems. `[e2e]` adds a small real-model project; `[release]` publishes the installers. | The tests pass; the app builds and installs everywhere |
-| `cynqra-workforce` | `[workforce]` in the commit message, or **Run workflow** (choose `local`, `hf` or `both`) | **The Bluedip idea, run by real AI models**, nothing scripted: the test of whether real models can do what the demo shows. `hf` uses the newest Hugging Face models; `local` uses three open models on a machine and is slow for a full company. |
-| `cynqra-model-race` | `[race]` | Which laptop model is fastest without losing quality |
-| `cynqra-model-scan` | When its file changes | Which open models Hugging Face offers |
-| `cynqra-spikes`, `cynqra-hf` | `[spikes]`, `[hf]` | Earlier experiments, kept for reference (code in `archive/02_harness`) |
+| `cynqra-desktop` | Pushes to `main`: tests only. Add `[build]` to the commit message, or use **Run workflow**, to build and install on all three systems. `[e2e]` adds a small real-model project; `[release]` publishes the installers. | The tests pass; the app builds and installs everywhere |
+| `cynqra-workforce` | `[workforce]` in a `main` commit message, or **Run workflow** (choose `local`, `hf` or `both`) | **The Bluedip idea, run by real AI models**, nothing scripted: the test of whether real models can do what the demo shows. `hf` uses the newest Hugging Face models; `local` uses three open models on a machine and is slow for a full company. |
+| `cynqra-model-race` | `[race]` in a `main` commit message | Which laptop model is fastest without losing quality |
+| `cynqra-model-scan` | When its workflow file changes on `main` | Which open models Hugging Face offers |
+| `cynqra-spikes`, `cynqra-hf` | `[spikes]`, `[hf]` in a `main` commit message | Earlier experiments, kept for reference (code in `archive/02_harness`) |
 
 **Secret:** `HF_TOKEN` (Settings → Secrets and variables → Actions) lets the Hugging Face runs call models. It needs
 only the "Make calls to Inference Providers" permission.
 
 ## Branches
 
-`main` and `cynqra` hold the same code. Work is pushed to both; the workflows run on `cynqra`.
+`main` is the source-of-truth branch. Historical feature branches may remain for audit context, but active workflows run from `main`.
