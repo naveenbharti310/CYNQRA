@@ -56,6 +56,11 @@ class SupplyBase(unittest.TestCase):
                                           "endpoint": self.srv.urls[1] + "/v1", "auth": {"method": "none"},
                                           "models": ["Local B"], "machine_usd_per_hour": 0.1})
 
+        # Test doubles stand in for already-qualified providers. Production discovery remains unverified until
+        # the real qualification/probe completes.
+        for entry in self.supply.registry.models():
+            self.reg.set_regression(entry["id"], True, "test fixture: fake provider qualification")
+
     def tearDown(self):
         self.srv.close()
         self.anthropic.close()
