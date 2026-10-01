@@ -37,7 +37,9 @@ def bind(run, worker_id: str, entry: dict, *, reason: str, by: str, candidates: 
          task_id: str | None = None) -> dict:
     """Bind a worker to an intelligence (a registry entry), pinning its current version."""
     old = current(run.store, worker_id)
-    if old and old["intelligence_id"] == entry["id"] and old.get("version") == served_version(entry):
+    if (old and old["intelligence_id"] == entry["id"]
+            and old.get("version") == served_version(entry)
+            and old.get("execution_profile_id") == entry.get("execution_profile_id")):
         return old
     history = list((old or {}).get("history") or [])
     epoch = int((old or {}).get("epoch") or 0) + 1
