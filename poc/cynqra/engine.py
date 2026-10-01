@@ -156,6 +156,11 @@ class Engine:
             sup = self._shared or self._local_supply()
             if not sup.registry.available():
                 sup.connect_environment()
+            if not sup.registry.available():
+                try:
+                    sup.bootstrap_qualification(max_models=3)
+                except (SupplyError, IntelligenceError):
+                    pass
             if strict and not sup.registry.available():
                 raise EngineError("live mode needs intelligence: connect a provider (OpenAI-compatible, Anthropic or "
                                   "a model on this machine), or name one in the environment")
