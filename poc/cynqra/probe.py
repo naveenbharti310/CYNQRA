@@ -130,6 +130,17 @@ def _speed(u: dict) -> str:
             + (f"; reads {u['read_tps']} tokens/s, writes {u['write_tps']} tokens/s" if u.get("write_tps") else ""))
 
 
+def _provider_failure_kind(message: str) -> str:
+    """Classify transport/provider failures without treating them as evidence of poor intelligence."""
+    text = str(message or "").lower()
+    transient = (
+        "http 408", "http 409", "http 425", "http 429",
+        "http 500", "http 502", "http 503", "http 504",
+        "timed out", "timeout", "network error", "remote end closed",
+        "temporarily unavailable", "high demand", "service unavailable",
+    )
+    return "provider_unavailable" if any(x in text for x in transient) else "model_error"
+
 def probe(supply, model_id: str, log=print) -> dict:
     """Run both probes on one registered model and record every round as an outcome. The result also settles the
     model's regression gate for its current version."""
@@ -138,12 +149,14 @@ def probe(supply, model_id: str, log=print) -> dict:
     if m["runtime"] == "scripted":
         raise ValueError("the scripted demo is not a model; there is nothing to probe")
     run = _Run(supply, model_id, "probe")
-    result = {"model_id": model_id, "model": m["name"], "objective": None, "code_rounds": [], "passed": False}
+    result = {"model_id": model_id, "model": m["name"], "objective": None, "code_rounds": [], "passed": False,
+              "qualification_status": "unverified"}
     say = lambda s: log(f"{m['name']}:{s}")  # noqa: E731
     try:
         ok_obj, result["objective"] = run.objective(say)
         ok_code, result["code_rounds"] = run.code(result["objective"].pop("fields"), say)
-        result.update(passed=ok_obj and ok_code, objective_passed=ok_obj, code_passed=ok_code)
+        result.update(passed=ok_obj and ok_code, objective_passed=ok_obj, code_passed=ok_code,
+                      qualification_status="passed" if ok_obj and ok_code else "failed")
         reg.set_regression(model_id, ok_obj and ok_code,
                            f"probe: objective {'filled' if ok_obj else 'incomplete'}, code "
                            f"{'passed' if ok_code else 'failed'} in {len(result['code_rounds'])} round(s)")
@@ -151,6 +164,8 @@ def probe(supply, model_id: str, log=print) -> dict:
         reg.record_call(model_id, role="probe", purpose="error", task_kind="probe", usage=exc.usage, run_id=run.run_id,
                         error=str(exc))
         result["error"] = str(exc)
+        result["error_kind"] = _provider_failure_kind(str(exc))
+        result["qualification_status"] = "inconclusive_provider_error" if result["error_kind"] == "provider_unavailable" else "failed"
         log(f"  {m['name']}: model error: {exc}")
     result["performance"] = reg.profile(model_id)
     return result
