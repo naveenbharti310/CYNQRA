@@ -34,7 +34,7 @@ class HostedEnvironmentTests(unittest.TestCase):
             self.assertEqual(adapter.flavor(conn), flavor)
             route = adapter.route(conn, "not-a-real-secret", {"ref": "model-x"})
             self.assertEqual(route["kind"], "local")
-            self.assertEqual(route["CYNQRA_LOCAL_BASE_URL"], endpoint + "/chat/completions")
+            self.assertEqual(route["CYNQRA_LOCAL_BASE_URL"], endpoint)
             self.assertEqual(route["CYNQRA_LOCAL_API_KEY"], "not-a-real-secret")
 
 
