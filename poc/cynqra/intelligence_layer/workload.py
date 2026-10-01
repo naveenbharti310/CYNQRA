@@ -13,7 +13,7 @@ _REQUIRED = {
     "decision": ("reasoning",),
     "code": ("coding",),
     "forecast": ("coding", "reasoning"),
-    "review_merge": ("reasoning", "code_generation"),
+    "review_merge": ("reasoning", "coding"),
     "deploy": ("reasoning",),
     "assign": ("structured_output", "reasoning"),
     "review": ("reasoning",),
