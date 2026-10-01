@@ -199,9 +199,9 @@ def enrich(plan: dict, workers: list[dict]) -> dict:
     for t in plan["tasks"]:
         owner = by_id[t["owner_worker_id"]]
         t.update({"risk_tier": roles.risk(t["kind"]), "verification_gate": GATES[t["kind"]],
-                  "workload_contract": compile_contract(t), "tools": TOOLS[t["kind"]],
-                  **coordination(owner, workers), "escalates_to": "founder",
+                  "tools": TOOLS[t["kind"]], **coordination(owner, workers), "escalates_to": "founder",
                   "authority_policy_id": f"{policy.POLICY_VERSION}:{owner['role']}"})
+        t["workload_contract"] = compile_contract(t)
     leads = {w["id"]: [x["id"] for x in workers if x.get("reports_to") == w["id"]] for w in workers
              if w.get("tier") == "cofounder"}
     plan.update({"critical_path": critical_path(plan["tasks"]), "escalation_conditions": list(ESCALATION_CONDITIONS),
