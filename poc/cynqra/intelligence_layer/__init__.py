@@ -113,7 +113,14 @@ class IntelligenceSupply:
         active = {m["ref"] for m in self.registry.models() if m["connection_id"] == connection_id}
         rows = [{"ref": f["ref"], "name": f.get("display_name") or f.get("name") or f["ref"], "context": f.get("context"),
                  "publisher_name": f.get("publisher_name") or "", "type": f.get("type") or "",
-                 "capabilities": f.get("capabilities") or [], "description": f.get("description") or "",
+                 "access_provider": f.get("access_provider") or "", "capabilities": f.get("capabilities") or [],
+                 "qualification_status": next(
+                     ((m.get("qualification") or {}).get("status") for m in self.registry.models()
+                      if m["connection_id"] == connection_id and m["ref"] == f["ref"]), None),
+                 "execution_profile_id": next(
+                     (m.get("execution_profile_id") for m in self.registry.models()
+                      if m["connection_id"] == connection_id and m["ref"] == f["ref"]), None),
+                 "description": f.get("description") or "",
                  "released": f.get("released"), "current": f["ref"] in fresh, "offered": f["ref"] in active}
                 for f in found]
         # newest first; models with no known date last
