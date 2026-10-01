@@ -61,3 +61,11 @@ founder's explicit agreement, and record the change here.
 | E5 | **Cynqra's local server answers only Cynqra's own page and tools:** requests must be addressed to this computer by name, a browser request must come from Cynqra's page, and a command must be JSON. | Any website open in the same browser could otherwise send it commands, for example to send a key from the environment to an address of its choosing. |
 | E6 | **Cynqra checks the type of every field in an AI's answer before using it.** A field that should be text but arrives as a number or an object is turned into text; a list that arrives as anything else is treated as empty; the platform then checks what it needs as usual. A test feeds the demos' answers garbled at random and requires every run to end cleanly. | One unexpected answer from a model would otherwise stop the run over and over, and a live run would stall with nobody told why. |
 | E7 | **Keys and the code the team writes are handled as if someone were trying to steal or misuse them.** A key travels only over https (plain http only to this computer), never follows a redirect, and is removed from anything written to the database; Cynqra's pages cannot be framed or embedded by another site; a provider's address must be a web address; stopping the team's code stops everything it started. | Each was found possible in the security audit of 28 September 2026 and is now covered by a test. |
+
+
+## Current implementation additions: 1 October 2026
+
+| # | Decision | Why |
+| --- | --- | --- |
+| I8 | Workers may request governed tools through the execution gateway. Tool requests never bypass identity, policy, budget or audit. | The worker must be able to inspect and change a real codebase rather than only return a prepared bundle of files. |
+| E8 | The worker runtime is a capability boundary, not a security sandbox. Production execution of untrusted generated code requires an OS/container sandbox with filesystem, network, process and resource isolation. | Process-level allowlists and environment isolation reduce exposure but cannot provide the security guarantees of a real sandbox on their own. |
