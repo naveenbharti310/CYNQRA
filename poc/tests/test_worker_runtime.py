@@ -36,7 +36,7 @@ class WorkerRuntimeTests(unittest.TestCase):
         old = os.environ.get("CYNQRA_TEST_SECRET")
         os.environ["CYNQRA_TEST_SECRET"] = "should-not-pass"
         try:
-            result = run(self.root, ["python", "-c", "import os; raise SystemExit(1 if 'CYNQRA_TEST_SECRET' in os.environ else 0)"])
+            result = run(self.root, ["python", "-c", "import os; print(os.environ.get('HOME','')); raise SystemExit(1 if 'CYNQRA_TEST_SECRET' in os.environ else 0)"])
             self.assertTrue(result["passed"])
             home = result["stdout"] if result.get("stdout") else ""
             self.assertNotIn(str(Path.home()), home)
