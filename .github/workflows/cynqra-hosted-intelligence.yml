@@ -1,0 +1,48 @@
+name: cynqra-hosted-intelligence
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: Hosted provider to examine
+        required: true
+        type: choice
+        options: [all, google, nvidia]
+        default: all
+      max_models:
+        description: Maximum number of current candidates to probe
+        required: true
+        default: "4"
+
+permissions:
+  contents: read
+
+jobs:
+  examine:
+    name: Discover and measure hosted intelligence
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check provider credentials
+        run: |
+          if [ -z "$GEMINI_API_KEY" ] && [ -z "$NVIDIA_API_KEY" ]; then
+            echo "Add GEMINI_API_KEY and/or NVIDIA_API_KEY in repository Actions secrets before running this workflow."
+            exit 1
+          fi
+      - name: Discover and examine candidates
+        run: |
+          python3 poc/run_hosted_examination.py \
+            --provider "${{ inputs.provider }}" \
+            --max-models "${{ inputs.max_models }}" \
+            --data-root "$RUNNER_TEMP/cynqra-hosted-examination"
+      - name: Publish examination evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cynqra-hosted-intelligence
+          path: ${{ runner.temp }}/cynqra-hosted-examination
