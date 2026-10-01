@@ -1,6 +1,6 @@
 # 3. Status and roadmap
 
-Last updated: 30 September 2026.
+Last updated: 1 October 2026.
 
 **What** this covers: what works today, what is proven, and what comes next. **Why** it matters: the vision is only
 as good as the proof behind it. **How** to read it: the status table first, then what real AI models have done so
@@ -47,6 +47,7 @@ prepared script, so they do not prove the quality of real AI output. `poc/TEST_R
 | 27 Sep | Same, two Linux machines | Ran out of time (340 min) while reworking the web app. |
 | 27 Sep | Current design, three open models on a CPU | Team proposed and approved; stopped by a bug in the test script (fixed). |
 | 27 Sep | Hugging Face: GLM-4.7, Kimi K2.5, Qwen3.5 | Probes: GLM and Kimi wrote working code first time; Qwen failed. Then the account's free credit ran out. |
+| 1 Oct | Hosted examination, Google Gemini + NVIDIA, latest main | 73 active hosted models discovered. Four were selected for bounded calibration. Kimi K3 passed the current objective and code probes. Gemini 3.7 and Gemini 3.6 encountered provider HTTP 503/high-demand conditions; GLM-5.3-Flash encountered a provider connection failure. These provider failures were recorded as inconclusive, not intelligence failures. Gemini 3.8 Flash was discovered but not selected in this four-model budget, so its intelligence remains untested. |
 
 **Next real run:** the Bluedip idea, on the newest online models through Hugging Face, once the founder has
 Hugging Face PRO. Nothing in it is scripted: it is the test of whether real AI models can do what the demo shows.
@@ -55,17 +56,18 @@ Hugging Face PRO. Nothing in it is scripted: it is the test of whether real AI m
 
 | # | What | Why this, and why now |
 | --- | --- | --- |
-| 1 | **The Bluedip run on real models**, then **the exam:** 20 real ideas, run end to end, measuring CEO decisions, time, cost and quality, against a single AI | Proof before more features. Every later change is measured against it. |
-| 2 | **Founder conversations:** show 10 to 20 target founders the Bluedip result; ask if they would pay, and how much | Confirms demand, price and the first buyer. |
-| 3 | **Speed:** online models by default; smaller tasks; faster rescue when a task fails twice | Real runs took hours. |
-| 4 | **Tools for the experts:** web research with sources; a calculator for the CFO; real tool use for building, or hand building to proven coding agents | Experts need current facts; a model's memory goes out of date. |
-| 5 | **Checks of substance:** facts against their sources, documents consistent with each other (the financial model's numbers are already recomputed) | Trust is the product. |
-| 6 | **Kickoff agreements:** before parallel work starts, the team agrees on how the parts connect and the key facts | Parallel work must fit together. |
-| 7 | **Company memory:** a shared knowledge base; a CEO change updates every affected document | The team must stay consistent over time. |
-| 8 | **Field playbooks:** what companies in a field usually need, as a starting point the idea adjusts | Better teams, faster. |
-| 9 | **CEO experience:** plain decision cards, grouped decisions, phone notifications | Less of the founder's time; a pitch that shows the product. |
-| 10 | **Hosted web product:** accounts, separate data per customer, secrets manager, AI included in the price, billing | To sell it. |
-| 11 | **Security:** AI-written code run in a sandbox; content from the web or colleagues treated as data to read, with no power to give orders | Before any launch. |
+| 1 | **Objective-specific intelligence selection:** turn the current measured router into an objective-aware control loop, then prove it on Bluedip and unrelated real objectives. CYNQRA must compare available intelligence against the actual work and acceptance criteria, not merely qualify a small generic candidate set. | This is the central product promise: the founder gives the objective and CYNQRA finds, coordinates, verifies and continuously reselects the intelligence needed to produce the strongest verified outcome. |
+| 2 | **The Bluedip run on real models**, then **the exam:** 20 real ideas, run end to end, measuring CEO decisions, time, cost and quality across different intelligence assignments | Proof before more features. Every later change is measured against it. |
+| 3 | **Founder conversations:** show 10 to 20 target founders the Bluedip result; ask if they would pay, and how much | Confirms demand, price and the first buyer. |
+| 4 | **Speed:** online models by default; smaller tasks; faster rescue when a task fails twice | Real runs took hours. |
+| 5 | **Tools for the experts:** web research with sources; a calculator for the CFO; real tool use for building, or hand building to proven coding agents | Experts need current facts; a model's memory goes out of date. |
+| 6 | **Checks of substance:** facts against their sources, documents consistent with each other (the financial model's numbers are already recomputed) | Trust is the product. |
+| 7 | **Kickoff agreements:** before parallel work starts, the team agrees on how the parts connect and the key facts | Parallel work must fit together. |
+| 8 | **Company memory:** a shared knowledge base; a CEO change updates every affected document | The team must stay consistent over time. |
+| 9 | **Field playbooks:** what companies in a field usually need, as a starting point the idea adjusts | Better teams, faster. |
+| 10 | **CEO experience:** plain decision cards, grouped decisions, phone notifications | Less of the founder's time; a pitch that shows the product. |
+| 11 | **Hosted web product:** accounts, separate data per customer, secrets manager, AI included in the price, billing | To sell it. |
+| 12 | **Security:** AI-written code run in a sandbox; content from the web or colleagues treated as data to read, with no power to give orders | Before any launch. |
 
 ## Known limits
 
