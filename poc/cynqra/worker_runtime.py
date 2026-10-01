@@ -112,8 +112,13 @@ def run(root: Path, argv: list[str], *, timeout: int = DEFAULT_TIMEOUT,
         raise WorkerRuntimeError("timeout must be between 1 and 900 seconds")
     root = workspace_root(root)
     command = _command(argv)
-    allowed_env = {"PATH", "HOME", "LANG", "LC_ALL", *env_allowlist}
+    allowed_env = {"PATH", "LANG", "LC_ALL", *env_allowlist}
     env = {k: v for k, v in os.environ.items() if k in allowed_env}
+    isolated_home = root / ".runtime-home"
+    isolated_home.mkdir(parents=True, exist_ok=True)
+    env["HOME"] = str(isolated_home)
+    env["XDG_CONFIG_HOME"] = str(isolated_home / ".config")
+    env["XDG_CACHE_HOME"] = str(isolated_home / ".cache")
     try:
         proc = subprocess.run(command, cwd=root, env=env, text=True, capture_output=True,
                               timeout=timeout, check=False)
