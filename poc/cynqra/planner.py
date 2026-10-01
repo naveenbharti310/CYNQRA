@@ -142,9 +142,11 @@ def validate_plan(plan: dict, workers: list[dict], requirement_ids: list[str] | 
         own = [t for t in tasks if t["milestone_id"] == m["id"]]
         m["task_ids"] = [t["id"] for t in own]
         m["due_day"] = max([m["due_day"]] + [t["deadline_day"] for t in own])
+    uncovered = [r for r in (requirement_ids or []) if not any(r in t["requirement_ids"] for t in tasks)]
+    if uncovered:
+        raise IntelligenceError("plan leaves requirements uncovered: " + ", ".join(uncovered))
     return {"workstreams": ws, "milestones": [m for m in ms if m["task_ids"]], "tasks": tasks,
-            "uncovered_requirements": [r for r in (requirement_ids or [])
-                                       if not any(r in t["requirement_ids"] for t in tasks)]}
+            "uncovered_requirements": []}
 
 
 def assumption_tests(tasks: list[dict], milestones: list[dict], assumptions: list[dict]) -> list[dict]:
