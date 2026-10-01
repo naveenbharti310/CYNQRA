@@ -140,6 +140,9 @@ class IntelligenceSupply:
     def qualification_history(self, model_id: str | None = None) -> list[dict]:
         return self.qualification.history(model_id)
 
+    def bootstrap_qualification(self, max_models: int = 3, log=lambda _msg: None) -> dict:
+        return self.qualification.bootstrap(max_models=max_models, log=log)
+
     def remove_connection(self, connection_id: str) -> None:
         for m in self.registry.models():
             if m["connection_id"] == connection_id:
