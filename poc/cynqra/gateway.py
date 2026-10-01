@@ -12,7 +12,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import binding, budget, policy
+from . import binding, budget, policy, worker_runtime
 from .db import SECRET, digest, now
 from .testrunner import run_unittests
 
@@ -58,7 +58,13 @@ def execute(run, worker_id: str, task_id: str, action_type: str, target: str = "
         action["status"] = "approved"
         action["approval_scope"] = {"decision_id": approval, "task_id": task_id, "target": target}
     out: dict = {}
-    if action_type == "write_file":
+    if action_type == "read_artifact":
+        folder = run.workspace(worker_id, task_id) / "out"
+        try:
+            result = {"file": target, "content": worker_runtime.read_file(folder, target)} if target else {"files": worker_runtime.list_files(folder)}
+        except worker_runtime.WorkerRuntimeError as exc:
+            return _refuse(run, action, task_id, auth, str(exc))
+    elif action_type == "write_file":
         folder = run.workspace(worker_id, task_id) / "out"
         rel = Path(target)
         if rel.is_absolute() or ".." in rel.parts or rel.suffix not in ALLOWED_EXT or len(rel.parts) > 3:
@@ -74,6 +80,22 @@ def execute(run, worker_id: str, task_id: str, action_type: str, target: str = "
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(content, encoding="utf-8")
         result = {"file": target, "hash": digest(content.encode("utf-8")), "bytes": len(content.encode("utf-8"))}
+    elif action_type == "delete_data":
+        folder = run.workspace(worker_id, task_id) / "out"
+        try:
+            worker_runtime.delete_file(folder, target)
+            result = {"deleted": target}
+        except worker_runtime.WorkerRuntimeError as exc:
+            return _refuse(run, action, task_id, auth, str(exc))
+    elif action_type == "install_package":
+        folder = run.workspace(worker_id, task_id) / "out"
+        package = target.strip()
+        if not package or any(x in package for x in (";", "&&", "||", "`", "$")):
+            return _refuse(run, action, task_id, auth, "invalid package target")
+        try:
+            result = worker_runtime.run(folder, ["pip", "install", package], timeout=300)
+        except worker_runtime.WorkerRuntimeError as exc:
+            return _refuse(run, action, task_id, auth, str(exc))
     elif action_type == "run_tests":
         t0 = time.time()
         report = run_unittests(cwd or run.workspace(worker_id, task_id) / "out")
