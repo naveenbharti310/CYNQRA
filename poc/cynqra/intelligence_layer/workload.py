@@ -5,7 +5,7 @@ It is deterministic platform metadata, not a model's recommendation.
 """
 from __future__ import annotations
 
-from . import contracts
+from .. import roles
 
 
 _REQUIRED = {
@@ -25,7 +25,7 @@ _REQUIRED = {
 
 def compile_contract(task: dict, *, context_tokens: int = 8192) -> dict:
     kind = str(task.get("kind") or "objective")
-    risk = contracts.TASK_RISK.get(kind, "LOW")
+    risk = roles.TASK_TYPES.get(kind, {}).get("risk", "LOW")
     return {
         "kind": kind,
         "objective": str(task.get("title") or kind),
