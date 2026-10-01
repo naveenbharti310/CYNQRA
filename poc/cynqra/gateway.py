@@ -131,10 +131,19 @@ def execute(run, worker_id: str, task_id: str, action_type: str, target: str = "
         result = {"ok": True}
     else:
         return _refuse(run, action, task_id, auth, f"no tool implementation for {action_type}")
-    action.update({"status": "executed", "result": result})
+    stored_result = result
+    if action_type == "read_artifact":
+        stored_result = {"file": target, "bytes": len(result.get("content", "").encode("utf-8"))} if target else {"files": result.get("files", [])}
+    elif action_type == "search_files":
+        stored_result = {"needle": target[:100], "files": result.get("files", [])}
+    elif action_type == "run_command":
+        stored_result = {"argv": result.get("argv", []), "returncode": result.get("returncode"), "passed": result.get("passed")}
+    elif action_type == "install_package":
+        stored_result = {"argv": result.get("argv", []), "returncode": result.get("returncode"), "passed": result.get("passed")}
+    action.update({"status": "executed", "result": stored_result})
     run.store.put("action", action["id"], action)
     run.event("action.executed", "action", action["id"], {"task_id": task_id, "action_type": action_type,
-              "target": target, "approval": approval, "result": {k: v for k, v in result.items() if k != "test_ids"}},
+              "target": target, "approval": approval, "result": {k: v for k, v in stored_result.items() if k != "test_ids"}},
               actor=worker_id, actor_type="worker", correlation_id=task_id, policy_decision=decision["decision"],
               authority=auth, test_ids=result.get("test_ids"))
     return {"status": "executed", "action": action, "result": result, "policy": decision, **out}
