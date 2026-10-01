@@ -61,6 +61,12 @@ CREATE TABLE IF NOT EXISTS entities (
 CREATE TABLE IF NOT EXISTS objects (
   hash TEXT PRIMARY KEY, kind TEXT NOT NULL, body TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS task_leases (
+  task_id TEXT PRIMARY KEY,
+  lease_id TEXT UNIQUE NOT NULL,
+  holder_id TEXT NOT NULL,
+  expires_at REAL NOT NULL
+);
 """
 
 # Payload keys that must never appear: D-22, events carry references only.
@@ -128,9 +134,36 @@ class Store:
             self.conn.execute("CREATE TRIGGER IF NOT EXISTS events_no_update BEFORE UPDATE ON events BEGIN SELECT RAISE(ABORT, 'events are append only'); END;")
             self.conn.execute("CREATE TRIGGER IF NOT EXISTS events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT, 'events are append only'); END;")
 
-    def close(self) -> None:
+    def claim_task(self, task_id: str, holder_id: str, lease_seconds: float = 120.0) -> str | None:
+        """Atomically claim a task. Expired leases are reclaimed; a live lease has exactly one holder."""
+        now_ts = time.time()
         with self.lock:
-            self.conn.close()
+            self.conn.execute("DELETE FROM task_leases WHERE expires_at <= ?", (now_ts,))
+            lease_id = "lease_" + uuid.uuid4().hex
+            cur = self.conn.execute(
+                "INSERT OR IGNORE INTO task_leases(task_id, lease_id, holder_id, expires_at) VALUES (?,?,?,?)",
+                (task_id, lease_id, holder_id, now_ts + max(1.0, lease_seconds)),
+            )
+            return lease_id if cur.rowcount == 1 else None
+
+    def renew_task_lease(self, task_id: str, lease_id: str, lease_seconds: float = 120.0) -> bool:
+        with self.lock:
+            cur = self.conn.execute(
+                "UPDATE task_leases SET expires_at=? WHERE task_id=? AND lease_id=? AND expires_at>?",
+                (time.time() + max(1.0, lease_seconds), task_id, lease_id, time.time()),
+            )
+            return cur.rowcount == 1
+
+    def release_task(self, task_id: str, lease_id: str) -> bool:
+        with self.lock:
+            cur = self.conn.execute("DELETE FROM task_leases WHERE task_id=? AND lease_id=?", (task_id, lease_id))
+            return cur.rowcount == 1
+
+    def task_lease(self, task_id: str) -> dict | None:
+        with self.lock:
+            r = self.conn.execute("SELECT task_id, lease_id, holder_id, expires_at FROM task_leases WHERE task_id=?",
+                                  (task_id,)).fetchone()
+            return dict(zip(("task_id", "lease_id", "holder_id", "expires_at"), r)) if r else None
 
     # events ---------------------------------------------------------------
     def append(self, *, company_id: str, event_type: str, aggregate_type: str, aggregate_id: str,
