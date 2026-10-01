@@ -16,6 +16,7 @@ import json
 import re
 import sqlite3
 import threading
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -45,7 +46,9 @@ CREATE TABLE IF NOT EXISTS events (
   source_service TEXT NOT NULL,
   created_at TEXT NOT NULL,
   protocol_hash TEXT,
-  test_ids TEXT NOT NULL
+  test_ids TEXT NOT NULL,
+  prev_event_hash TEXT,
+  event_hash TEXT NOT NULL
 );
 CREATE TRIGGER IF NOT EXISTS events_no_update BEFORE UPDATE ON events
 BEGIN SELECT RAISE(ABORT, 'events are append only'); END;
@@ -84,8 +87,9 @@ def canonical(obj) -> str:
 
 
 def digest(obj) -> str:
+    """Full SHA-256 digest. Short hashes are not sufficient for tamper evidence."""
     raw = obj if isinstance(obj, (bytes, bytearray)) else canonical(obj).encode("utf-8")
-    return hashlib.sha256(raw).hexdigest()[:16]
+    return hashlib.sha256(raw).hexdigest()
 
 
 class Store:
@@ -95,6 +99,34 @@ class Store:
         self.conn = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(SCHEMA)
+        self._migrate_events()
+
+    def _migrate_events(self) -> None:
+        """Hash-chain legacy event rows once when opening an older POC database."""
+        with self.lock:
+            cols = {r[1] for r in self.conn.execute("PRAGMA table_info(events)").fetchall()}
+            missing = {"prev_event_hash", "event_hash"} - cols
+            if not missing:
+                return
+            self.conn.execute("DROP TRIGGER IF EXISTS events_no_update")
+            self.conn.execute("DROP TRIGGER IF EXISTS events_no_delete")
+            if "prev_event_hash" not in cols:
+                self.conn.execute("ALTER TABLE events ADD COLUMN prev_event_hash TEXT")
+            if "event_hash" not in cols:
+                self.conn.execute("ALTER TABLE events ADD COLUMN event_hash TEXT")
+            rows = self.conn.execute("SELECT * FROM events ORDER BY seq").fetchall()
+            names = [d[0] for d in self.conn.execute("SELECT * FROM events LIMIT 0").description]
+            prev = None
+            for row in rows:
+                d = dict(zip(names, row))
+                body = {k: v for k, v in d.items() if k not in ("seq", "prev_event_hash", "event_hash")}
+                body["prev_event_hash"] = prev
+                eh = hashlib.sha256(canonical(body).encode("utf-8")).hexdigest()
+                self.conn.execute("UPDATE events SET prev_event_hash=?, event_hash=? WHERE seq=?",
+                                   (prev, eh, d["seq"]))
+                prev = eh
+            self.conn.execute("CREATE TRIGGER IF NOT EXISTS events_no_update BEFORE UPDATE ON events BEGIN SELECT RAISE(ABORT, 'events are append only'); END;")
+            self.conn.execute("CREATE TRIGGER IF NOT EXISTS events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT, 'events are append only'); END;")
 
     def close(self) -> None:
         with self.lock:
@@ -106,12 +138,18 @@ class Store:
                authority_snapshot: str = "platform", policy_decision: str = "ALLOW",
                causation_id: str | None = None, context_refs: list | None = None,
                protocol_hash: str | None = None, test_ids: list | None = None,
-               aggregate_version: int = 1, source_service: str = "cynqra_poc") -> dict:
+               aggregate_version: int = 1, source_service: str = "cynqra_poc",
+               command_id: str | None = None, idempotency_key: str | None = None) -> dict:
         bad = FORBIDDEN_PAYLOAD_KEYS & set(payload)
         if bad:
             raise ValueError(f"event payload may not carry personal data keys: {sorted(bad)}")
         with self.lock:
-            last = self.conn.execute("SELECT event_id FROM events ORDER BY seq DESC LIMIT 1").fetchone()
+            if idempotency_key:
+                existing = self.conn.execute("SELECT * FROM events WHERE idempotency_key=?", (idempotency_key,)).fetchone()
+                if existing:
+                    names = [d[0] for d in self.conn.execute("SELECT * FROM events LIMIT 0").description]
+                    return dict(zip(names, existing))
+            last = self.conn.execute("SELECT event_id, event_hash, seq FROM events ORDER BY seq DESC LIMIT 1").fetchone()
             eid = "evt_" + uuid.uuid4().hex[:12]
             row = {
                 "event_id": eid,
@@ -127,8 +165,8 @@ class Store:
                 "policy_decision": policy_decision,
                 "correlation_id": correlation_id,
                 "causation_id": causation_id or (last[0] if last else None),
-                "command_id": "cmd_" + uuid.uuid4().hex[:12],
-                "idempotency_key": "idem_" + uuid.uuid4().hex[:16],
+                "command_id": command_id or ("cmd_" + uuid.uuid4().hex[:12]),
+                "idempotency_key": idempotency_key or ("idem_" + uuid.uuid4().hex[:16]),
                 "context_refs": json.dumps(context_refs or []),
                 "payload": scrub(canonical(payload)),
                 "payload_schema_version": 1,
@@ -136,12 +174,30 @@ class Store:
                 "created_at": now(),
                 "protocol_hash": protocol_hash,
                 "test_ids": json.dumps(test_ids or []),
+                "prev_event_hash": last[1] if last and last[1] else None,
             }
+            row["event_hash"] = hashlib.sha256(canonical(row).encode("utf-8")).hexdigest()
             cols = ",".join(row)
             marks = ",".join("?" for _ in row)
             cur = self.conn.execute(f"INSERT INTO events ({cols}) VALUES ({marks})", list(row.values()))
             row["seq"] = cur.lastrowid
             return row
+
+    def verify_event_chain(self) -> bool:
+        """Recompute the event chain and detect mutation or deletion."""
+        with self.lock:
+            rows = self.conn.execute("SELECT * FROM events ORDER BY seq").fetchall()
+            names = [d[0] for d in self.conn.execute("SELECT * FROM events LIMIT 0").description]
+            prev = None
+            for row in rows:
+                d = dict(zip(names, row))
+                if not d.get("event_hash") or d.get("prev_event_hash") != prev:
+                    return False
+                body = {k: v for k, v in d.items() if k not in ("seq", "event_hash")}
+                if hashlib.sha256(canonical(body).encode("utf-8")).hexdigest() != d["event_hash"]:
+                    return False
+                prev = d["event_hash"]
+            return True
 
     def events(self, after: int = 0, correlation_id: str | None = None, limit: int = 100000) -> list[dict]:
         with self.lock:
