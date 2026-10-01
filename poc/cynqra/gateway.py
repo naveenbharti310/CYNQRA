@@ -7,6 +7,7 @@ PROHIBITED one is refused whoever asks. The tools a worker can reach are exactly
 """
 from __future__ import annotations
 
+import json
 import shutil
 import time
 import uuid
@@ -58,7 +59,22 @@ def execute(run, worker_id: str, task_id: str, action_type: str, target: str = "
         action["status"] = "approved"
         action["approval_scope"] = {"decision_id": approval, "task_id": task_id, "target": target}
     out: dict = {}
-    if action_type == "read_artifact":
+    if action_type == "search_files":
+        folder = run.workspace(worker_id, task_id) / "out"
+        try:
+            result = {"needle": target, "files": worker_runtime.search_files(folder, target)}
+        except worker_runtime.WorkerRuntimeError as exc:
+            return _refuse(run, action, task_id, auth, str(exc))
+    elif action_type == "run_command":
+        folder = run.workspace(worker_id, task_id) / "out"
+        try:
+            argv = json.loads(target)
+            if not isinstance(argv, list) or not all(isinstance(x, str) for x in argv):
+                raise ValueError("command target must be a JSON string array")
+            result = worker_runtime.run(folder, argv, timeout=120)
+        except (ValueError, json.JSONDecodeError, worker_runtime.WorkerRuntimeError) as exc:
+            return _refuse(run, action, task_id, auth, str(exc))
+    elif action_type == "read_artifact":
         folder = run.workspace(worker_id, task_id) / "out"
         try:
             result = {"file": target, "content": worker_runtime.read_file(folder, target)} if target else {"files": worker_runtime.list_files(folder)}
