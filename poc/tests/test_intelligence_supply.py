@@ -212,6 +212,18 @@ class WorkforceOnTheSupplyTests(SupplyBase):
         self.assertEqual((ev["payload"]["previous"], ev["payload"]["intelligence_id"]), (first, better))
         e.close()
 
+    def test_unverified_version_is_not_assignable(self):
+        e = self.engine()
+        mid = e.model_of("w_eng_a")
+        entry = self.reg.get(mid)
+        self.reg.register({"ref": entry["ref"], "name": entry["name"], "version": "unqualified-2"},
+                           connection_id=entry["connection_id"])
+        fresh = self.reg.get(mid)
+        ok, why = self.reg.availability(fresh)
+        self.assertFalse(ok)
+        self.assertIn("not qualified", why)
+        e.close()
+
     def test_a_new_version_is_regression_checked_before_the_worker_continues(self):
         e = self.engine()
         mid = e.model_of("w_eng_a")
