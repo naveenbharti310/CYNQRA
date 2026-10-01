@@ -8,7 +8,7 @@ name: cynqra-workforce
 
 on:
   push:
-    branches: [cynqra]
+    branches: [main]
   workflow_dispatch:
     inputs:
       route:
