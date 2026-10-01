@@ -21,7 +21,7 @@ name: cynqra-desktop
 
 on:
   push:
-    branches: [cynqra]
+    branches: [main]
     paths: ["poc/**", "desktop/**", ".github/workflows/cynqra-desktop.yml"]
   pull_request:
     branches: [main]
