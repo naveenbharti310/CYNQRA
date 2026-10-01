@@ -133,6 +133,7 @@ class SupplyTests(SupplyBase):
         self.supply.adapters["mirror"] = Mirror()
         out = self.supply.connect({"type": "mirror", "name": "Mirror", "auth": {"method": "none"}})
         mid = out["intelligence"][0]["id"]
+        self.reg.set_regression(mid, True, "test fixture: fake provider qualification")
         self.assertIsNone(self.supply.gateway.invoke(mid, {"prompt": "Plan the work for this organization"})["error"])
         self.assertIn("Mirror 1", [r["model"] for r in rank(self.reg, ["code"], 10.0)], "the router ranks it as is")
 
