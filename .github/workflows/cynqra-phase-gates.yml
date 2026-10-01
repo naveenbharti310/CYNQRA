@@ -2,7 +2,7 @@ name: cynqra-phase-gates
 
 on:
   push:
-    branches: [main, cynqra-phase-0-8]
+    branches: [main]
   workflow_dispatch:
     inputs:
       real_model:
@@ -13,6 +13,12 @@ on:
         description: Number of examination objectives to run
         required: false
         default: "20"
+
+# Phase gates are validation work. Keep only the newest run for a branch so
+# rapid implementation commits do not create a queue of duplicate runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
