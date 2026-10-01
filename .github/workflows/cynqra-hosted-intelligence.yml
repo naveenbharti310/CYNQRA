@@ -29,11 +29,33 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Check provider credentials
+        env:
+          SELECTED_PROVIDER: ${{ inputs.provider }}
         run: |
-          if [ -z "$GEMINI_API_KEY" ] && [ -z "$NVIDIA_API_KEY" ]; then
-            echo "Add GEMINI_API_KEY and/or NVIDIA_API_KEY in repository Actions secrets before running this workflow."
-            exit 1
-          fi
+          case "$SELECTED_PROVIDER" in
+            google)
+              if [ -z "$GEMINI_API_KEY" ]; then
+                echo "GEMINI_API_KEY is required when provider=google."
+                exit 1
+              fi
+              ;;
+            nvidia)
+              if [ -z "$NVIDIA_API_KEY" ]; then
+                echo "NVIDIA_API_KEY is required when provider=nvidia."
+                exit 1
+              fi
+              ;;
+            all)
+              if [ -z "$GEMINI_API_KEY" ] && [ -z "$NVIDIA_API_KEY" ]; then
+                echo "Add GEMINI_API_KEY and/or NVIDIA_API_KEY in repository Actions secrets before running this workflow."
+                exit 1
+              fi
+              ;;
+            *)
+              echo "Unknown provider: $SELECTED_PROVIDER"
+              exit 1
+              ;;
+          esac
       - name: Discover and examine candidates
         run: |
           python3 poc/run_hosted_examination.py \
