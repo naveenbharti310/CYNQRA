@@ -46,7 +46,9 @@ def execute(run, worker_id: str, task_id: str, action_type: str, target: str = "
         return _refuse(run, action, task_id, auth, decision["reason"], decision)
     if decision["decision"] == "REQUIRE_APPROVAL":
         d = run.store.get("decision", approval) if approval else None
-        if not d or d.get("status") != "approved" or d.get("action_type") != action_type:
+        approved_target = (d or {}).get("extra", {}).get("target")
+        if (not d or d.get("status") != "approved" or d.get("action_type") != action_type
+                or d.get("task_id") != task_id or (approved_target is not None and approved_target != target)):
             action["status"] = "proposed"
             run.store.put("action", action["id"], action)
             run.event("action.proposed", "action", action["id"], {"task_id": task_id, "action_type": action_type,
@@ -54,6 +56,7 @@ def execute(run, worker_id: str, task_id: str, action_type: str, target: str = "
                       actor_type="worker", correlation_id=task_id, policy_decision="REQUIRE_APPROVAL", authority=auth)
             return {"status": "requires_approval", "action": action, "policy": decision}
         action["status"] = "approved"
+        action["approval_scope"] = {"decision_id": approval, "task_id": task_id, "target": target}
     out: dict = {}
     if action_type == "write_file":
         folder = run.workspace(worker_id, task_id) / "out"
