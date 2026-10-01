@@ -9,6 +9,7 @@ from ..db import digest, now
 from ..intelligence import IntelligenceError
 from ..probe import _Run, probe
 from .identity import ensure_identity
+from .registry import served_version
 
 
 class QualificationError(RuntimeError):
@@ -44,7 +45,7 @@ class QualificationEngine:
             "id": qid,
             "model_id": model_id,
             "execution_profile_id": m.get("execution_profile_id"),
-            "model_version": m.get("version") or "",
+            "model_version": served_version(m),
             "workload_kind": workload_kind,
             "depth": depth,
             "status": status,
