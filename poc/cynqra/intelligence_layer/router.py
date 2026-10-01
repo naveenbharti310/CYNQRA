@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from .. import roles
 from .registry import IntelligenceRegistry as Registry
+from .workload import compile_contract
 
 ATTEMPTS = 3  # verification attempts before a task counts as failed (execution.MAX_ATTEMPTS)
 PRIOR = 2.0
@@ -128,16 +129,30 @@ def choose(reg: Registry, settings: dict, kinds: list[str], budget_left: float |
     return (rows[0] if rows and rows[0]["fits_budget"] else None), rows
 
 
-def staff(reg: Registry, settings: dict, workers: list[dict], workload: dict[str, list[str]] | None = None) -> dict:
-    """A model for every worker: the lowest expected cost per verified task over its work (its role's kinds of work
-    before there is a roadmap, the kinds of the tasks it owns once there is one). When no model fits the budget the
-    best one is still chosen; the roadmap gate shows the overrun and the founder decides."""
+def staff(reg: Registry, settings: dict, workers: list[dict], workload=None) -> dict:
+    """Choose intelligence for each worker from its actual workload contract and measured evidence."""
     out = {}
     for w in workers:
-        kinds = (workload or {}).get(w["id"]) or roles.staffing_kinds(w["role"])
-        best, rows = choose(reg, settings, kinds, settings["budget_usd"])
+        requested = (workload or {}).get(w["id"])
+        if isinstance(requested, dict):
+            kinds = list(requested.get("kinds") or [])
+            contract = dict(requested)
+        else:
+            kinds = list(requested or roles.staffing_kinds(w["role"]))
+            contract = {"kinds": kinds}
+        if not kinds:
+            kinds = roles.staffing_kinds(w["role"])
+            contract["kinds"] = kinds
+        contracts = [compile_contract({"kind": k}) for k in kinds]
+        required = sorted({cap for x in contracts for cap in x["required_capabilities"]})
+        contract["required_capabilities"] = required
+        contract["min_context_tokens"] = max((x["min_context_tokens"] for x in contracts), default=MIN_CONTEXT)
+        contract["risk"] = "HIGH" if any(x["risk"] == "HIGH" for x in contracts) else (
+            "MEDIUM" if any(x["risk"] == "MEDIUM" for x in contracts) else "LOW")
+        best, rows = choose(reg, settings, kinds, settings["budget_usd"], workload=contract)
         best = best or (rows[0] if rows else None)
         if best is None:
             raise RouterError("no available model can staff the organization: register one in the model registry")
-        out[w["id"]] = {"model_id": best["model_id"], "model": best["model"], "candidates": rows, "kinds": kinds}
+        out[w["id"]] = {"model_id": best["model_id"], "model": best["model"], "candidates": rows,
+                        "kinds": kinds, "workload_contract": contract}
     return out
