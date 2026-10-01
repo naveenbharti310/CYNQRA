@@ -1,0 +1,22 @@
+[
+  {"id":"exam01","domain":"restaurant","objective":"Build a small restaurant owner web app that tracks daily covers, revenue and a simple weekly forecast. No payments or diner accounts."},
+  {"id":"exam02","domain":"education","objective":"Build a web app for a tutoring centre to schedule lessons, track attendance and show weekly student progress. No payments."},
+  {"id":"exam03","domain":"logistics","objective":"Build a small parcel operations dashboard that tracks shipments, delayed parcels and delivery status with searchable records."},
+  {"id":"exam04","domain":"healthcare","objective":"Build an internal clinic appointment dashboard for staff to manage appointments, cancellations and daily capacity. No patient portal."},
+  {"id":"exam05","domain":"insurance","objective":"Build an internal insurance renewal tracker showing policies due in 30 days, owner, status and renewal notes."},
+  {"id":"exam06","domain":"lending","objective":"Build an internal lending application tracker showing applications, verification status, pending documents and approval stages."},
+  {"id":"exam07","domain":"real estate","objective":"Build a property lead tracker for a small brokerage with enquiries, viewing status, next action and owner."},
+  {"id":"exam08","domain":"hospitality","objective":"Build a hotel operations dashboard for room status, housekeeping queues and maintenance issues."},
+  {"id":"exam09","domain":"manufacturing","objective":"Build a simple production board tracking work orders, machine status, planned completion and blocked jobs."},
+  {"id":"exam10","domain":"professional services","objective":"Build a consulting project tracker showing clients, milestones, tasks, owners and overdue work."},
+  {"id":"exam11","domain":"events","objective":"Build an event operations dashboard tracking sessions, speakers, rooms and schedule conflicts."},
+  {"id":"exam12","domain":"retail","objective":"Build a small retail inventory dashboard showing products, stock levels, low-stock alerts and recent adjustments."},
+  {"id":"exam13","domain":"recruiting","objective":"Build an internal recruiting pipeline showing candidates, interview stages, owners and next actions."},
+  {"id":"exam14","domain":"customer support","objective":"Build a support queue showing tickets, priority, status, owner, SLA due time and resolution notes."},
+  {"id":"exam15","domain":"finance operations","objective":"Build an internal invoice tracker showing invoices, due dates, payment status and ageing buckets. No payment execution."},
+  {"id":"exam16","domain":"travel","objective":"Build a small travel operations dashboard tracking bookings, traveller status, itinerary issues and unresolved actions."},
+  {"id":"exam17","domain":"construction","objective":"Build a construction project dashboard tracking tasks, subcontractors, milestones, blockers and completion percentage."},
+  {"id":"exam18","domain":"nonprofit","objective":"Build a volunteer coordination app tracking volunteers, shifts, attendance and unfilled shifts."},
+  {"id":"exam19","domain":"media","objective":"Build a content production tracker showing stories, stages, editors, deadlines and publication status."},
+  {"id":"exam20","domain":"fitness","objective":"Build an internal fitness studio dashboard tracking classes, capacity, instructors and attendance."}
+]

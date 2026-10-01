@@ -25,7 +25,7 @@ ROLES        for each role:
 from __future__ import annotations
 
 E, P = "execute", "propose"
-BASE = {"write_file": E, "read_artifact": E, "run_tests": E, "send_protocol": E}
+BASE = {"write_file": E, "read_artifact": E, "run_tests": E, "send_protocol": E, "search_files": E}
 
 AREAS = ["product", "functional", "non_functional", "ai_ml", "data", "design", "security", "qa", "devops",
          "deployment", "business", "market", "finance", "legal", "domain"]
@@ -126,7 +126,7 @@ ROLES: dict[str, dict] = {
                    "workspace only.",
         "capabilities": ["backend", "frontend", "testing"],
         "areas": ["functional", "data", "non_functional", "design"], "owns": ["code"], "documents": [],
-        "answers": False, "authority": {**BASE, "merge_to_main": P, "install_package": P},
+        "answers": False, "authority": {**BASE, "run_command": E, "merge_to_main": P, "install_package": P},
         "reports_to": ["CTO"], "max": 3},
     "BackendEngineer": {
         "title": "Backend Engineer", "slug": "be", "tier": "team",
@@ -150,7 +150,7 @@ ROLES: dict[str, dict] = {
                    "computes it, with tests that check its numbers.",
         "capabilities": ["statistics", "machine learning", "experimentation", "Python"],
         "areas": ["ai_ml", "data"], "owns": ["document", "forecast", "code"], "documents": ["method"],
-        "answers": True, "authority": {**BASE, "answer_blocker": E, "install_package": P, "merge_to_main": P},
+        "answers": True, "authority": {**BASE, "run_command": E, "answer_blocker": E, "install_package": P, "merge_to_main": P},
         "reports_to": ["CTO"], "max": 1},
     "Designer": {
         "title": "Product Designer", "slug": "design", "tier": "team",
@@ -167,7 +167,7 @@ ROLES: dict[str, dict] = {
         "capabilities": ["CI/CD", "infrastructure", "deployment", "observability"],
         "areas": ["devops", "deployment", "security"], "owns": ["document", "code", "deploy"],
         "documents": ["runbook"], "answers": False,
-        "authority": {**BASE, "install_package": P, "deploy_production": P},
+        "authority": {**BASE, "run_command": E, "install_package": P, "deploy_production": P},
         "reports_to": ["CTO"], "max": 1},
     "QA": {
         "title": "QA Engineer", "slug": "qa", "tier": "team",
@@ -175,7 +175,7 @@ ROLES: dict[str, dict] = {
                    "acceptance tests that check the product against its acceptance criteria.",
         "capabilities": ["test design", "regression", "acceptance validation"],
         "areas": ["qa", "non_functional"], "owns": ["document", "code"], "documents": ["test_plan", "acceptance"],
-        "answers": False, "authority": {**BASE, "review_work": E},
+        "answers": False, "authority": {**BASE, "run_command": E, "review_work": E},
         "reports_to": ["CTO", "CPO"], "max": 2},
     "MarketAnalyst": {
         "title": "Market Analyst", "slug": "market", "tier": "team",

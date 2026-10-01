@@ -1,0 +1,58 @@
+name: cynqra-phase-gates
+
+on:
+  push:
+    branches: [main, cynqra-phase-0-8]
+  workflow_dispatch:
+    inputs:
+      real_model:
+        description: Optional CYNQRA model id for the twenty-objective real examination
+        required: false
+        default: ""
+      exam_count:
+        description: Number of examination objectives to run
+        required: false
+        default: "20"
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Unit and contract suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Python tests
+        run: cd poc && python3 -m unittest discover -s tests -t tests
+
+  static_phase_contract:
+    name: Phase architecture contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Required architecture files
+        run: |
+          test -f docs/6_PHASED_ARCHITECTURE.md
+          test -f poc/cynqra/worker_runtime.py
+          test -f poc/tests/test_worker_runtime.py
+          test -f poc/run_examination.py
+          test -f poc/scenarios/examination_20.json
+
+  real_examination:
+    name: Real model examination
+    if: github.event_name == 'workflow_dispatch' && inputs.real_model != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v5
+      - name: Run examination
+        run: |
+          python3 poc/run_examination.py --model "${{ inputs.real_model }}" --count "${{ inputs.exam_count }}"             --data-root "$RUNNER_TEMP/cynqra-examination"
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cynqra-examination
+          path: ${{ runner.temp }}/cynqra-examination

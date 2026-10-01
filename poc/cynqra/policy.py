@@ -18,6 +18,8 @@ POLICY_VERSION = "poc-2026-09-27.1"
 RISK = {
     "write_file": "LOW",
     "read_artifact": "LOW",
+    "search_files": "LOW",
+    "run_command": "LOW",
     "run_tests": "LOW",
     "send_protocol": "LOW",
     "assign_task": "LOW",
