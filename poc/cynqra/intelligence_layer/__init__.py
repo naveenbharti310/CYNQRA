@@ -35,10 +35,11 @@ from .connections import Connections, ConnectionsError
 from .contracts import SupplyError
 from .credentials import CredentialError, Credentials
 from .gateway import IntelligenceGateway, VersionChanged
+from .qualification import QualificationEngine
 from .registry import IntelligenceRegistry, RegistryError
 
 __all__ = ["IntelligenceSupply", "SupplyError", "CredentialError", "ConnectionsError", "RegistryError",
-           "VersionChanged", "adapter_types"]
+           "VersionChanged", "QualificationEngine", "adapter_types"]
 
 
 class IntelligenceSupply:
@@ -54,6 +55,7 @@ class IntelligenceSupply:
         self.connections = Connections(self.store, self.credentials, self.adapters)
         self.registry = IntelligenceRegistry(self.store, reachable=self._reachable)
         self.gateway = IntelligenceGateway(self.registry, self.connections, self.credentials, self.adapters)
+        self.qualification = QualificationEngine(self)
 
     # --- the intelligence supply flow: connect, discover, register -------------------------------------------
     def connect(self, spec: dict, origin: str = "founder") -> dict:
@@ -111,7 +113,14 @@ class IntelligenceSupply:
         active = {m["ref"] for m in self.registry.models() if m["connection_id"] == connection_id}
         rows = [{"ref": f["ref"], "name": f.get("display_name") or f.get("name") or f["ref"], "context": f.get("context"),
                  "publisher_name": f.get("publisher_name") or "", "type": f.get("type") or "",
-                 "capabilities": f.get("capabilities") or [], "description": f.get("description") or "",
+                 "access_provider": f.get("access_provider") or "", "capabilities": f.get("capabilities") or [],
+                 "qualification_status": next(
+                     ((m.get("qualification") or {}).get("status") for m in self.registry.models()
+                      if m["connection_id"] == connection_id and m["ref"] == f["ref"]), None),
+                 "execution_profile_id": next(
+                     (m.get("execution_profile_id") for m in self.registry.models()
+                      if m["connection_id"] == connection_id and m["ref"] == f["ref"]), None),
+                 "description": f.get("description") or "",
                  "released": f.get("released"), "current": f["ref"] in fresh, "offered": f["ref"] in active}
                 for f in found]
         # newest first; models with no known date last
@@ -131,6 +140,15 @@ class IntelligenceSupply:
             except SupplyError:
                 continue  # its status says why; another source may still serve
         return out
+
+    def qualify(self, model_id: str, *, deep: bool = False, log=lambda _msg: None) -> dict:
+        return self.qualification.qualify(model_id, deep=deep, log=log)
+
+    def qualification_history(self, model_id: str | None = None) -> list[dict]:
+        return self.qualification.history(model_id)
+
+    def bootstrap_qualification(self, max_models: int = 3, log=lambda _msg: None) -> dict:
+        return self.qualification.bootstrap(max_models=max_models, log=log)
 
     def remove_connection(self, connection_id: str) -> None:
         for m in self.registry.models():

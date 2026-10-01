@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from .. import roles
 from .registry import IntelligenceRegistry as Registry
+from .workload import compile_contract
 
 ATTEMPTS = 3  # verification attempts before a task counts as failed (execution.MAX_ATTEMPTS)
 PRIOR = 2.0
@@ -76,49 +77,82 @@ def estimate(reg: Registry, m: dict, kind: str, time_value_per_hour: float) -> d
             "expected_tokens": int(E * tokens), "score": round(score, 4), "basis": basis, "samples": st_k["attempts"]}
 
 
-def fits(m: dict) -> tuple[bool, str]:
-    """Capability fit from the model's facts: a known context window too small for the work is excluded. An unknown
-    fact excludes nothing; what a model can do is otherwise learned from outcomes, not assumed."""
+def fits(m: dict, workload: dict | None = None) -> tuple[bool, str]:
+    """Capability and context fit. Unknown capability facts do not invent support, but explicit requirements are hard."""
     if m.get("context") and m["context"] < MIN_CONTEXT:
         return False, f"context {m['context']} tokens, the work needs {MIN_CONTEXT}"
+    required = {str(x).strip().lower() for x in ((workload or {}).get("required_capabilities") or []) if str(x).strip()}
+    if required and m.get("capabilities"):
+        have = {str(x).strip().lower() for x in (m.get("capabilities") or [])}
+        aliases = {
+            "coding": {"coding", "code", "programming"},
+            "reasoning": {"reasoning", "agentic"},
+            "tool use": {"tool use", "tools", "function calling"},
+            "structured output": {"structured output", "json", "structured_outputs"},
+            "multimodal": {"multimodal", "vision"},
+        }
+        for need in required:
+            accepted = aliases.get(need, {need})
+            if not have.intersection(accepted):
+                return False, f"missing capability: {need}"
+    need_ctx = int((workload or {}).get("min_context_tokens") or MIN_CONTEXT)
+    if m.get("context") and m["context"] < need_ctx:
+        return False, f"context {m['context']} tokens, the workload needs {need_ctx}"
     return True, ""
 
 
 def rank(reg: Registry, kinds: list[str], time_value_per_hour: float, budget_left: float | None = None,
-         exclude: set | None = None) -> list[dict]:
-    """Every available model that fits the work, scored over a list of kinds (a worker's work), best first."""
+         exclude: set | None = None, workload: dict | None = None) -> list[dict]:
+    """Every available model that fits the WorkloadContract, scored over the worker's kinds of work."""
     rows = []
     for m in reg.available():
-        if (exclude and m["id"] in exclude) or not fits(m)[0]:
+        if (exclude and m["id"] in exclude) or not fits(m, workload)[0]:
             continue
         per = [estimate(reg, m, k, time_value_per_hour) for k in kinds]
+        samples = sum(int(e.get("samples") or 0) for e in per)
+        confidence = round(min(1.0, samples / 10.0), 3)
         row = {"model_id": m["id"], "model": m["name"], "runtime": m["runtime"],
                "score": round(sum(e["score"] for e in per), 4),
                "expected_usd": round(sum(e["expected_usd"] for e in per), 4),
                "expected_minutes": round(sum(e["expected_minutes"] for e in per), 1),
-               "p_task": round(min(e["p_task"] for e in per), 3), "by_kind": per}
+               "p_task": round(min(e["p_task"] for e in per), 3),
+               "confidence": confidence, "sample_count": samples, "by_kind": per}
         row["fits_budget"] = budget_left is None or row["expected_usd"] <= budget_left + 1e-9
         rows.append(row)
-    rows.sort(key=lambda r: (not r["fits_budget"], r["score"]))
+    rows.sort(key=lambda r: (not r["fits_budget"], r["score"], -r["confidence"]))
     return rows
 
 
 def choose(reg: Registry, settings: dict, kinds: list[str], budget_left: float | None = None,
-           exclude: set | None = None) -> tuple[dict | None, list[dict]]:
-    rows = rank(reg, kinds, settings["time_value_per_hour"], budget_left, exclude)
+           exclude: set | None = None, workload: dict | None = None) -> tuple[dict | None, list[dict]]:
+    rows = rank(reg, kinds, settings["time_value_per_hour"], budget_left, exclude, workload)
     return (rows[0] if rows and rows[0]["fits_budget"] else None), rows
 
 
-def staff(reg: Registry, settings: dict, workers: list[dict], workload: dict[str, list[str]] | None = None) -> dict:
-    """A model for every worker: the lowest expected cost per verified task over its work (its role's kinds of work
-    before there is a roadmap, the kinds of the tasks it owns once there is one). When no model fits the budget the
-    best one is still chosen; the roadmap gate shows the overrun and the founder decides."""
+def staff(reg: Registry, settings: dict, workers: list[dict], workload=None) -> dict:
+    """Choose intelligence for each worker from its actual workload contract and measured evidence."""
     out = {}
     for w in workers:
-        kinds = (workload or {}).get(w["id"]) or roles.staffing_kinds(w["role"])
-        best, rows = choose(reg, settings, kinds, settings["budget_usd"])
+        requested = (workload or {}).get(w["id"])
+        if isinstance(requested, dict):
+            kinds = list(requested.get("kinds") or [])
+            contract = dict(requested)
+        else:
+            kinds = list(requested or roles.staffing_kinds(w["role"]))
+            contract = {"kinds": kinds}
+        if not kinds:
+            kinds = roles.staffing_kinds(w["role"])
+            contract["kinds"] = kinds
+        contracts = [compile_contract({"kind": k}) for k in kinds]
+        required = sorted({cap for x in contracts for cap in x["required_capabilities"]})
+        contract["required_capabilities"] = required
+        contract["min_context_tokens"] = max((x["min_context_tokens"] for x in contracts), default=MIN_CONTEXT)
+        contract["risk"] = "HIGH" if any(x["risk"] == "HIGH" for x in contracts) else (
+            "MEDIUM" if any(x["risk"] == "MEDIUM" for x in contracts) else "LOW")
+        best, rows = choose(reg, settings, kinds, settings["budget_usd"], workload=contract)
         best = best or (rows[0] if rows else None)
         if best is None:
             raise RouterError("no available model can staff the organization: register one in the model registry")
-        out[w["id"]] = {"model_id": best["model_id"], "model": best["model"], "candidates": rows, "kinds": kinds}
+        out[w["id"]] = {"model_id": best["model_id"], "model": best["model"], "candidates": rows,
+                        "kinds": kinds, "workload_contract": contract}
     return out

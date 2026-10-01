@@ -45,6 +45,7 @@ class _Run:
 
     def __init__(self, supply, model_id: str, source: str):
         self.supply, self.reg, self.model_id, self.source = supply, supply.registry, model_id, source
+        self.profile_id = (self.reg.get(model_id) or {}).get("execution_profile_id")
         self.run_id = f"{source}_{int(time.time())}"
         self.src = ModelSource()
         self.src.bind(self)
@@ -54,15 +55,17 @@ class _Run:
         return self.model_id
 
     def invoke(self, worker: str, request: dict) -> dict:
-        return self.supply.gateway.invoke(self.model_id, request)
+        mode = "qualification" if self.source == "qualification_cheap" else (
+            "regression" if self.source == "regression" else "qualification")
+        return self.supply.gateway.invoke(self.model_id, request, mode=mode)
 
     def outcome(self, kind, verified, usage, attempt, failure=""):
         c = self.reg.record_call(self.model_id, role=self.source, purpose=kind, task_kind=kind, usage=usage,
-                                 run_id=self.run_id)
+                                 run_id=self.run_id, execution_profile_id=self.profile_id)
         self.reg.record_outcome(self.model_id, role=self.source, task_kind=kind, task_id=f"{self.source}_{kind}",
                                 run_id=self.run_id, attempt=attempt, verified=verified, usd=c["usd"],
                                 seconds=c["seconds"], tokens=c["tokens_in"] + c["tokens_out"], failure=failure,
-                                source=self.source)
+                                source=self.source, execution_profile_id=self.profile_id)
         self.usd += c["usd"]
         return c
 

@@ -156,6 +156,11 @@ class Engine:
             sup = self._shared or self._local_supply()
             if not sup.registry.available():
                 sup.connect_environment()
+            if not sup.registry.available():
+                try:
+                    sup.bootstrap_qualification(max_models=3)
+                except (SupplyError, IntelligenceError):
+                    pass
             if strict and not sup.registry.available():
                 raise EngineError("live mode needs intelligence: connect a provider (OpenAI-compatible, Anthropic or "
                                   "a model on this machine), or name one in the environment")
@@ -188,17 +193,19 @@ class Engine:
         version its binding pinned. A new version continues only after its regression check passes."""
         who = worker_id if worker_id.startswith("w_") and binding.current(self.store, worker_id) else binding.SYSTEM
         mid = self.intelligence_for(worker_id)
-        pin = (binding.current(self.store, who) or {}).get("version")
+        current_binding = binding.current(self.store, who) or {}
+        pin = current_binding.get("version")
+        epoch_id = current_binding.get("binding_epoch_id")
         try:
-            return self._call(mid, request, pin)
+            return self._call(mid, request, pin, epoch_id)
         except VersionChanged as exc:
             replacement.version_changed(self, who, exc)  # kept after its regression check, or rebound
             b = binding.current(self.store, who)
-            return self._call(b["intelligence_id"], request, b["version"])
+            return self._call(b["intelligence_id"], request, b["version"], b.get("binding_epoch_id"))
         except SupplyError as exc:
             raise IntelligenceError(str(exc), model_id=mid) from exc
 
-    def _call(self, mid: str, request: dict, pin: str | None) -> dict:
+    def _call(self, mid: str, request: dict, pin: str | None, binding_epoch_id: str | None = None) -> dict:
         """The model call itself, the slow part, made without holding the run: while one worker waits for its
         intelligence, the others record their results. Everything before and after the call is serialized."""
         local = bool(self.registry.get(mid).get("local"))
@@ -207,8 +214,12 @@ class Engine:
         try:
             if local:
                 with _LOCAL_CALLS:
-                    return self.supply.gateway.invoke(mid, request, pinned_version=pin)
-            return self.supply.gateway.invoke(mid, request, pinned_version=pin)
+                    out = self.supply.gateway.invoke(mid, request, pinned_version=pin)
+            else:
+                out = self.supply.gateway.invoke(mid, request, pinned_version=pin)
+            if isinstance(out, dict):
+                out["binding_epoch_id"] = binding_epoch_id
+            return out
         finally:
             if owned:
                 self.lock._acquire_restore(state)
@@ -378,7 +389,9 @@ class Engine:
             kind = {"answer_blocker": "answer"}.get(purpose, purpose)
         role = (self.worker(worker) or {}).get("role", worker)
         c = self.registry.record_call(model_id, role=role, purpose=purpose, task_kind=kind, usage=usage,
-                                      run_id=self.cid)
+                                      run_id=self.cid,
+                                      execution_profile_id=usage.get("execution_profile_id"),
+                                      binding_epoch_id=usage.get("binding_epoch_id"))
         n = self.count("call") + 1
         rec = {"id": f"call_{n:04d}", "task_id": task_id, "worker": worker, "purpose": purpose, **usage,
                "usd": c["usd"], "at": now()}

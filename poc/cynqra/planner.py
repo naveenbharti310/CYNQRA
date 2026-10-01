@@ -20,6 +20,7 @@ import re
 from . import policy, roles
 from .db import now
 from .intelligence import IntelligenceError, as_int, ask
+from .intelligence_layer.workload import compile_contract
 from .objective import _slug_list
 
 TOOLS = {"document": ["write_file"], "decision": ["product_rule_decision"], "code": ["write_file", "run_tests"],
@@ -197,9 +198,10 @@ def enrich(plan: dict, workers: list[dict]) -> dict:
     by_id = {w["id"]: w for w in workers}
     for t in plan["tasks"]:
         owner = by_id[t["owner_worker_id"]]
-        t.update({"risk_tier": roles.risk(t["kind"]), "verification_gate": GATES[t["kind"]], "tools": TOOLS[t["kind"]],
-                  **coordination(owner, workers), "escalates_to": "founder",
+        t.update({"risk_tier": roles.risk(t["kind"]), "verification_gate": GATES[t["kind"]],
+                  "tools": TOOLS[t["kind"]], **coordination(owner, workers), "escalates_to": "founder",
                   "authority_policy_id": f"{policy.POLICY_VERSION}:{owner['role']}"})
+        t["workload_contract"] = compile_contract(t)
     leads = {w["id"]: [x["id"] for x in workers if x.get("reports_to") == w["id"]] for w in workers
              if w.get("tier") == "cofounder"}
     plan.update({"critical_path": critical_path(plan["tasks"]), "escalation_conditions": list(ESCALATION_CONDITIONS),

@@ -24,6 +24,7 @@ from typing import Callable
 
 from ..db import now
 from .contracts import SupplyError
+from .identity import ensure_identity
 
 DOWN_AFTER_ERRORS = 2  # consecutive failed calls before an intelligence counts as unavailable
 DOWN_FOR_S = 600
@@ -90,15 +91,24 @@ class IntelligenceRegistry:
             for k in ("price_in", "price_out", "compute_usd_per_hour"):
                 m[k] = float(m[k] or 0)
             m["context"] = int(m["context"] or 0)
-            same = old is not None and served_version(old) == served_version(m)
+            conn = self.store.get("connection", connection_id) or {"id": connection_id}
+            m.update(ensure_identity(self.store, m, conn))
+            same = (old is not None and served_version(old) == served_version(m)
+                    and old.get("execution_profile_id") == m.get("execution_profile_id"))
             regression = (old or {}).get("regression") if same and (old or {}).get("regression") else {
                 "status": "unverified", "version": served_version(m), "at": now(),
                 "previous_version": served_version(old) if old and not same else None}
-            if m.get("runtime") == "scripted":  # a replay of a prepared script has no version to check
+            qualification = (old or {}).get("qualification") if same and (old or {}).get("qualification") else {
+                "status": "discovered", "execution_profile_id": m["execution_profile_id"],
+                "version": served_version(m), "at": now()}
+            if m.get("runtime") == "scripted":
                 regression = {"status": "not applicable", "version": "", "at": now(), "previous_version": None}
+                qualification = {"status": "qualified", "execution_profile_id": m["execution_profile_id"],
+                                 "version": "", "at": now(), "source": "scripted scenario"}
             m.update({"status": "active", "status_note": "", "fault": (old or {}).get("fault") or {},
                       "health": (old or {}).get("health") or {"errors": 0, "down_until": 0},
-                      "registered_at": (old or {}).get("registered_at") or now(), "regression": regression})
+                      "registered_at": (old or {}).get("registered_at") or now(), "regression": regression,
+                      "qualification": qualification})
             self.store.put("intelligence", mid, m)
             if old is None or not same:
                 self._audit("intelligence.registered", mid, {"model": m["name"], "provider": m["provider"],
@@ -166,6 +176,9 @@ class IntelligenceRegistry:
             return False, "failed its regression check"
         if regression == "unverified":
             return False, "not qualified for assignment yet"
+        qstatus = (m.get("qualification") or {}).get("status")
+        if qstatus and qstatus != "qualified":
+            return False, f"qualification status is {qstatus}"
         h = m.get("health") or {}
         if h.get("down_until", 0) > time.time():
             return False, f"down after {h.get('errors')} failed calls in a row"
@@ -181,7 +194,8 @@ class IntelligenceRegistry:
 
     # --- measurement -----------------------------------------------------------------------------------------
     def record_call(self, model_id: str, *, role: str, purpose: str, task_kind: str, usage: dict, run_id: str,
-                    error: str = "") -> dict:
+                    error: str = "", execution_profile_id: str | None = None,
+                    binding_epoch_id: str | None = None) -> dict:
         """Every call, metered: what it cost and how long it took. A failed call counts toward being down."""
         with self.lock:
             m = self.store.get("intelligence", model_id)
@@ -189,10 +203,22 @@ class IntelligenceRegistry:
                 raise RegistryError(f"no intelligence {model_id!r} in the registry")
             secs = float(usage.get("latency_s") or 0)
             tin, tout = int(usage.get("tokens_in") or 0), int(usage.get("tokens_out") or 0)
+            profile_id = execution_profile_id or usage.get("execution_profile_id") or m.get("execution_profile_id")
+            profile = self.store.get("execution_profile", profile_id) if profile_id else None
+            if profile:
+                if profile.get("runtime") == "local" or profile.get("local"):
+                    usd = round(secs * float(profile.get("compute_usd_per_hour") or 0) / 3600, 6)
+                else:
+                    usd = round(tin * float(profile.get("price_in") or 0) / 1e6
+                                + tout * float(profile.get("price_out") or 0) / 1e6, 6)
+            else:
+                usd = self.cost(m, tin, tout, secs)
             c = {"id": f"c_{self._n('call') + 1:06d}", "model_id": model_id, "role": role, "purpose": purpose,
                  "task_kind": task_kind, "run_id": run_id, "tokens_in": tin, "tokens_out": tout,
-                 "seconds": round(secs, 1), "usd": self.cost(m, tin, tout, secs), "write_tps": usage.get("write_tps"),
-                 "error": error[:300], "served_by": m.get("served_by") or "", "at": now()}
+                 "seconds": round(secs, 1), "usd": usd, "write_tps": usage.get("write_tps"),
+                 "error": error[:300], "served_by": m.get("served_by") or "",
+                 "execution_profile_id": profile_id,
+                 "binding_epoch_id": binding_epoch_id or usage.get("binding_epoch_id"), "at": now()}
             self.store.put("call", c["id"], c)
             h = m.get("health") or {"errors": 0, "down_until": 0}
             h["errors"] = h.get("errors", 0) + 1 if error else 0
@@ -206,11 +232,15 @@ class IntelligenceRegistry:
 
     def record_outcome(self, model_id: str, *, role: str, task_kind: str, task_id: str, run_id: str, attempt: int,
                        verified: bool, usd: float, seconds: float, tokens: int, failure: str = "",
-                       source: str = "project") -> dict:
+                       source: str = "project", execution_profile_id: str | None = None,
+                       binding_epoch_id: str | None = None) -> dict:
         """One verification of one attempt at a task: the unit Cynqra learns from."""
         with self.lock:
-            version = served_version(self.store.get("intelligence", model_id) or {})
+            m = self.store.get("intelligence", model_id) or {}
+            version = served_version(m)
+            profile_id = execution_profile_id or m.get("execution_profile_id")
             o = {"id": f"o_{self._n('outcome') + 1:06d}", "model_id": model_id, "model_version": version,
+                 "execution_profile_id": profile_id, "binding_epoch_id": binding_epoch_id,
                  "role": role, "task_kind": task_kind, "task_id": task_id, "run_id": run_id, "attempt": attempt,
                  "verified": bool(verified), "first_pass": bool(verified and attempt == 1), "usd": round(usd, 6),
                  "seconds": round(seconds, 1), "tokens": int(tokens), "failure": failure[:400], "source": source,
@@ -223,6 +253,9 @@ class IntelligenceRegistry:
             m = self.get(model_id)
             m["regression"] = {"status": "passed" if passed else "failed", "version": served_version(m),
                                "at": now(), "evidence": evidence[:300]}
+            m["qualification"] = {"status": "qualified" if passed else "failed",
+                                  "execution_profile_id": m.get("execution_profile_id"),
+                                  "version": served_version(m), "at": now(), "evidence": evidence[:300]}
             self.store.put("intelligence", model_id, m)
             self._audit("intelligence.regression_checked", model_id, {"passed": passed, "evidence": evidence[:200],
                         "version": served_version(m)})
@@ -242,8 +275,13 @@ class IntelligenceRegistry:
         """Measured performance: attempts verified, first-pass rate, cost and time per attempt, speed, reliability."""
         outs = self.outcomes(model_id, task_kind)
         calls = self.calls(model_id)
-        sb = (self.store.get("intelligence", model_id) or {}).get("served_by")
-        if sb:  # evidence belongs to the company that served it: another company's record is not this one's
+        m = self.store.get("intelligence", model_id) or {}
+        sb = m.get("served_by")
+        profile_id = m.get("execution_profile_id")
+        if profile_id:
+            outs = [o for o in outs if o.get("execution_profile_id") == profile_id]
+            calls = [c for c in calls if c.get("execution_profile_id") == profile_id]
+        elif sb:
             outs = [o for o in outs if str(o.get("model_version") or "").endswith("@" + sb)]
             calls = [c for c in calls if c.get("served_by") == sb]
         n = len(outs)
