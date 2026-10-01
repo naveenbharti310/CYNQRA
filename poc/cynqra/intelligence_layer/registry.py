@@ -204,9 +204,18 @@ class IntelligenceRegistry:
             secs = float(usage.get("latency_s") or 0)
             tin, tout = int(usage.get("tokens_in") or 0), int(usage.get("tokens_out") or 0)
             profile_id = execution_profile_id or usage.get("execution_profile_id") or m.get("execution_profile_id")
+            profile = self.store.get("execution_profile", profile_id) if profile_id else None
+            if profile:
+                if profile.get("runtime") == "local" or profile.get("local"):
+                    usd = round(secs * float(profile.get("compute_usd_per_hour") or 0) / 3600, 6)
+                else:
+                    usd = round(tin * float(profile.get("price_in") or 0) / 1e6
+                                + tout * float(profile.get("price_out") or 0) / 1e6, 6)
+            else:
+                usd = self.cost(m, tin, tout, secs)
             c = {"id": f"c_{self._n('call') + 1:06d}", "model_id": model_id, "role": role, "purpose": purpose,
                  "task_kind": task_kind, "run_id": run_id, "tokens_in": tin, "tokens_out": tout,
-                 "seconds": round(secs, 1), "usd": self.cost(m, tin, tout, secs), "write_tps": usage.get("write_tps"),
+                 "seconds": round(secs, 1), "usd": usd, "write_tps": usage.get("write_tps"),
                  "error": error[:300], "served_by": m.get("served_by") or "",
                  "execution_profile_id": profile_id,
                  "binding_epoch_id": binding_epoch_id or usage.get("binding_epoch_id"), "at": now()}
