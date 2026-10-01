@@ -78,7 +78,19 @@ class CapacityTests(unittest.TestCase):
 
 
 class QualificationTests(SupplyBase):
+    def test_unqualified_model_is_blocked_for_normal_calls_but_allowed_for_calibration(self):
+        entry = self.reg.get("model-a")
+        self.reg.set_regression("model-a", False, "P1 test: awaiting qualification")
+        blocked = self.supply.gateway.invoke("model-a", {"prompt": "x", "max_tokens": 16})
+        self.assertIn("not qualified", blocked["error"])
+        calibrated = self.supply.gateway.invoke(
+            "model-a", {"prompt": "Convert the founder objective: a bakery tracker", "max_tokens": 512},
+            mode="qualification")
+        self.assertFalse(calibrated.get("error"))
+        self.assertEqual(calibrated["execution_profile_id"], entry["execution_profile_id"])
+
     def test_cheap_qualification_produces_candidate_evidence_without_assigning(self):
+        self.reg.set_regression("model-a", False, "P1 test: awaiting qualification")
         q = QualificationEngine(self.supply).cheap_probe("model-a")
         self.assertIn(q["status"], ("candidate", "failed"))
         self.assertTrue(q["execution_profile_id"])
