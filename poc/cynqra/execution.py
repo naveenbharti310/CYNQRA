@@ -13,6 +13,7 @@ that keeps failing goes to the Replacement Engine, and to the founder only when 
 """
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
@@ -107,15 +108,48 @@ def work(run, t: dict) -> dict:
     repo = sorted(p.relative_to(run.paths["integration"]).as_posix()
                   for p in run.paths["integration"].rglob("*") if p.is_file() and "__pycache__" not in p.parts)
     who = t["blockers_to"]
-    result, usage = run.intel.work(t, worker=owner, objective=run.objective_ctx(), rules=run.rules(),
-                                   handoff=t.get("handoff") or {}, inbox=_inbox(run, t), feedback=t.get("feedback", ""),
-                                   answers=t.get("answers", []), call_index=t["work_calls"], previous=previous,
-                                   repo_files=repo, persona=run.persona(owner), answerers=who)
-    t["work_calls"] += 1
-    run.save_task(t)
-    run.record_call(t["id"], owner, "work", usage)
-    if run.meta["frozen"]:
-        return frozen_during_call(run, t)
+    tool_feedback = ""
+    result = {}
+    for tool_round in range(6):
+        result, usage = run.intel.work(
+            t, worker=owner, objective=run.objective_ctx(), rules=run.rules(),
+            handoff=t.get("handoff") or {}, inbox=_inbox(run, t),
+            feedback=(t.get("feedback", "") + tool_feedback),
+            answers=t.get("answers", []), call_index=t["work_calls"], previous=previous,
+            repo_files=repo, persona=run.persona(owner), answerers=who)
+        t["work_calls"] += 1
+        run.save_task(t)
+        run.record_call(t["id"], owner, "work", usage)
+        if run.meta["frozen"]:
+            return frozen_during_call(run, t)
+        calls = result.get("tool_calls") if isinstance(result, dict) else None
+        if not calls:
+            break
+        if t["kind"] not in roles.FILE_TYPES:
+            raise ProtocolError("tool calls are currently supported only for build and file tasks")
+        if not isinstance(calls, list) or len(calls) > 8:
+            raise ProtocolError("a worker may request at most eight tools in one round")
+        observations = []
+        for call in calls:
+            if not isinstance(call, dict) or not isinstance(call.get("action"), str):
+                raise ProtocolError("every tool call needs an action")
+            action = call["action"]
+            if action not in {"read_artifact", "search_files", "write_file", "delete_data", "install_package", "run_command",
+                              "run_tests"}:
+                raise ProtocolError(f"worker requested an unsupported tool: {action}")
+            target = str(call.get("target") or "")
+            content = call.get("content")
+            if content is not None and not isinstance(content, str):
+                raise ProtocolError("tool write content must be text")
+            g = run.gateway(owner, t["id"], action, target=target, content=content)
+            observations.append({"action": action, "target": target,
+                                 "status": g.get("status"), "result": g.get("result"),
+                                 "policy": g.get("policy")})
+        tool_feedback = "\n\nTool results from Cynqra:\n" + json.dumps(observations, ensure_ascii=False)[:12000]
+        previous = {p.relative_to(out).as_posix(): p.read_text(encoding="utf-8", errors="replace")
+                    for p in sorted(out.rglob("*")) if p.is_file()}
+    else:
+        raise ProtocolError("worker exhausted its six tool rounds without producing a final result")
     if result.get("result") == "blocked":
         needs = result.get("needs_from") if result.get("needs_from") in who else who[0]
         blocker = run.send("Blocker", {"category": result.get("category", "missing_input"),
