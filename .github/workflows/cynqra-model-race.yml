@@ -7,7 +7,7 @@ name: cynqra-model-race
 
 on:
   push:
-    branches: [cynqra]
+    branches: [main]
 
 permissions:
   contents: read
