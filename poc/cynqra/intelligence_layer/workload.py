@@ -11,8 +11,8 @@ from .. import roles
 _REQUIRED = {
     "document": ("structured_output",),
     "decision": ("reasoning",),
-    "code": ("code_generation",),
-    "forecast": ("code_generation", "reasoning"),
+    "code": ("coding",),
+    "forecast": ("coding", "reasoning"),
     "review_merge": ("reasoning", "code_generation"),
     "deploy": ("reasoning",),
     "assign": ("structured_output", "reasoning"),
