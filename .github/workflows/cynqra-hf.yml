@@ -7,7 +7,7 @@ name: cynqra-hf
 
 on:
   push:
-    branches: [cynqra]
+    branches: [main]
 
 permissions:
   contents: read
