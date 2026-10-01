@@ -3,7 +3,7 @@
 name: cynqra-model-scan
 on:
   push:
-    branches: [cynqra]
+    branches: [main]
     paths: [".github/workflows/cynqra-model-scan.yml"]
 permissions:
   contents: read
