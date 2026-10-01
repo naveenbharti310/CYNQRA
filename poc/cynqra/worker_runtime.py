@@ -9,7 +9,6 @@ place this runtime inside an OS/container sandbox before untrusted generated cod
 from __future__ import annotations
 
 import os
-import shlex
 import subprocess
 from pathlib import Path
 from typing import Iterable
@@ -25,7 +24,7 @@ COMMANDS = {
 }
 
 
-class RuntimeError(RuntimeError):
+class WorkerRuntimeError(RuntimeError):
     pass
 
 
@@ -38,35 +37,35 @@ def workspace_root(root: Path) -> Path:
 def safe_path(root: Path, relative: str) -> Path:
     p = Path(relative)
     if p.is_absolute() or ".." in p.parts:
-        raise RuntimeError("path must remain relative to the worker workspace")
+        raise WorkerRuntimeError("path must remain relative to the worker workspace")
     dest = (workspace_root(root) / p).resolve()
     if workspace_root(root) not in dest.parents and dest != workspace_root(root):
-        raise RuntimeError("path escapes the worker workspace")
+        raise WorkerRuntimeError("path escapes the worker workspace")
     return dest
 
 
 def list_files(root: Path, relative: str = "") -> list[str]:
     base = safe_path(root, relative)
     if not base.exists():
-        raise RuntimeError(f"path does not exist: {relative}")
+        raise WorkerRuntimeError(f"path does not exist: {relative}")
     if not base.is_dir():
-        raise RuntimeError("list_files requires a directory")
+        raise WorkerRuntimeError("list_files requires a directory")
     return sorted(str(p.relative_to(workspace_root(root))) for p in base.rglob("*") if p.is_file())
 
 
 def read_file(root: Path, relative: str, max_bytes: int = 200_000) -> str:
     p = safe_path(root, relative)
     if not p.is_file():
-        raise RuntimeError(f"file does not exist: {relative}")
+        raise WorkerRuntimeError(f"file does not exist: {relative}")
     if p.stat().st_size > max_bytes:
-        raise RuntimeError("file exceeds the runtime read limit")
+        raise WorkerRuntimeError("file exceeds the runtime read limit")
     return p.read_text(encoding="utf-8", errors="replace")
 
 
 def write_file(root: Path, relative: str, content: str, max_bytes: int = 200_000) -> dict:
     data = content.encode("utf-8")
     if len(data) > max_bytes:
-        raise RuntimeError("file exceeds the runtime write limit")
+        raise WorkerRuntimeError("file exceeds the runtime write limit")
     p = safe_path(root, relative)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_bytes(data)
@@ -76,16 +75,16 @@ def write_file(root: Path, relative: str, content: str, max_bytes: int = 200_000
 def delete_file(root: Path, relative: str) -> None:
     p = safe_path(root, relative)
     if not p.is_file():
-        raise RuntimeError(f"file does not exist: {relative}")
+        raise WorkerRuntimeError(f"file does not exist: {relative}")
     p.unlink()
 
 
 def search_files(root: Path, needle: str, relative: str = "") -> list[str]:
     if not needle:
-        raise RuntimeError("search text is required")
+        raise WorkerRuntimeError("search text is required")
     base = safe_path(root, relative)
     if not base.is_dir():
-        raise RuntimeError("search_files requires a directory")
+        raise WorkerRuntimeError("search_files requires a directory")
     hits = []
     for p in base.rglob("*"):
         if p.is_file() and p.stat().st_size <= 1_000_000:
@@ -100,7 +99,7 @@ def search_files(root: Path, needle: str, relative: str = "") -> list[str]:
 def _command(argv: Iterable[str]) -> list[str]:
     argv = list(argv)
     if not argv or argv[0] not in COMMANDS:
-        raise RuntimeError("command is not in the runtime allowlist")
+        raise WorkerRuntimeError("command is not in the runtime allowlist")
     if argv[0] == "python":
         return ["python3", *argv[1:]]
     return argv
@@ -109,7 +108,7 @@ def _command(argv: Iterable[str]) -> list[str]:
 def run(root: Path, argv: list[str], *, timeout: int = DEFAULT_TIMEOUT,
         env_allowlist: Iterable[str] = ()) -> dict:
     if timeout <= 0 or timeout > 900:
-        raise RuntimeError("timeout must be between 1 and 900 seconds")
+        raise WorkerRuntimeError("timeout must be between 1 and 900 seconds")
     root = workspace_root(root)
     command = _command(argv)
     allowed_env = {"PATH", "HOME", "LANG", "LC_ALL", *env_allowlist}
@@ -118,7 +117,7 @@ def run(root: Path, argv: list[str], *, timeout: int = DEFAULT_TIMEOUT,
         proc = subprocess.run(command, cwd=root, env=env, text=True, capture_output=True,
                               timeout=timeout, check=False)
     except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f"command timed out after {timeout}s") from exc
+        raise WorkerRuntimeError(f"command timed out after {timeout}s") from exc
     stdout = (proc.stdout or "")[-MAX_OUTPUT:]
     stderr = (proc.stderr or "")[-MAX_OUTPUT:]
     return {"argv": command, "returncode": proc.returncode, "passed": proc.returncode == 0,
