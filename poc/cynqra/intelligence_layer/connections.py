@@ -11,6 +11,8 @@ and retires the intelligence it offered; the measured record of that intelligenc
 """
 from __future__ import annotations
 
+import ipaddress
+import socket
 import threading
 import uuid
 from urllib.parse import urlparse
@@ -32,9 +34,23 @@ def check_endpoint(endpoint: str, auth_method: str) -> None:
     if u.scheme not in ("http", "https") or not u.hostname:
         raise ConnectionsError("the endpoint must be a web address starting with https:// (or http:// for a server "
                                "on this computer or one that needs no key)")
-    if auth_method != "none" and u.scheme == "http" and u.hostname not in LOCAL_HOSTS:
+    host = (u.hostname or "").lower()
+    if auth_method != "none" and u.scheme == "http" and host not in LOCAL_HOSTS:
         raise ConnectionsError("a key is only sent over https:// to another computer; over http:// anyone on the "
                                "network could read it")
+    # Never let a provider connection carrying credentials target a private, loopback, link-local, multicast or
+    # otherwise non-public address. This blocks common SSRF and DNS-rebinding targets at connection setup.
+    if host not in LOCAL_HOSTS and host not in ("::1",):
+        try:
+            addresses = {item[4][0] for item in socket.getaddrinfo(host, u.port or (443 if u.scheme == "https" else 80),
+                                                                  type=socket.SOCK_STREAM)}
+        except socket.gaierror as exc:
+            raise ConnectionsError(f"the endpoint hostname does not resolve: {host}") from exc
+        for address in addresses:
+            ip = ipaddress.ip_address(address)
+            if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved
+                    or ip.is_unspecified):
+                raise ConnectionsError("the endpoint resolves to a private or otherwise non-public network address")
 
 class ConnectionsError(SupplyError):
     pass
