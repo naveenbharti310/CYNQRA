@@ -40,16 +40,37 @@ def bind(run, worker_id: str, entry: dict, *, reason: str, by: str, candidates: 
     if old and old["intelligence_id"] == entry["id"] and old.get("version") == served_version(entry):
         return old
     history = list((old or {}).get("history") or [])
+    epoch = int((old or {}).get("epoch") or 0) + 1
+    profile_id = entry.get("execution_profile_id")
+    binding_epoch_id = f"be_{worker_id}_{epoch}"
     if old:
-        history.append({k: old[k] for k in ("intelligence_id", "intelligence", "version", "reason", "by", "bound_at")})
+        history.append({k: old.get(k) for k in (
+            "worker_id", "intelligence_id", "intelligence", "version", "execution_profile_id",
+            "binding_epoch_id", "epoch", "reason", "by", "bound_at")})
+    epoch_record = {
+        "id": binding_epoch_id,
+        "worker_id": worker_id,
+        "epoch": epoch,
+        "intelligence_id": entry["id"],
+        "execution_profile_id": profile_id,
+        "version": served_version(entry),
+        "previous_binding_epoch_id": (old or {}).get("binding_epoch_id"),
+        "bound_at": now(),
+        "reason": reason[:400],
+        "by": by,
+    }
+    run.store.put("binding_epoch", binding_epoch_id, epoch_record)
     b = {"worker_id": worker_id, "intelligence_id": entry["id"], "intelligence": entry["name"],
-         "version": served_version(entry), "reason": reason[:400], "by": by,
+         "version": served_version(entry), "execution_profile_id": profile_id,
+         "binding_epoch_id": binding_epoch_id, "epoch": epoch,
+         "reason": reason[:400], "by": by,
          "candidates": candidates if candidates is not None else (old or {}).get("candidates", []),
-         "bound_at": now(), "history": history}
+         "bound_at": epoch_record["bound_at"], "history": history}
     run.store.put("binding", worker_id, b)
     role = (run.worker(worker_id) or {}).get("role", "control plane")
     run.event("worker.intelligence_bound", "worker", worker_id, {
         "role": role, "intelligence_id": entry["id"], "model": entry["name"], "version": b["version"],
+        "execution_profile_id": profile_id, "binding_epoch_id": binding_epoch_id, "epoch": epoch,
         "previous": (old or {}).get("intelligence_id"), "reason": reason[:200], "by": by,
         "candidates": [{k: r.get(k) for k in ("model", "score", "p_task", "expected_usd", "expected_minutes")}
                        for r in (candidates or [])]},
