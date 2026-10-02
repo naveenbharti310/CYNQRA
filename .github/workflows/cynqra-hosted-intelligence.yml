@@ -37,9 +37,9 @@ jobs:
     env:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
-      # the Claude key: this repository keeps it as Claude_key (secret names are not case-sensitive); the
-      # conventional names are read too
-      ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_KEY || secrets.ANTHROPIC_API_KEY || secrets.CLAUDE_API_KEY }}
+      # the Claude key: ANTHROPIC_API_KEY first, then the names this repository has also used (Claude_key; secret
+      # names are not case-sensitive)
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY || secrets.CLAUDE_KEY || secrets.CLAUDE_API_KEY }}
       # a key for several workspaces must name the one each request runs in: an identifier, not a credential
       ANTHROPIC_WORKSPACE_ID: ${{ inputs.anthropic_workspace_id || vars.ANTHROPIC_WORKSPACE_ID || secrets.ANTHROPIC_WORKSPACE_ID }}
       PYTHONUNBUFFERED: "1"
@@ -64,13 +64,13 @@ jobs:
               ;;
             anthropic)
               if [ -z "$ANTHROPIC_API_KEY" ]; then
-                echo "The Claude key (secret Claude_key or ANTHROPIC_API_KEY) is required when provider=anthropic."
+                echo "The Claude key (secret ANTHROPIC_API_KEY or Claude_key) is required when provider=anthropic."
                 exit 1
               fi
               ;;
             all)
               if [ -z "$GEMINI_API_KEY" ] && [ -z "$NVIDIA_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ]; then
-                echo "Add GEMINI_API_KEY, NVIDIA_API_KEY and/or Claude_key in repository Actions secrets before running this workflow."
+                echo "Add GEMINI_API_KEY, NVIDIA_API_KEY and/or ANTHROPIC_API_KEY in repository Actions secrets before running this workflow."
                 exit 1
               fi
               ;;
