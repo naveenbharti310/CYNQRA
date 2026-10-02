@@ -17,13 +17,19 @@ on:
         description: Optional objective to run through the objective intelligence loop (to its first bindings, or to delivery)
         required: false
         default: ""
+      objective_set:
+        description: "A named set of objectives run one after another against the same Intelligence Layer (p1-validation: location tracking, SaaS, research analysis)"
+        required: false
+        type: choice
+        options: [none, p1-validation]
+        default: none
       to_delivery:
         description: Carry the objective on through the work to delivery
         required: false
         type: boolean
         default: false
       max_minutes:
-        description: Time limit for the work after the first bindings, in minutes
+        description: Time limit for each objective's work after its first bindings, in minutes
         required: false
         default: "300"
       price_per_m:
@@ -31,7 +37,7 @@ on:
         required: false
         default: ""
       budget_usd:
-        description: Hard cap for the objective run, in US dollars
+        description: Hard cap for each objective run, in US dollars
         required: false
         default: "1"
       anthropic_workspace_id:
@@ -116,12 +122,25 @@ jobs:
             --provider "${{ inputs.provider }}" \
             --max-models "${{ inputs.max_models }}" \
             --objective "$OBJECTIVE" \
+            --objective-set "${{ inputs.objective_set }}" \
             --budget-usd "${{ inputs.budget_usd }}" \
             --max-minutes "${{ inputs.max_minutes }}" \
             --data-root "$RUNNER_TEMP/cynqra-hosted-examination" $extra
+      - name: Audit the run from its persisted records
+        if: always()
+        working-directory: poc
+        # every control of the P1 completion mandate (sections 3 to 7 and 10), read from what the run persisted; the
+        # job's keys are passed by name so the scan can prove none of them was written anywhere (it never prints one)
+        run: |
+          root="$RUNNER_TEMP/cynqra-hosted-examination"
+          if [ ! -d "$root" ]; then echo "no data root: nothing to audit"; exit 0; fi
+          python3 -m cynqra.run_audit "$root" --json "$RUNNER_TEMP/run-audit.json" \
+            --secret-env GEMINI_API_KEY NVIDIA_API_KEY ANTHROPIC_API_KEY
       - name: Publish examination evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: cynqra-hosted-intelligence
-          path: ${{ runner.temp }}/cynqra-hosted-examination
+          path: |
+            ${{ runner.temp }}/cynqra-hosted-examination
+            ${{ runner.temp }}/run-audit.json

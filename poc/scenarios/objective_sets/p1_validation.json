@@ -1,0 +1,12 @@
+{
+  "name": "p1-validation",
+  "about": "Three materially different objectives (P1 completion mandate, section 9), run one after another against one Intelligence Layer, so selection can be compared across them and Objective A's evidence can be checked never to become Objective B's (section 10). Statements are written as a founder would write them; nothing in them names a model.",
+  "objectives": [
+    {"id": "location_tracking",
+     "statement": "Build a location-tracking application for a small delivery company. Each driver's phone reports its position every 30 seconds; a backend ingests and stores the positions; dispatchers see every driver's live position and today's route on a map. Positions are private: only dispatchers of the same company may see them, and they are deleted after 30 days. Include tests for ingestion, the route calculation and the privacy rules."},
+    {"id": "saas_platform",
+     "statement": "Build a multi-tenant SaaS for small gyms to run memberships. Members sign up and choose a plan, staff check members in at the door, and owners see monthly revenue and churn. Each gym's data must be separate from every other gym's. It needs a database schema, an API, a web front end and a deployment configuration, with tests for tenant separation and billing."},
+    {"id": "research_analysis",
+     "statement": "Build an analysis tool for our support team. It reads a CSV export of support tickets, finds the five most common causes of complaints and how each changed month over month, checks its own numbers against the raw data, and writes a short report that states its method and its limits."}
+  ]
+}

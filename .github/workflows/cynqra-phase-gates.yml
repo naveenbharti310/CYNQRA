@@ -54,6 +54,10 @@ jobs:
           test -f poc/tests/test_objective_intelligence.py
           test -f poc/tests/test_mandate_audit.py
           test -f poc/tests/test_real_model_proof.py
+          test -f poc/cynqra/run_audit.py
+          test -f poc/tests/test_run_audit.py
+          test -f poc/scenarios/objective_sets/p1_validation.json
+          test -f .github/workflows/cynqra-run-audit.yml
           grep -q "SelectionDecision" docs/6_PHASED_ARCHITECTURE.md
 
   real_examination:

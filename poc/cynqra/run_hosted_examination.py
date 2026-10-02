@@ -62,8 +62,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--provider", default="all", help="all, or providers joined with +: "
                     + ", ".join(PROVIDERS) + " (google+nvidia)")
     ap.add_argument("--data-root", default="")
-    ap.add_argument("--objective", default="", help="after qualification, run this objective through the objective "
-                    "intelligence loop: requirements, workforce, plan, calibration, decisions")
+    ap.add_argument("--objective", action="append", default=[], help="after qualification, run this objective "
+                    "through the objective intelligence loop: requirements, workforce, plan, calibration, decisions "
+                    "(repeat for several, run one after another against the same Intelligence Layer)")
+    ap.add_argument("--objective-set", default="", help="a named set of objectives (scenarios/objective_sets/<name>"
+                    ".json), run after any --objective: " + ", ".join(objective_sets()))
     ap.add_argument("--budget-usd", type=float, default=1.0, help="the objective run's hard cap")
     ap.add_argument("--to-delivery", action="store_true", help="carry the objective on through the work to delivery")
     ap.add_argument("--max-minutes", type=float, default=300.0, help="time limit for the work after first bindings")
@@ -115,12 +118,23 @@ def main(argv: list[str] | None = None) -> int:
         for m in selected:
             print(f"\nExamining {m['ref']}...", flush=True)
             manifest["results"].append(probe(supply, m["id"], log=print))
-        if args.objective:
-            manifest["objective_run"] = objective_run(supply, root / "objective-run", args.objective, args.budget_usd,
-                                                      to_delivery=args.to_delivery, max_minutes=args.max_minutes)
-            print("\nObjective run:\n" + json.dumps(objective_summary(manifest["objective_run"]), indent=2, default=str))
-            print("\nSelection report:\n" + json.dumps((manifest["objective_run"].get("selection_report") or {}).get(
-                "summary"), indent=2, default=str))
+        statements = objectives(args.objective, args.objective_set)
+        runs = []
+        for i, (label, statement) in enumerate(statements, 1):
+            folder = root / ("objective-run" if len(statements) == 1 else f"objective-run-{i}")
+            print(f"\nObjective {i} of {len(statements)} ({label}), in {folder.name}:", flush=True)
+            r = objective_run(supply, folder, statement, args.budget_usd, to_delivery=args.to_delivery,
+                              max_minutes=args.max_minutes)
+            runs.append(r | {"label": label, "folder": folder.name})
+            print("\nObjective run:\n" + json.dumps(objective_summary(r), indent=2, default=str))
+            print("\nSelection report:\n" + json.dumps((r.get("selection_report") or {}).get("summary"), indent=2,
+                                                       default=str))
+        if runs:
+            manifest["objective_run"] = runs[0]  # the first, where earlier manifests kept their only one
+            manifest["objective_runs"] = runs
+        if len(runs) > 1:
+            manifest["comparison"] = comparison(runs)
+            print("\nAcross objectives:\n" + json.dumps(manifest["comparison"], indent=2, default=str))
         (root / "manifest.json").write_text(json.dumps(manifest, indent=2, default=str), encoding="utf-8")
         passed = sum(bool(r.get("passed")) for r in manifest["results"])
         print(json.dumps({"models_examined": len(selected), "passed": passed,
@@ -128,6 +142,53 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if selected and passed else 1
     finally:
         supply.close()
+
+
+SETS = Path(__file__).resolve().parent.parent / "scenarios" / "objective_sets"
+
+
+def objective_sets() -> list[str]:
+    return sorted(json.loads(p.read_text(encoding="utf-8"))["name"] for p in SETS.glob("*.json"))
+
+
+def objectives(given: list[str] | str | None, set_name: str = "") -> list[tuple[str, str]]:
+    """The objectives to run, in order, each with a label: those given on the command line, then a named set's."""
+    given = [given] if isinstance(given, str) else list(given or [])
+    out = [(f"objective_{i}", s) for i, s in enumerate((x.strip() for x in given if x and x.strip()), 1)]
+    if set_name and set_name != "none":
+        found = [json.loads(p.read_text(encoding="utf-8")) for p in SETS.glob("*.json")]
+        chosen = next((x for x in found if x["name"] == set_name), None)
+        if chosen is None:
+            raise SystemExit(f"--objective-set is one of {', '.join(objective_sets())} (unknown: {set_name})")
+        out += [(o["id"], o["statement"]) for o in chosen["objectives"]]
+    return out
+
+
+def comparison(runs: list[dict]) -> dict:
+    """Each objective's own choices, side by side: by kind of work, which intelligence its controller chose first and
+    which produced the verified work. Read per objective; nothing here ranks one intelligence above another across
+    objectives, and a choice that differs between objectives is reported, not explained away."""
+    per = []
+    for r in runs:
+        items = (r.get("selection_report") or {}).get("items") or []
+        kinds: dict[str, dict] = {}
+        for x in items:
+            k = kinds.setdefault(x["kind"], {"first_choice": {}, "verified_by": {}, "work_items": 0})
+            k["work_items"] += 1
+            k["first_choice"][str(x["first_choice"])] = k["first_choice"].get(str(x["first_choice"]), 0) + 1
+            if x.get("verified_by"):
+                k["verified_by"][x["verified_by"]] = k["verified_by"].get(x["verified_by"], 0) + 1
+        per.append({"label": r.get("label"), "folder": r.get("folder"), "stage": r.get("stage"),
+                    "calibration": (r.get("calibration") or {}).get("status"),
+                    "evidence_by_intelligence": ((r.get("selection_report") or {}).get("summary") or {}).get(
+                        "evidence_by_intelligence"), "by_kind": kinds})
+    shared = sorted(set.intersection(*[set(p["by_kind"]) for p in per])) if per else []
+    differs = [k for k in shared if len({json.dumps(p["by_kind"][k]["first_choice"], sort_keys=True)
+                                         for p in per}) > 1]
+    return {"objectives": per, "kinds_in_every_objective": shared, "kinds_chosen_differently": differs,
+            "reading": "each objective's choices come from its own evidence over a shared global prior; a kind chosen "
+                       "differently is selection conditional on the work, and the same choice everywhere is not a "
+                       "ranking either"}
 
 
 def connection_report(supply) -> list[dict]:

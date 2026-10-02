@@ -335,6 +335,15 @@ def commit(run, d: dict, work: dict, *, reason: str, by: str, purpose: str, excl
                 "work_item_id": d["work_item_id"], "intelligence_id": entry["id"], "version": served_version(entry),
                 "binding_version": b.get("_v"), "mode": d["selection_mode"]}, actor="intelligence_controller",
                 correlation_id=d["work_item_id"], aggregate_version=None)
+            if d["selection_mode"] == "reselect" and purpose != "reselection":
+                # evidence moved this work off its incumbent (the worker's own intelligence, say) on verified
+                # superiority: the founder sees it as a reselection, whichever path decided it (revalidate says so
+                # itself before it commits)
+                run.event("intelligence.reselection.triggered", "task" if d["scope"] == "task" else "work_item",
+                          d["work_item_id"], {"from": (incumbent or {}).get("intelligence_id"), "to": entry["id"],
+                                              "decision_id": d["decision_id"], "evidence_version": d["evidence_version"],
+                                              "mode": d["selection_mode"], "purpose": purpose},
+                          actor="intelligence_controller", correlation_id=d["work_item_id"])
             return b
     raise ConcurrencyError(f"could not bind {d['work_item_id']}: the binding kept changing")
 

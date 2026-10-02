@@ -1,0 +1,58 @@
+name: cynqra-run-audit
+
+# Audit a finished hosted examination from its persisted records: every control of the P1 completion mandate
+# (sections 3 to 7 and 10). The run's artifact is downloaded here, inside Actions; nothing is called and nothing in
+# it is changed. The verdicts and the tables an auditor reads are printed to this job's log and kept as an artifact.
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: The cynqra-hosted-intelligence run to audit (its run ID)
+        required: true
+      artifact:
+        description: The artifact holding that run's data root
+        required: false
+        default: cynqra-hosted-intelligence
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  audit:
+    name: Audit a run from its persisted records
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # only so the scan can prove these values appear in no persisted file; they are never printed
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY || secrets.CLAUDE_KEY }}
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - name: Download the run's artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact }}
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/audited-run
+      - name: Audit
+        working-directory: poc
+        env:
+          RUN_ID: ${{ inputs.run_id }}
+        run: |
+          root="$RUNNER_TEMP/audited-run"
+          # newer artifacts also carry the run's own audit beside the data root
+          if [ -d "$root/cynqra-hosted-examination" ]; then root="$root/cynqra-hosted-examination"; fi
+          echo "auditing run $RUN_ID from $root"
+          python3 -m cynqra.run_audit "$root" --json "$RUNNER_TEMP/run-audit-$RUN_ID.json" \
+            --secret-env GEMINI_API_KEY NVIDIA_API_KEY ANTHROPIC_API_KEY
+      - name: Keep the audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cynqra-run-audit-${{ inputs.run_id }}
+          path: ${{ runner.temp }}/run-audit-${{ inputs.run_id }}.json
+          if-no-files-found: ignore
