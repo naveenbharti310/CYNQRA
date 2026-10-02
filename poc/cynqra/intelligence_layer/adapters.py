@@ -387,14 +387,31 @@ class AnthropicAdapter(ProviderAdapter):
 
     MAX_PAGES = 10  # the listing is paged a hundred at a time; a thousand models is far beyond any real account
 
+    @staticmethod
+    def workspace(conn: dict) -> str | None:
+        """The workspace a key that is not scoped to one must name on every request (anthropic-workspace-id): the
+        environment's ANTHROPIC_WORKSPACE_ID for a connection made from it, else the connection's own. An identifier,
+        not a secret."""
+        if conn.get("origin") == "environment":
+            return os.environ.get("ANTHROPIC_WORKSPACE_ID") or None
+        return str((conn.get("metadata") or {}).get("workspace_id") or "") or None
+
     def _listing(self, conn: dict, secret: str | None) -> dict[str, dict]:
         """Every model the key can reach, by id, across the listing's pages."""
         base = (conn.get("endpoint") or self.DEFAULT) + "/v1/models?limit=100"
-        headers = {"x-api-key": secret or "", "anthropic-version": self.VERSION}
+        headers = {"x-api-key": secret or "", "anthropic-version": self.VERSION,
+                   **({"anthropic-workspace-id": self.workspace(conn)} if self.workspace(conn) else {})}
         out: dict[str, dict] = {}
         after = None
         for _ in range(self.MAX_PAGES):
-            data = _get_json(base + (f"&after_id={urllib.parse.quote(after)}" if after else ""), headers)
+            try:
+                data = _get_json(base + (f"&after_id={urllib.parse.quote(after)}" if after else ""), headers)
+            except SupplyError as exc:
+                if "anthropic-workspace-id" in str(exc) and not self.workspace(conn):
+                    raise SupplyError("this key is not scoped to one workspace: set ANTHROPIC_WORKSPACE_ID to the "
+                                      "workspace's wrkspc_ ID (Claude Console, Settings, Workspaces), or use a key "
+                                      "created for one workspace") from exc
+                raise
             rows = [m for m in data.get("data") or [] if isinstance(m, dict) and m.get("id")]
             out.update((m["id"], m) for m in rows)
             if not data.get("has_more") or not rows:
@@ -433,8 +450,11 @@ class AnthropicAdapter(ProviderAdapter):
 
     def route(self, conn: dict, secret: str | None, entry: dict) -> dict:
         ep = conn.get("endpoint") or ""
+        # a connection made from the environment calls in the environment's workspace; any other names its own,
+        # or none, so another key's workspace never reaches its calls
+        ws = {} if conn.get("origin") == "environment" else {"ANTHROPIC_WORKSPACE_ID": self.workspace(conn)}
         return _hosted({"kind": "anthropic", "label": entry["ref"], "local": False, "ANTHROPIC_API_KEY": secret,
-                        **({"CYNQRA_ANTHROPIC_URL": ep + "/v1/messages"} if ep else {}), **_settings(conn)}, conn)
+                        **({"CYNQRA_ANTHROPIC_URL": ep + "/v1/messages"} if ep else {}), **ws, **_settings(conn)}, conn)
 
     def environment_specs(self, primary: dict | None) -> list[dict]:
         """The key's models, discovered from the provider's listing; only a model the environment names

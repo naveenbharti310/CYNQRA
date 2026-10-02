@@ -284,6 +284,9 @@ def _anthropic(prompt: str, model: str, max_tokens: int = 1500) -> dict:
             "x-api-key": _ENV["ANTHROPIC_API_KEY"],
             "anthropic-version": "2023-06-01",
             "Content-Type": "application/json",
+            # a key not scoped to one workspace must name the workspace each request runs in
+            **({"anthropic-workspace-id": _ENV.get("ANTHROPIC_WORKSPACE_ID")}
+               if _ENV.get("ANTHROPIC_WORKSPACE_ID") else {}),
         },
     )
     stop = data.get("stop_reason")

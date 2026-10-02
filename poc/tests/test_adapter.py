@@ -154,6 +154,16 @@ class AnthropicWireTests(ProviderBase):
         self.assertEqual(listing["headers"]["x-api-key"], "test-key-not-real")
         e.close()
 
+    def test_a_key_for_several_workspaces_sends_the_workspace_with_each_call(self):
+        os.environ["ANTHROPIC_WORKSPACE_ID"] = "wrkspc_01TESTWORKSPACE"
+        data, usage = env_source()._call("Plan the work for this organization")
+        self.assertIn("tasks", data)
+        self.assertEqual(self.p.listings[-1]["headers"]["anthropic-workspace-id"], "wrkspc_01TESTWORKSPACE")
+        self.assertEqual(self.p.requests[-1]["headers"]["anthropic-workspace-id"], "wrkspc_01TESTWORKSPACE")
+        del os.environ["ANTHROPIC_WORKSPACE_ID"]
+        env_source()._call("Plan the work for this organization")
+        self.assertNotIn("anthropic-workspace-id", self.p.requests[-1]["headers"], "a single-workspace key omits it")
+
     def test_truncated_reply_is_an_error_not_a_short_answer(self):
         self.p.mode = "truncated"
         with self.assertRaises(IntelligenceError) as ctx:

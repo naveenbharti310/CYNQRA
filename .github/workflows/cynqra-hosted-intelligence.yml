@@ -21,6 +21,10 @@ on:
         description: Hard cap for the objective run, in US dollars
         required: false
         default: "1"
+      anthropic_workspace_id:
+        description: Claude workspace ID (wrkspc_...), needed when the Claude key is not scoped to one workspace
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -36,6 +40,8 @@ jobs:
       # the Claude key: this repository keeps it as Claude_key (secret names are not case-sensitive); the
       # conventional names are read too
       ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_KEY || secrets.ANTHROPIC_API_KEY || secrets.CLAUDE_API_KEY }}
+      # a key for several workspaces must name the one each request runs in: an identifier, not a credential
+      ANTHROPIC_WORKSPACE_ID: ${{ inputs.anthropic_workspace_id || vars.ANTHROPIC_WORKSPACE_ID || secrets.ANTHROPIC_WORKSPACE_ID }}
       PYTHONUNBUFFERED: "1"
     steps:
       - uses: actions/checkout@v5

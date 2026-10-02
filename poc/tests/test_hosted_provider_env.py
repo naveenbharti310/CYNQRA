@@ -216,5 +216,41 @@ class HostedEnvironmentTests(unittest.TestCase):
         self.assertEqual(manifest["connections"][0]["status"], "error")
         self.assertNotIn("sk-ant-test", out.getvalue() + json.dumps(manifest), "the key never reaches the evidence")
 
+    def test_a_key_for_several_workspaces_names_the_workspace_on_every_request(self):
+        adapter = AnthropicAdapter()
+        seen = []
+
+        def listing(url, headers):
+            seen.append(dict(headers))
+            return {"data": [{"id": "claude-a-5"}], "has_more": False}
+
+        with mock.patch("cynqra.intelligence_layer.adapters._get_json", side_effect=listing), \
+                mock.patch.dict(os.environ, {"ANTHROPIC_WORKSPACE_ID": "wrkspc_01TESTWORKSPACE"}, clear=False):
+            adapter.discover({"endpoint": "", "origin": "environment", "models": []}, "not-a-real-secret")
+            route = adapter.route({"endpoint": "", "origin": "environment"}, "not-a-real-secret", {"ref": "claude-a-5"})
+            self.assertNotIn("ANTHROPIC_WORKSPACE_ID", route, "the environment's calls read the environment's workspace")
+            founder = {"endpoint": "", "origin": "founder", "models": [], "metadata": {"workspace_id": "wrkspc_01OWN"}}
+            adapter.discover(founder, "not-a-real-secret")
+            self.assertEqual(adapter.route(founder, "k", {"ref": "claude-a-5"})["ANTHROPIC_WORKSPACE_ID"], "wrkspc_01OWN")
+            plain = {"endpoint": "", "origin": "founder", "models": []}
+            adapter.discover(plain, "not-a-real-secret")
+            self.assertIsNone(adapter.route(plain, "k", {"ref": "claude-a-5"})["ANTHROPIC_WORKSPACE_ID"],
+                              "another key's workspace never reaches a connection that names none")
+        self.assertEqual(seen[0]["anthropic-workspace-id"], "wrkspc_01TESTWORKSPACE")
+        self.assertEqual(seen[1]["anthropic-workspace-id"], "wrkspc_01OWN")
+        self.assertNotIn("anthropic-workspace-id", seen[2])
+
+    def test_a_missing_workspace_is_explained(self):
+        from cynqra.intelligence_layer.contracts import SupplyError
+        adapter = AnthropicAdapter()
+        refused = SupplyError("https://api.anthropic.com/v1/models?limit=100 answered HTTP 400: This API key is not "
+                              "scoped to a workspace, so this request must include the anthropic-workspace-id header")
+        with mock.patch("cynqra.intelligence_layer.adapters._get_json", side_effect=refused), \
+                mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("ANTHROPIC_WORKSPACE_ID", None)
+            with self.assertRaises(SupplyError) as ctx:
+                adapter.discover({"endpoint": "", "origin": "environment", "models": []}, "not-a-real-secret")
+        self.assertIn("set ANTHROPIC_WORKSPACE_ID", str(ctx.exception))
+
 if __name__ == "__main__":
     unittest.main()
