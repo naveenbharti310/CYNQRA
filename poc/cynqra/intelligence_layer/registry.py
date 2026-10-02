@@ -26,7 +26,11 @@ from ..db import now
 from .contracts import SupplyError
 
 DOWN_AFTER_ERRORS = 2  # consecutive failed calls before an intelligence counts as unavailable
-DOWN_FOR_S = 600
+DOWN_FOR_S = 600  # how long it is left untried the first time it goes down
+# Each time it goes down again without having answered in between, the wait doubles, to at most an hour: a provider
+# still limiting calls after one wait is likely to keep doing so. On a fixed wait, real run 36972596704 moved seven
+# workers back to a rate-limited model three times, and each time it refused again within two minutes.
+DOWN_MAX_S = 3600
 FACTS = ("name", "provider", "ref", "runtime", "version", "context", "tools", "json_schema", "modalities", "mcp",
          "local", "price_in", "price_out", "compute_usd_per_hour", "license", "commercial_use", "params", "hardware",
          "size_gb", "predict", "think", "served_by", "released",
@@ -217,10 +221,12 @@ class IntelligenceRegistry:
             self.store.put("call", c["id"], c)
             h = m.get("health") or {"errors": 0, "down_until": 0}
             h["errors"] = h.get("errors", 0) + 1 if error else 0
-            if h["errors"] >= DOWN_AFTER_ERRORS:
-                h["down_until"] = time.time() + DOWN_FOR_S
+            if h["errors"] >= DOWN_AFTER_ERRORS and h.get("down_until", 0) <= time.time():
+                # it goes down (again): a call in flight that fails while it is down changes nothing
+                h["trips"] = int(h.get("trips") or 0) + 1
+                h["down_until"] = time.time() + min(DOWN_MAX_S, DOWN_FOR_S * 2 ** (h["trips"] - 1))
             elif not error:  # it answered: it is up, whatever the last failures said
-                h["down_until"] = 0
+                h.update(down_until=0, trips=0)
             m["health"] = h
             self.store.put("intelligence", model_id, m)
             return c

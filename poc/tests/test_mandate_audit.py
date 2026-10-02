@@ -250,5 +250,46 @@ class CalibrationCoverageTests(unittest.TestCase):
             e.close()
 
 
+class ProviderBackOffTests(unittest.TestCase):
+    """Real run 36972596704: a rate-limited provider on a fixed ten-minute wait took seven workers back three times,
+    each refusing again within two minutes. The wait now doubles each time it goes down without answering between."""
+
+    def test_the_wait_doubles_each_time_it_goes_down_again_and_an_answer_resets_it(self):
+        from cynqra.intelligence_layer import registry as reg_mod
+        tmp = TempDir()
+        srv = ModelsServer()
+        sup = supply_with(tmp.path, [("Busy", 0.0)], srv)
+        try:
+            reg = sup.registry
+            mid = reg.models()[0]["id"]
+            clock = [1_000_000.0]
+
+            def call(error=""):
+                reg.record_call(mid, role="Engineer", purpose="work", task_kind="code", usage={}, run_id="r",
+                                error=error)
+                return (reg.get(mid).get("health") or {})
+
+            with mock.patch.object(reg_mod.time, "time", lambda: clock[0]):
+                self.assertEqual(call("HTTP 429")["down_until"], 0, "one failure is not down")
+                waits = []
+                for _ in range(5):
+                    h = call("HTTP 429")
+                    waits.append(h["down_until"] - clock[0])
+                    self.assertFalse(reg.availability(reg.get(mid))[0])
+                    clock[0] += 60  # a call that was in flight fails while it is down: the wait stays as it was
+                    self.assertEqual(call("HTTP 429")["down_until"] - clock[0], waits[-1] - 60)
+                    clock[0] = h["down_until"] + 1  # the wait is over: it may be tried again
+                    self.assertTrue(reg.availability(reg.get(mid))[0])
+                self.assertEqual(waits, [600, 1200, 2400, 3600, 3600])
+                h = call("")
+                self.assertEqual((h["errors"], h["down_until"], h["trips"]), (0, 0, 0), "an answer resets it")
+                call("HTTP 429")
+                self.assertEqual(call("HTTP 429")["down_until"] - clock[0], 600, "and the next outage starts again")
+        finally:
+            sup.close()
+            srv.close()
+            tmp.cleanup()
+
+
 if __name__ == "__main__":
     unittest.main()

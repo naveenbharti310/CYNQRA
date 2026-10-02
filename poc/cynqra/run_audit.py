@@ -264,7 +264,12 @@ def _decisions(out, c):
                "policy_hash": (d.get("policy_hash") or "")[:12], "snapshot": (d.get("evidence_snapshot") or "")[:12],
                "evidence_version": d.get("evidence_version"), "expected_usd": d.get("expected_cost"),
                "expected_minutes": d.get("expected_latency_minutes"), "binding_version": d.get("binding_version"),
-               "at": d.get("decision_timestamp"), "replayed": rp.get("reproduced")}
+               "at": d.get("decision_timestamp"), "replayed": rp.get("reproduced"),
+               # each candidate's quality with its band, evidence and the level that decided it, its cost and time:
+               # kept apart, never one score
+               "ranking": [{"id": r["id"], "q": r.get("quality"), "band": [r.get("lcb"), r.get("ucb")],
+                            "n": r.get("effective_n"), "by": r.get("decisive_level"), "usd": r.get("expected_usd"),
+                            "min": r.get("expected_minutes")} for r in d.get("ranking") or []][:4]}
         if d.get("scope") == "task" and d.get("selected_intelligence"):
             pc = controller.prior_choice(c["run"], d["decision_id"])
             row.update(prior=pc.get("prior"), agrees_with_prior=pc.get("agrees"))
