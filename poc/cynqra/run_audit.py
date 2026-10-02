@@ -60,6 +60,13 @@ def _check(out: list, section: str, name: str, status: str, detail: str, **data)
     out.append({"section": section, "check": name, "status": status, "detail": detail, **({"data": data} if data else {})})
 
 
+def _count(values) -> dict:
+    out: dict = {}
+    for v in values:
+        out[str(v)] = out.get(str(v), 0) + 1
+    return out
+
+
 def _runs(root: Path) -> list[Path]:
     return sorted(p.parent for p in root.glob("*/cynqra.db"))
 
@@ -162,6 +169,7 @@ def _candidates(out, c):
                      "served_by": m.get("served_by") or "", "served_version": served_version(m),
                      "qualification": q.get("status", "unverified"), "by_kind": q.get("by_kind") or {},
                      "status": m.get("status") or "active"})
+    rows.sort(key=lambda r: (r["qualification"] not in ("passed", "not applicable"), r["status"] != "active", r["id"]))
     c.setdefault("tables", {})["candidates"] = rows
     _check(out, "3", "candidates on record", PASS if rows else FAIL,
            f"{len(rows)} intelligence entries; {sum(1 for r in rows if r['qualification'] in ('passed', 'not applicable'))}"
@@ -244,9 +252,9 @@ def _decisions(out, c):
         row = {"decision": d["decision_id"], "purpose": d.get("purpose"), "scope": d.get("scope"),
                "work_item": d.get("work_item_id"), "selected": (d.get("selected_intelligence") or {}).get("id"),
                "mode": d.get("selection_mode"), "status": d.get("status"), "tier": d.get("tier"),
-               "eligible": len(d.get("eligible_candidates") or []), "excluded": [
-                   {"id": x["id"], "why": (x.get("violations") or [{}])[0].get("constraint")}
-                   for x in d.get("excluded_candidates") or []],
+               "eligible": [x.get("id") if isinstance(x, dict) else x for x in d.get("eligible_candidates") or []],
+               "excluded_by_constraint": _count((x.get("violations") or [{}])[0].get("constraint")
+                                                for x in d.get("excluded_candidates") or []),
                "objective_evidence": len(d.get("evidence_ids") or []), "policy": d.get("selection_policy_version"),
                "policy_hash": (d.get("policy_hash") or "")[:12], "snapshot": (d.get("evidence_snapshot") or "")[:12],
                "evidence_version": d.get("evidence_version"), "expected_usd": d.get("expected_cost"),
@@ -478,8 +486,9 @@ def _production(out, c):
 
 def _events(out, c):
     types, store = c["types"], c["store"]
-    owed = {"always": True, "calibrated": "intelligence.calibration.started" in types or any(
-        p.get("status") == "completed" for p in store.all("calibration_plan")),
+    # what each event reports is read from the state it reports, never from the event itself
+    owed = {"always": True, "calibrated": any(p.get("trials") or p.get("status") in ("running", "completed")
+                                              for p in store.all("calibration_plan")),
         "reviewed": any(x.get("purpose") == "review" for x in store.all("call")),
         # rework is what sent a work item back: a verification that asked for it, a cofounder's send-back, the
         # task's own rework history (a failed calibration trial is evidence, not rework; a third failure goes to
