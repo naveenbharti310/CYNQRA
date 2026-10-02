@@ -106,6 +106,27 @@ class ToDeliveryTests(unittest.TestCase):
         self.assertEqual(summary["journey"]["ended"], "accepted")
         self.assertEqual(summary["journey"]["refused"], [])
 
+    def test_the_live_view_prints_every_saved_event_once_in_order(self):
+        import re
+        from cynqra.db import Store
+        lines = []
+        out = rhe.objective_run(self.sup, self.tmp.path / "live", SCENARIO["messy"], 5.0, to_delivery=True,
+                                max_minutes=10, log=lines.append, live=True)
+        self.assertEqual(out["stage"], "accepted", out.get("error"))
+        shown = [int(m.group(1)) for x in lines if (m := re.match(r"  live #(\d+) ", x))]
+        s = Store(str(self.tmp.path / "live" / "cynqra.db"))
+        try:
+            saved = [e["seq"] for e in s.events()]
+            types = {e["seq"]: e["event_type"] for e in s.events()}
+        finally:
+            s.close()
+        self.assertEqual(shown, saved, "every saved event, once, in order; nothing that was not saved")
+        live = [x for x in lines if x.startswith("  live #")]
+        for name in ("objective.created", "intelligence.selection.committed", "verification.completed",
+                     "objective.completed"):
+            self.assertTrue(any(f" {name} " in x for x in live), name)
+        self.assertTrue(all(f" {types[n]} " in x for n, x in zip(shown, live)))
+
 
 if __name__ == "__main__":
     unittest.main()

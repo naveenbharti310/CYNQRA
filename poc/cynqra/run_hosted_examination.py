@@ -24,6 +24,7 @@ from pathlib import Path
 from .intelligence_layer import IntelligenceSupply
 from .intelligence_layer.candidates import details, family_key, priority, provider_key
 from .intelligence_layer.candidates import select as _select
+from .live_events import EventTail
 from .probe import probe
 
 _family_key, _candidate_score, _provider_key = family_key, priority, provider_key
@@ -70,6 +71,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--budget-usd", type=float, default=1.0, help="the objective run's hard cap")
     ap.add_argument("--to-delivery", action="store_true", help="carry the objective on through the work to delivery")
     ap.add_argument("--max-minutes", type=float, default=300.0, help="time limit for the work after first bindings")
+    ap.add_argument("--live-events", action="store_true", help="print each objective run's events to the log as "
+                    "they are saved: the founder's view, live")
     args = ap.parse_args(argv)
 
     keys = {p: env for p, (env, _) in PROVIDERS.items()}
@@ -124,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
             folder = root / ("objective-run" if len(statements) == 1 else f"objective-run-{i}")
             print(f"\nObjective {i} of {len(statements)} ({label}), in {folder.name}:", flush=True)
             r = objective_run(supply, folder, statement, args.budget_usd, to_delivery=args.to_delivery,
-                              max_minutes=args.max_minutes)
+                              max_minutes=args.max_minutes, live=args.live_events)
             runs.append(r | {"label": label, "folder": folder.name})
             print("\nObjective run:\n" + json.dumps(objective_summary(r), indent=2, default=str))
             print("\nSelection report:\n" + json.dumps((r.get("selection_report") or {}).get("summary"), indent=2,
@@ -241,7 +244,7 @@ def examination_answer(d: dict) -> str:
 
 
 def objective_run(supply, folder: Path, statement: str, budget_usd: float, *, to_delivery: bool = False,
-                  max_minutes: float = 300.0, log=print) -> dict:
+                  max_minutes: float = 300.0, log=print, live: bool = False) -> dict:
     """A real objective through the control plane, with the qualified hosted intelligence: the objective structured
     and decomposed, the workforce synthesized, the roadmap planned, objective calibration on representative work
     items and a persisted selection decision for every worker and work item; with to_delivery, on through the work,
@@ -251,6 +254,7 @@ def objective_run(supply, folder: Path, statement: str, budget_usd: float, *, to
     from .engine import Engine
     out = {"objective": statement, "budget_usd": budget_usd, "stage": "start", "to_delivery": to_delivery}
     e = Engine(folder, supply=supply)
+    tail = EventTail(e.store, log=log).start() if live else None
     try:
         e.create_company("Hosted objective examination", "live")
         e.set_guardrails(budget_usd=budget_usd, time_value_per_hour=10)
@@ -289,7 +293,11 @@ def objective_run(supply, folder: Path, statement: str, budget_usd: float, *, to
         except Exception:  # noqa: BLE001 - a report that cannot be built leaves the error to speak
             pass
     finally:
-        e.close()
+        try:
+            if tail is not None:
+                tail.stop()  # the last events, then the view ends; the store keeps every one of them
+        finally:
+            e.close()
     return out
 
 

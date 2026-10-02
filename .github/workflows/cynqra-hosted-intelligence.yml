@@ -125,6 +125,7 @@ jobs:
             --objective-set "${{ inputs.objective_set }}" \
             --budget-usd "${{ inputs.budget_usd }}" \
             --max-minutes "${{ inputs.max_minutes }}" \
+            --live-events \
             --data-root "$RUNNER_TEMP/cynqra-hosted-examination" $extra
       - name: Audit the run from its persisted records
         if: always()
