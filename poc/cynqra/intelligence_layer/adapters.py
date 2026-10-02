@@ -123,7 +123,8 @@ _OPENER = urllib.request.build_opener(_NoRedirect)
 MAX_RESPONSE_BYTES = 8_000_000
 
 def _get_json(url: str, headers: dict, timeout: float = 30.0):
-    req = urllib.request.Request(url, headers=headers)
+    from ..model_adapter import USER_AGENT  # the same signature as the calls: a bot filter refuses Python's own
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, **headers})
     try:
         with _OPENER.open(req, timeout=timeout) as r:
             length = r.headers.get("Content-Length")

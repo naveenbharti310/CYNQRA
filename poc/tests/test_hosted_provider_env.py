@@ -55,6 +55,38 @@ class HostedEnvironmentTests(unittest.TestCase):
         self.assertIn("GROQ_API_KEY", live_events.SECRET_ENV)
         self.assertIn("MISTRAL_API_KEY", live_events.SECRET_ENV)
 
+    def test_every_request_says_who_is_calling(self):
+        # run 37020380134: Groq's bot filter refused Python's default signature (HTTP 403, Cloudflare error 1010)
+        from cynqra.intelligence_layer import adapters
+        agents = []
+
+        class Resp:
+            headers = {}
+
+            def __init__(self):
+                self.left = b'{"data": [], "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}'
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self, n=-1):
+                out, self.left = self.left, b""
+                return out
+
+        def capture(req, timeout=None):
+            agents.append(req.get_header("User-agent"))
+            return Resp()
+
+        with mock.patch.object(adapters._OPENER, "open", side_effect=capture):
+            adapters._get_json("https://api.groq.com/openai/v1/models", {"Authorization": "Bearer x"})
+        with mock.patch.object(model_adapter._OPENER, "open", side_effect=capture):
+            model_adapter._post_once("https://api.groq.com/openai/v1/chat/completions", b"{}", {"Authorization": "x"})
+        self.assertEqual(agents, [model_adapter.USER_AGENT] * 2, "the listing and the call both say who is calling")
+        self.assertFalse(model_adapter.USER_AGENT.lower().startswith("python"))
+
     def test_environment_discovery_keeps_the_complete_provider_chat_catalogue(self):
         adapter = OpenAICompatibleAdapter()
         listing = {"data": [

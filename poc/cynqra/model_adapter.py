@@ -205,8 +205,13 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 _OPENER = urllib.request.build_opener(_NoRedirect)
 
 
+# Who is calling, on every request. Without it Python's own signature is sent, and a provider behind a bot filter
+# refuses the call before it reads the key (Groq answered HTTP 403, Cloudflare error 1010).
+USER_AGENT = "cynqra/1.0"
+
+
 def _post_once(url: str, body: bytes, headers: dict, timeout: float = TIMEOUT_S) -> dict:
-    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    req = urllib.request.Request(url, data=body, headers={"User-Agent": USER_AGENT, **headers}, method="POST")
     try:
         with _OPENER.open(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
