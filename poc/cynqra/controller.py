@@ -59,6 +59,16 @@ def objective_id(run) -> str:
     return obj.get("objective_id") or run.meta.get("objective_id") or f"obj_{run.cid}"
 
 
+def stamp(run, t: dict | None = None) -> dict:
+    """The objective and version a record belongs to, written on it when it is made (mandate 5): a task's attempt
+    keeps the version it started under, so a later version never re-labels what happened before it."""
+    obj = run.objective() or {}
+    t = t or {}
+    return {"objective_id": objective_id(run),
+            "objective_version": int(t.get("attempt_objective_version") or t.get("objective_version")
+                                     or obj.get("version") or 1)}
+
+
 def context(run) -> dict:
     from . import objective as objective_engine
     obj = run.objective() or {}
@@ -87,7 +97,7 @@ def _tier(kinds: list[str], requirement_ids: list[str], run) -> tuple[str, str]:
 
 
 def _work(run, *, item: str, scope: str, kinds: list[str], worker_id: str | None, role: str | None,
-          requirement_ids=(), acceptance_hash=None, criterion_ids=(), tier=None) -> dict:
+          requirement_ids=(), acceptance_hash=None, criterion_ids=(), tier=None, requires=()) -> dict:
     sel = policies.body("selection")
     t, importance = _tier(kinds, list(requirement_ids), run)
     ctx = context(run)
@@ -97,7 +107,9 @@ def _work(run, *, item: str, scope: str, kinds: list[str], worker_id: str | None
             "criterion_ids": list(criterion_ids), "risk_tier": tier or t, "importance": importance,
             "min_context": sel["min_context"],
             "output_tokens": max(sel["output_tokens"].get(k, sel["output_tokens"]["default"]) for k in kinds),
-            "local_only": _local_only(run)}
+            "local_only": _local_only(run),
+            # capabilities the work needs (mandate 46): its type's, and any the task names (an image to read, say)
+            "requires": sorted({*requires, *(r for k in kinds for r in roles.TASK_TYPES.get(k, {}).get("requires", []))})}
 
 
 def work_for_task(run, t: dict) -> dict:
@@ -105,7 +117,7 @@ def work_for_task(run, t: dict) -> dict:
     return _work(run, item=t["id"], scope="task", kinds=[t["kind"]], worker_id=t["owner_worker_id"],
                  role=owner.get("role"), requirement_ids=t.get("requirement_ids") or [],
                  acceptance_hash=t.get("acceptance_hash"),
-                 criterion_ids=[c["criterion_id"] for c in t.get("acceptance") or []])
+                 criterion_ids=[c["criterion_id"] for c in t.get("acceptance") or []], requires=t.get("requires") or [])
 
 
 def work_for_worker(run, w: dict, kinds: list[str]) -> dict:
@@ -597,6 +609,11 @@ def autonomy_of(run, t: dict) -> tuple[str, list[str]]:
                                                                                             "rejected_with_reason")
            for d in ds):
         return "human_assisted", ids  # it passed after a person sent it back
+    mid, _ = producer(run, t)
+    directed = [r for r in run.store.all("replacement") if r.get("human_directed") and r.get("active")
+                and r.get("worker_id") == t.get("owner_worker_id") and r.get("to") == mid]
+    if directed:  # a person chose which intelligence does this work; the work itself was its own
+        return "human_directed_reroute", ids + [r["id"] for r in directed]
     return "autonomous", ids
 
 
@@ -702,8 +719,8 @@ def record_task_evidence(run, t: dict, *, verified: bool | None, failure: dict |
                                     run_id=run.cid, attempt=rec["attempt"], verified=bool(verified),
                                     usd=rec["cost_usd"], seconds=rec["latency_s"], tokens=rec["tokens"],
                                     failure=(failure or {}).get("detail") or "", tenant_id=ctx["tenant_id"],
-                                    objective_id=ctx["objective_id"], objective_version=rec["objective_version"],
-                                    model_version=rec["served_version"])
+                                    workspace_id=ctx["workspace_id"], objective_id=ctx["objective_id"],
+                                    objective_version=rec["objective_version"], model_version=rec["served_version"])
     if created:
         after_evidence(run, ev)
     return ev
@@ -761,6 +778,32 @@ def record_attempt_failure(run, t: dict, failure: dict, *, kind: str, idempotenc
                                     intelligence=intelligence, extra=extra)
     except oe.EvidenceError:
         return None
+
+
+def cancel_open_attempts(run, why: str) -> list[str]:
+    """The objective was cancelled with work in progress: each open attempt is recorded as cancelled (mandate 49),
+    contaminated, so it never becomes an intelligence failure, and closed. Returns the tasks it closed."""
+    closed = []
+    for t in run.tasks():
+        if t["status"] == "VERIFIED" or not t.get("attempt_open"):
+            continue
+        record_attempt_failure(run, t, attr.failure("cancelled", "the objective was cancelled while this work was "
+                                                    "in progress", why), kind="cancelled",
+                               idempotency_key=f"objective_cancelled:{t['id']}:{t.get('attempts')}:{t.get('work_calls')}")
+        t.update(attempt_open=False, cancelled_at=now())
+        run.save_task(t)
+        closed.append(t["id"])
+    return closed
+
+
+def _constraint_model(run) -> dict | None:
+    """The objective's constraint model as stored with its requirements; a run saved before it was stored gets it
+    computed from the same objective and policies."""
+    req = run.requirements()
+    if not req:
+        return None
+    from . import objective as objective_engine
+    return req.get("constraint_model") or objective_engine.constraint_model(run)
 
 
 # --- replay and audit -----------------------------------------------------------------------------------------------
@@ -825,6 +868,10 @@ def explain(run, task_id: str) -> dict:
         "objective_lifecycle_state": (obj.get("lifecycle") or {}).get("state"),
         "objective_version": ctx["objective_version"] if obj else None,
         "requirements": [reqs[r]["id"] for r in t.get("requirement_ids") or [] if r in reqs] or None,
+        "constraints": ({"hard": [h["id"] for h in cm["hard_constraints"]],
+                         "preferences": [p["id"] for p in cm["preferences"]],
+                         "mandatory_requirements": len(cm["mandatory_requirements"])}
+                        if (cm := _constraint_model(run)) else None),
         "acceptance_criteria": {"task": [c["criterion_id"] for c in t.get("acceptance") or []],
                                 "requirements": [c["criterion_id"] for c in crit],
                                 "acceptance_hash": t.get("acceptance_hash")} if t.get("acceptance") else None,

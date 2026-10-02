@@ -52,6 +52,7 @@ jobs:
           test -f poc/cynqra/attribution.py
           test -f poc/cynqra/intelligence_layer/evidence.py
           test -f poc/tests/test_objective_intelligence.py
+          test -f poc/tests/test_mandate_audit.py
           grep -q "SelectionDecision" docs/6_PHASED_ARCHITECTURE.md
 
   real_examination:

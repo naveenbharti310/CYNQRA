@@ -68,7 +68,7 @@ INHERITANCE = {
 }
 
 EVIDENCE = {
-    "version": "evidence-2026-10-01.1",
+    "version": "evidence-2026-10-02.1",
     "body": {
         # The hierarchy, strongest first. A level's samples weigh what is written here, times their relevance,
         # verification quality, recency and version integrity; the lower levels are capped, so a long history
@@ -78,13 +78,15 @@ EVIDENCE = {
                    "capability": 5, "reputation": 6},
         "weight": {"objective_verified": 1.0, "objective_partial": 0.5, "historical": 0.5, "global": 0.25},
         "cap": {"objective_verified": None, "objective_partial": 6.0, "historical": 8.0, "global": 4.0},
-        "relevance": {"same_work_item": 1.0, "same_class": 1.0, "same_kind_other_role": 0.7,
-                      "proxy_kind": 0.35, "other_kind": 0.15},
+        "relevance": {"same_work_item": 1.0, "same_class": 1.0, "same_requirement": 0.85,
+                      "same_kind_other_role": 0.7, "proxy_kind": 0.35, "other_kind": 0.15},
         "historical_half_life_days": 90.0,
         "environment_change_factor": 0.5,  # a changed verifier or tool environment halves an item's authority
         "severity_factor": {"critical": 1.5, "major": 1.0, "minor": 0.5},
+        # a success counts by how much of it was the intelligence's own: a person correcting or overriding the work
+        # takes credit away; a person choosing which intelligence works (a directed reroute) does not
         "autonomy_success": {"autonomous": 1.0, "human_assisted": 0.6, "human_corrected": 0.3,
-                             "human_override": 0.0, "human_directed_reroute": 0.0, "human_rejected": 0.0},
+                             "human_override": 0.0, "human_directed_reroute": 1.0, "human_rejected": 0.0},
         "prior": [1.0, 1.0],  # unknown is uniform: unverified is neither bad nor best
         "z": 1.2816,  # an 80% band around the mean: lcb and ucb
         "maturity": {"thin": 0.5, "developing": 3.0, "mature": 8.0},
@@ -102,13 +104,18 @@ RISK = {
 }
 
 SELECTION = {
-    "version": "selection-2026-10-01.1",
+    "version": "selection-2026-10-02.1",
     "body": {
         "rule": ("Select the candidate that satisfies all hard constraints and has the strongest policy-consistent "
                  "evidence for the specific work item, objective version and acceptance criteria, subject to risk, "
                  "budget, latency and evidence sufficiency."),
-        "hard_constraints": ["qualified", "available", "context", "output_limit", "modality", "protocol",
-                             "founder_constraints", "budget_headroom", "tenant_scope"],
+        # what makes a candidate infeasible for the work, whatever its strength (router.hard_constraints)
+        "hard_constraints": ["qualified", "available", "context", "output_limit", "modality", "capability",
+                             "protocol", "founder_constraints", "excluded"],
+        # enforced outside selection, so never traded for quality either
+        "enforced_elsewhere": {"budget_cap": "reservations and the breaker at spend time; selection prefers "
+                                             "candidates whose expected cost fits the headroom",
+                               "tenant_and_workspace_scope": "evidence isolation (the isolation policy)"},
         # Tradeoffs per risk tier. quality_first: the strongest evidenced quality, cost breaking ties. balanced and
         # economy: among candidates whose evidenced quality clears the floor, the lowest expected cost of a verified
         # result (money and the founder's time); when none clears it, quality first.
@@ -175,10 +182,11 @@ CALIBRATION = {
 }
 
 REPLACEMENT = {
-    "version": "replacement-2026-10-01.1",
+    "version": "replacement-2026-10-02.1",
     "body": {
         "max_replacements": 2,
         "max_bad_replies": 3,
+        "max_cut_offs": 3,  # replies in a row cut off at the model's output limit before its AI is evaluated
         "thresholds": {
             "min_verifications": 2,     # judge quality only after this many verifications on this worker and model
             "acceptance_rate": 0.5,     # below this, alternatives are evaluated
@@ -193,10 +201,12 @@ REPLACEMENT = {
 }
 
 ISOLATION = {
-    "version": "isolation-2026-10-01.1",
+    "version": "isolation-2026-10-02.1",
     "body": {
         "objective_evidence_scope": "objective",  # objective evidence is usable only by its own objective
-        "historical_scope": "tenant",  # other objectives' evidence is a prior only inside the same tenant
+        # other objectives' evidence is a prior only inside the same workspace; "tenant" shares priors across a
+        # tenant's workspaces. Qualification evidence is global and is not scoped.
+        "historical_scope": "workspace",
         "cross_tenant": "deny",  # no aggregation policy permits cross-tenant evidence in this build
     },
 }

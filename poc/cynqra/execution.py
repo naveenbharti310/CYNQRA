@@ -18,14 +18,14 @@ import shutil
 from pathlib import Path
 
 from . import attribution as attr
-from . import budget, controller, deploy, objective, people, replacement, roles, verifier
+from . import budget, controller, deploy, objective, people, policies, replacement, roles, verifier
 from . import settings as project_settings
 from .db import digest, now
 from .protocol import ProtocolError
 from .testrunner import failure_summary
 
 MAX_ATTEMPTS = verifier.MAX_ATTEMPTS
-MAX_CUT_OFFS = 3  # replies in a row cut off at the model's output limit before the task goes to the Replacement Engine
+MAX_CUT_OFFS = policies.body("replacement")["max_cut_offs"]  # cut-off replies in a row before the Replacement Engine
 MAX_SEND_BACKS = 2  # times a cofounder may send the same task back; after that the platform's checks decide
 MAX_REVIEW_ERRORS = 2  # unreadable reviews in a row before the work goes on without one, and it is said
 PROPOSAL_ACTIONS = {"decision": "product_rule_decision", "review_merge": "merge_to_main", "deploy": "deploy_production"}

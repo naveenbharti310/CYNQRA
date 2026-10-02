@@ -273,6 +273,7 @@ def decompose(run, note: str = "") -> dict:
     rec = {"id": "req_1", **pkg, "objective_version": version, "objective_id": objective_id(run),
            "acceptance_criteria": acceptance_criteria(pkg, version), "intelligence": usage["label"], "note": note,
            "created_at": now()}
+    rec["constraint_model"] = constraint_model(run, rec["acceptance_criteria"])
     run.store.put("requirements", "req_1", rec)
     run.event("objective.decomposed", "objective", "obj_1", {"requirements": len(pkg["requirements"]),
               "workstreams": len(pkg["workstreams"]), "critical_path": pkg["critical_path"]},
@@ -349,6 +350,9 @@ def transition(run, to: str, reason: str, by: str = "orchestrator", strict: bool
     run.store.put("objective", "obj_1", obj)
     run.event("objective.state_changed", "objective", obj["objective_id"], {"from": frm, "to": to,
               "reason": reason[:200], "version": obj["version"]}, actor=by, aggregate_version=None)
+    if to == "OBJECTIVE_CANCELLED":  # work in flight is cancelled, never failed
+        from . import controller
+        controller.cancel_open_attempts(run, reason)
     return True
 
 
@@ -474,6 +478,43 @@ def acceptance_criteria(pkg: dict, version: int) -> list[dict]:
                 "verification_method": "audit", "mandatory": True, "severity": "critical",
                 "required_evidence": ["audit"], "objective_version": version, "verified_by_tasks": []})
     return out
+
+
+def constraint_model(run, acceptance: list[dict] | None = None) -> dict:
+    """What binds the objective, kept apart (mandate 44): hard constraints (must hold: a candidate violating one is
+    infeasible, whatever its strength), mandatory requirements (must be delivered), optimization dimensions (traded
+    per the selection policy's risk tiers), preferences (stated and tracked, not enforced by the platform), risk
+    thresholds (the quality a tier's work must clear) and the acceptance criteria (what verified completion is)."""
+    from . import controller, settings as project_settings
+    obj = run.objective() or {}
+    fc = dict(obj.get("founder_constraints") or {})
+    sel, risk = _policies.body("selection"), _policies.body("risk")
+    req = run.requirements() or {}
+    crit = acceptance if acceptance is not None else (req.get("acceptance_criteria") or [])
+    hard = [{"id": h, "enforced_by": "router.hard_constraints"} for h in sel["hard_constraints"]]
+    hard += [{"id": k, "enforced_by": v} for k, v in sel.get("enforced_elsewhere", {}).items()]
+    if controller._local_only(run):
+        hard.append({"id": "local_only", "enforced_by": "router.hard_constraints (founder_constraints)",
+                     "source": "the founder's constraints or the project's settings"})
+    for k in ("geography", "compliance"):  # the founder's word: binding, checked at the founder's review
+        if fc.get(k):
+            hard.append({"id": k, "statement": fc[k], "enforced_by": "the founder's review of proposals and delivery"})
+    prefs = [{"id": k, "statement": fc[k], "enforced_by": None} for k in ("deadline", "technology") if fc.get(k)]
+    return {"objective_id": objective_id(run), "objective_version": obj.get("version"),
+            "hard_constraints": hard,
+            "mandatory_requirements": sorted({c["requirement_id"] for c in crit if c.get("mandatory")
+                                              and c.get("requirement_id")}),
+            "optimization_dimensions": {"dimensions": ["quality", "cost", "latency"],
+                                        "time_value_per_hour": project_settings.get(run.store)["time_value_per_hour"],
+                                        "by_risk_tier": {t: v["tradeoff"] for t, v in sel["tiers"].items()},
+                                        "policy": _policies.version("selection")},
+            "preferences": prefs,
+            "risk_thresholds": {"by_tier": {t: {"floor": v["floor"], "quality_floor": v["quality_floor"],
+                                                "explore": v["explore"]} for t, v in sel["tiers"].items()},
+                                "critical_areas": risk.get("critical_areas"),
+                                "risk_tolerance": fc.get("risk_tolerance")},
+            "acceptance_criteria": [{k: c.get(k) for k in ("criterion_id", "verification_method", "mandatory",
+                                                           "severity")} for c in crit]}
 
 
 def task_acceptance(t: dict, version: int) -> list[dict]:

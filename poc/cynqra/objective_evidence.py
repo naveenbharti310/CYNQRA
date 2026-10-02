@@ -193,7 +193,9 @@ def raw(r: dict) -> dict:
     return {"src": "objective", "id": r["evidence_id"], "content_hash": r.get("content_hash"),
             "intelligence_id": r["intelligence_id"], "served_version": r.get("served_version") or "",
             "objective_id": r["objective_id"], "objective_version": r["objective_version"],
-            "tenant_id": r["tenant_id"], "stage": r["stage"], "work_item_id": r["work_item_id"],
+            "tenant_id": r["tenant_id"], "workspace_id": r.get("workspace_id") or "local", "stage": r["stage"],
+            "work_item_id": r["work_item_id"],
+            "requirement_ids": list(r.get("requirement_ids") or []), "criterion_ids": list(r.get("criterion_ids") or []),
             "task_kind": r.get("task_kind"), "role": r.get("role"), "verified": r.get("verified"),
             "clean": r.get("clean"), "attribution": (r.get("failure") or {}).get("kind"),
             "autonomy": r.get("autonomy"), "vq": (r.get("verification") or {}).get("quality"),
@@ -212,6 +214,7 @@ def registry_raw(o: dict, entry_version: str | None = None) -> dict:
     return {"src": "registry", "id": o["id"], "intelligence_id": o["model_id"],
             "served_version": o.get("model_version") or "", "task_kind": o.get("task_kind"), "role": o.get("role"),
             "verified": bool(o.get("verified")), "source": o.get("source") or "project", "run_id": o.get("run_id"),
-            "tenant_id": o.get("tenant_id") or "local", "at": at, "clean": o.get("clean", True),
+            "tenant_id": o.get("tenant_id") or "local", "workspace_id": o.get("workspace_id") or "local", "at": at,
+            "clean": o.get("clean", True),
             "attribution": o.get("attribution"), "vq": 0.8 if o.get("source") == "probe" and o.get("task_kind") ==
             "code" else 1.0, "objective_id": o.get("objective_id"), "status": "active"}

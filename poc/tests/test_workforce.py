@@ -185,6 +185,7 @@ class WorkforceTests(unittest.TestCase):
         self.assertEqual(e.meta["phase"], "accepted", e.meta.get("notice"))
         reps = e.store.all("replacement")
         self.assertTrue(reps and all(r["from"] == "model-a" and r["temporary"] for r in reps))
+        self.assertTrue(all(r.get("human_directed") for r in reps), "the founder chose the stand-in: recorded as such")
         self.assertTrue({r["to"] for r in reps} <= {"model-b", "model-c"})
         self.assertEqual(sorted(w["id"] for w in e.workers()), before, "every worker kept its identity")
         self.assertEqual({w["id"]: w["name"] for w in e.workers()}, names, "an outage replaces no one")

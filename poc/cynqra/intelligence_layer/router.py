@@ -167,6 +167,9 @@ def hard_constraints(c: dict, work: dict, snap: dict) -> list[dict]:
     mods = c.get("input_modalities") or []
     if mods and "text" not in [str(x).lower() for x in mods]:
         no("modality", "does not read text")
+    for need in work.get("requires") or []:  # what the work item needs, cognitive or runtime/protocol
+        if capability(c, need) is False:
+            no("capability", f"the work needs {need}; its provider states it cannot")
     if work.get("local_only") and not c.get("local"):
         no("founder_constraints", "the founder's constraints keep the work on this computer")
     if c["id"] in (snap.get("exclude") or []):
@@ -179,6 +182,24 @@ def hard_constraints(c: dict, work: dict, snap: dict) -> list[dict]:
     if len(bad) >= 3:
         no("protocol", f"{len(bad)} protocol violations on this work in this objective: incompatible protocol behavior")
     return out
+
+
+_MODALITY = {"vision": "image", "audio": "audio", "video": "video"}
+_STATED = {"tool_calling": {"tool use", "tools", "function calling"},
+           "structured_output": {"structured output", "json mode", "json schema"},
+           "reasoning": {"reasoning"}, "coding": {"coding"}, "long_context": {"long context"},
+           "parallel_tool_calls": {"parallel tool calls", "parallel tools"}}
+
+
+def capability(c: dict, need: str) -> bool | None:
+    """Whether a candidate has a capability the work needs: True when its provider states it, False only when its
+    stated facts rule it out (its listed input types leave out images, say), None when nothing says (unknown is not
+    unable, and a capability a provider claims is never evidence of quality)."""
+    if need in _MODALITY:
+        mods = [str(x).lower() for x in c.get("input_modalities") or []]
+        return (_MODALITY[need] in mods) if mods else None
+    caps = {str(x).lower() for x in c.get("capabilities") or []}
+    return True if caps & _STATED.get(need, {need.replace("_", " ")}) else None
 
 
 def _economics(c: dict, per_kind: list[dict], sel: dict, budget: dict, tv: float) -> dict:
@@ -209,7 +230,8 @@ def select(snap: dict) -> dict:
     """The selection a snapshot implies. Deterministic: the same snapshot always gives the same result."""
     pol = {k: v["body"] for k, v in snap["policies"].items()}
     sel, work, ctx = pol["selection"], snap["work"], dict(snap["context"])
-    ctx.update(role=work.get("role"), work_item_id=work.get("work_item_id"), now=snap["now"])
+    ctx.update(role=work.get("role"), work_item_id=work.get("work_item_id"), now=snap["now"],
+               requirement_ids=work.get("requirement_ids") or [], criterion_ids=work.get("criterion_ids") or [])
     ctx["candidate_versions"] = {c["id"]: c.get("served_version") or "" for c in snap["candidates"]}
     by: dict[str, list] = {}
     for r in snap.get("evidence") or []:

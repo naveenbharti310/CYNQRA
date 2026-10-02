@@ -17,8 +17,10 @@ budget (a fraction of the cap, never more than is left).
 
 Stopping, per class, after each round, only once every candidate in it has been tried (one success never stops it):
 evidence sufficiency, candidate separation, information value (no remaining candidate can overtake), the risk
-tier's round limit, the budget, and coverage of the item's acceptance criteria. Then the run moves from calibration
-to execution and keeps learning from verified production work.
+tier's round limit and the budget, and never on a best candidate whose verified work has not covered the item's
+acceptance criteria (acceptance coverage). Task coverage is on the plan: every class of open work, and whether it was
+calibrated, skipped with its reason, not verifiable before the work is real, or beyond the class limit. Then the run
+moves from calibration to execution and keeps learning from verified production work.
 
 Integrity: an item's work and acceptance criteria are frozen and content-addressed before any candidate sees them,
 and its hash is checked again before each verdict, so a candidate can never adapt the difficulty or the bar. The
@@ -71,7 +73,7 @@ class _Access:
             n = self.run.store.next_id("call")
             self.run.store.put("call", f"call_{n:04d}", {"id": f"call_{n:04d}", "task_id": f"calibration:{self.item_id}",
                                "worker": "platform", "purpose": "calibration", **usage, "usd": c["usd"],
-                               "model_version": c.get("model_version"), "at": now()})
+                               "model_version": c.get("model_version"), "at": now(), **controller.stamp(self.run)})
         self.run.spend("platform", "calibration", c["usd"], "verification")
 
 
@@ -84,6 +86,28 @@ def _author(run) -> str | None:
     """The intelligence that wrote the roadmap the items come from."""
     boss = run.planner_id()
     return run.model_of(boss) if boss else run.model_of(binding.SYSTEM)
+
+
+def coverage(run, pol: dict, items: list[dict]) -> dict:
+    """Task coverage (mandate 41): every class of open work in this cycle, and what calibration did about it:
+    calibrated, skipped with its reason, not verifiable before the work is real, or beyond the class limit."""
+    tasks = [t for t in run.tasks() if int(t.get("cycle") or 1) == run.cycle() and t["status"] != "VERIFIED"]
+    classes = sorted({t.get("work_class") or f"{t['kind']}:" for t in tasks})
+    kinds = {t.get("work_class") or f"{t['kind']}:": t["kind"] for t in tasks}
+    mine = {i["work_class"]: i for i in items}
+    out = {"work_classes": classes, "calibrated": [], "skipped": {}, "not_verifiable_before_execution": [],
+           "beyond_class_limit": []}
+    for cls in classes:
+        if cls in mine:
+            if mine[cls].get("skipped"):
+                out["skipped"][cls] = mine[cls]["skipped"]
+            else:
+                out["calibrated"].append(cls)
+        elif kinds[cls] not in pol["kinds"]:
+            out["not_verifiable_before_execution"].append(cls)
+        else:
+            out["beyond_class_limit"].append(cls)
+    return out
 
 
 def _items(run, pol: dict) -> list[dict]:
@@ -175,7 +199,8 @@ def plan(run) -> dict:
         else:
             last["skipped"] = "budget: its trials do not fit the calibration budget"
         planned = sum(sum(i.get("upper_bound_usd", {}).values()) for i in items if not i.get("skipped"))
-    base.update(items=items, planned_upper_bound_usd=round(planned, 6), author_intelligence=author)
+    base.update(items=items, planned_upper_bound_usd=round(planned, 6), author_intelligence=author,
+                coverage=coverage(run, pol, items))
     if not any(not i.get("skipped") for i in items):
         return _skip(run, base, "; ".join(sorted({i["skipped"] for i in items})) or "no work the platform can verify "
                      "before it is real")
@@ -221,7 +246,7 @@ def run_plan(run, p: dict) -> dict:
             p["trials"] += trials
             p["spent_usd"] = round(p["spent_usd"] + sum(t["usd"] for t in trials), 6)
             run.store.put(KIND, p["plan_id"], p)
-            stop, why, todo = _stop(run, it, rnd, rounds, pol)
+            stop, why, todo = _stop(run, it, rnd, rounds, pol, p["trials"])
             if stop:
                 p["stopping"][it["item_id"]] = {"stopped": True, "reason": why, "round": rnd}
                 break
@@ -229,9 +254,14 @@ def run_plan(run, p: dict) -> dict:
     p.update(status="completed", completed_at=now())
     run.store.put(KIND, p["plan_id"], p)
     verified = sum(1 for t in p["trials"] if t.get("verified"))
+    cov = p.get("coverage") or {}
     run.event("intelligence.calibration.completed", "calibration", p["plan_id"], {
         "status": "completed", "trials": len(p["trials"]), "verified": verified, "spent_usd": p["spent_usd"],
-        "stopping": {k: v["reason"] for k, v in p["stopping"].items()}}, actor="intelligence_controller")
+        "stopping": {k: v["reason"] for k, v in p["stopping"].items()},
+        "coverage": {"work_classes": len(cov.get("work_classes") or []), "calibrated": len(cov.get("calibrated") or []),
+                     "acceptance_covered": sorted(i["item_id"] for i in p["items"] if not i.get("skipped") and any(
+                         covered(i, p["trials"], c) for c in i.get("candidates") or []))}},
+        actor="intelligence_controller")
     return p
 
 
@@ -343,6 +373,7 @@ def _trial(run, p: dict, it: dict, cand: str, rnd: int) -> dict:
                                         tokens=access.tokens, failure=(failure or {}).get("detail") or "",
                                         source="objective_calibration",
                                         tenant_id=controller.context(run)["tenant_id"],
+                                        workspace_id=controller.context(run)["workspace_id"],
                                         objective_id=controller.objective_id(run),
                                         model_version=trial["served_version"])
     except (IntelligenceError, RegistryError, OSError) as exc:
@@ -365,8 +396,17 @@ def _trial(run, p: dict, it: dict, cand: str, rnd: int) -> dict:
     return trial
 
 
-def _stop(run, it: dict, rnd: int, rounds: int, pol: dict) -> tuple[bool, str, list[str]]:
-    """Whether this class's calibration stops after round rnd, why, and who is still worth another trial."""
+def covered(it: dict, trials: list[dict], intelligence_id: str) -> bool:
+    """Acceptance coverage (mandate 41): a verified trial of this intelligence on this item, which means the
+    platform's verifier passed every mandatory acceptance criterion of the item."""
+    return any(t.get("item_id") == it["item_id"] and t.get("intelligence_id") == intelligence_id and t.get("verified")
+               for t in trials)
+
+
+def _stop(run, it: dict, rnd: int, rounds: int, pol: dict, trials: list[dict] | None = None
+          ) -> tuple[bool, str, list[str]]:
+    """Whether this class's calibration stops after round rnd, why, and who is still worth another trial. It never
+    settles on a best candidate whose verified work has not yet covered the item's acceptance criteria."""
     t = run.task(it["source_task_id"])
     work = controller.work_for_task(run, t)
     pool = [run.registry.get(c) for c in it["candidates"]]
@@ -377,13 +417,18 @@ def _stop(run, it: dict, rnd: int, rounds: int, pol: dict) -> tuple[bool, str, l
     best, others = rows[0], rows[1:]
     if not others:
         return True, "a single feasible candidate is left", []
+    alive = [r["id"] for r in others if r["quality"]["ucb"] >= best["quality"]["lcb"]]
+    if not covered(it, trials or [], best["id"]):
+        if rnd >= rounds:
+            return True, ("max_rounds: no verified trial covered the item's acceptance criteria within the bounded "
+                          "rounds; execution evidence decides from here"), []
+        return False, "", [best["id"]] + alive
     second = max(others, key=lambda r: r["quality"]["ucb"])
     if best["quality"]["lcb"] >= second["quality"]["ucb"]:
         return True, "candidate_separation", []
     if router._rank(best["quality"]["maturity"]) >= router._rank(pol["sufficient_maturity"]) and \
             best["quality"]["mean"] >= 0.5:
         return True, "evidence_sufficiency", []
-    alive = [r["id"] for r in others if r["quality"]["ucb"] >= best["quality"]["lcb"]]
     if not alive:
         return True, "information_value: no other candidate can overtake the best", []
     if rnd >= rounds:

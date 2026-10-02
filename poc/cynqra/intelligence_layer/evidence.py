@@ -13,12 +13,14 @@ The hierarchy (policies.EVIDENCE), strongest first:
                          never a measure of quality
   6 reputation           name, provider, release date, benchmark: calibration priority only, never quality
 
-Every item weighs level weight x relevance x verification quality x recency x environment x conflict. Levels 2 to 4
+Every item weighs level weight x relevance x verification quality x recency x environment x conflict. Relevance
+follows the work: the same work item, the same class (kind and role), the same requirement or acceptance criteria
+(a workstream), the same kind for another role, the closest evaluation kind, other work. Levels 2 to 4
 are capped, so a long history informs a new objective without outvoting what the objective itself shows, and one
 objective result does not outvote a mature history either. Quality is a Beta posterior from a uniform prior: its mean,
 an 80% band (lcb, ucb) and the effective sample size, never a raw win rate. An item is excluded, with its reason,
 when it belongs to another served version, another objective, an objective version this one may not inherit, another
-tenant, when it is contaminated (a failure the intelligence did not cause), archived or invalidated.
+tenant or workspace, when it is contaminated (a failure the intelligence did not cause), archived or invalidated.
 """
 from __future__ import annotations
 
@@ -61,6 +63,14 @@ def normalize(raw: dict, ctx: dict, policy: dict, kind: str) -> dict:
     if raw.get("tenant_id", "local") != ctx.get("tenant_id", "local"):
         out["excluded"] = "tenant_isolation"
         return out
+    # another workspace: objective evidence never crosses; other work only where the isolation policy shares priors
+    # across the tenant's workspaces. Qualification (probe, regression) is global by design and is not scoped.
+    scope = (policy.get("isolation") or {}).get("historical_scope", "workspace")
+    other_ws = (raw.get("workspace_id") or "local") != (ctx.get("workspace_id") or "local")
+    if other_ws and (raw.get("src") == "objective" or (scope == "workspace" and raw.get("source") not in
+                                                       ("probe", "regression"))):
+        out["excluded"] = "workspace_isolation"
+        return out
     if raw.get("clean") is False:
         out["excluded"] = "contaminated:" + str(raw.get("attribution") or "not the intelligence's fault")
         return out
@@ -90,6 +100,12 @@ def normalize(raw: dict, ctx: dict, policy: dict, kind: str) -> dict:
         if raw.get("work_item_id") and raw.get("work_item_id") == ctx.get("work_item_id") \
                 and raw.get("task_kind") == kind:  # the same piece of work, not a colleague's coordination of it
             rel = max(rel, ev["relevance"]["same_work_item"])
+        shared = (set(raw.get("requirement_ids") or []) & set(ctx.get("requirement_ids") or [])) or \
+            (set(raw.get("criterion_ids") or []) & set(ctx.get("criterion_ids") or []))
+        if shared and raw.get("task_kind") == kind and ev["relevance"].get("same_requirement") is not None:
+            # the same kind of work on the same requirement or acceptance criteria: the same workstream
+            rel = max(rel, ev["relevance"]["same_requirement"])
+            how = how if how in ("same_class",) else "same_requirement"
         recency = 1.0
     else:  # the registry's record of other work
         if raw.get("run_id") and raw.get("run_id") == ctx.get("run_id"):

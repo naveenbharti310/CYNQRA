@@ -552,6 +552,8 @@ def _stand_in(run, t: dict, m: dict, cause: str, pick: str | None, kind: str, au
                    "to": mid, "reason": f"stand-in: {m['name']} {PLAIN[cause]}", "attempts": 0,
                    "usd_spent_by_previous": 0.0, "candidates": rows, "regression_check": check["evidence"],
                    "rerouted": False, "temporary": True, "active": True, "at": now(),
+                   # the founder chose this: a fallback they named, or their approval (mandate 50)
+                   "human_directed": True, "authority": authority,
                    "inherited": ["everything: the worker, its role, history and files are unchanged"]}
             run.store.put("replacement", rep["id"], rep)
             run.event("worker.stand_in", "worker", w["id"], {"from": m["id"], "to": mid, "cause": cause},

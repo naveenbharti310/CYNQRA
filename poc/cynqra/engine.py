@@ -476,7 +476,8 @@ class Engine:
         with self.store.atomic():  # numbered and metered as one: concurrent workers never share a record
             n = self.store.next_id("call")
             rec = {"id": f"call_{n:04d}", "task_id": task_id, "worker": worker, "purpose": purpose, **usage,
-                   "usd": c["usd"], "model_version": c.get("model_version"), "at": now()}
+                   "usd": c["usd"], "model_version": c.get("model_version"), "at": now(),
+                   **controller.stamp(self, self.store.get("task", task_id) if task_id.startswith("t_") else None)}
             self.store.put("call", rec["id"], rec)
             if task_id.startswith("t_") and purpose == "work":
                 m = self.store.get("meter", task_id) or {"usd": 0.0, "seconds": 0.0, "tokens": 0}

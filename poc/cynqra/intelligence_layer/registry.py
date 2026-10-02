@@ -229,9 +229,10 @@ class IntelligenceRegistry:
                        verified: bool, usd: float, seconds: float, tokens: int, failure: str = "",
                        source: str = "project", tenant_id: str = "local", objective_id: str | None = None,
                        objective_version: int | None = None, attribution: str | None = None,
-                       model_version: str | None = None) -> dict:
-        """One verification of one attempt at a task: the unit Cynqra learns from. Every outcome names its tenant,
-        so another tenant's work never becomes this one's evidence, and the version that actually did the work."""
+                       model_version: str | None = None, workspace_id: str = "local") -> dict:
+        """One verification of one attempt at a task: the unit Cynqra learns from. Every outcome names its tenant
+        and workspace, so another tenant's (or, by the isolation policy, another workspace's) work never becomes this
+        one's evidence, and the version that actually did the work."""
         with self.lock:
             version = model_version if model_version is not None else \
                 served_version(self.store.get("intelligence", model_id) or {})
@@ -239,7 +240,8 @@ class IntelligenceRegistry:
                  "role": role, "task_kind": task_kind, "task_id": task_id, "run_id": run_id, "attempt": attempt,
                  "verified": bool(verified), "first_pass": bool(verified and attempt == 1), "usd": round(usd, 6),
                  "seconds": round(seconds, 1), "tokens": int(tokens), "failure": failure[:400], "source": source,
-                 "tenant_id": tenant_id or "local", "objective_id": objective_id, "objective_version": objective_version,
+                 "tenant_id": tenant_id or "local", "workspace_id": workspace_id or "local",
+                 "objective_id": objective_id, "objective_version": objective_version,
                  "attribution": attribution or ("intelligence" if not verified else None), "clean": True,
                  "at": now()}
             self.store.put("outcome", o["id"], o)

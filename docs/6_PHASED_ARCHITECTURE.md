@@ -127,14 +127,14 @@ it; none of them decides on its own which intelligence does a piece of work.
 | Module | Role in the loop |
 | --- | --- |
 | `cynqra/policies.py` | Every rule the control plane decides by, versioned and discoverable in one place: system, authority (`policy.py`), objective, inheritance, selection, evidence, risk, budget, verification, calibration, replacement, isolation, retention. A decision stores the full bodies of the policies it used. |
-| `cynqra/objective.py` | `objective_id` and `objective_version`; the lifecycle state machine (`TRANSITIONS`, `transition`, refused moves recorded); version records with statement, field, requirement and acceptance hashes; `classify_change` and `inheritance_map` (full, prior only, none); `acceptance_criteria` and `task_acceptance` (machine-readable criteria); `acceptance_hash` (the frozen bar). |
+| `cynqra/objective.py` | `objective_id` and `objective_version`; the lifecycle state machine (`TRANSITIONS`, `transition`, refused moves recorded); version records with statement, field, requirement and acceptance hashes; `classify_change` and `inheritance_map` (full, prior only, none); `acceptance_criteria` and `task_acceptance` (machine-readable criteria); `acceptance_hash` (the frozen bar); `constraint_model` (hard constraints, mandatory requirements, optimization dimensions, preferences, risk thresholds and acceptance criteria kept apart, stored with the requirements); a cancelled objective records its work in flight as cancelled (`controller.cancel_open_attempts`), never failed. |
 | `cynqra/planner.py` | Work items carry objective identity and version, acceptance criteria with verification methods, the frozen acceptance hash and their work class; the work graph is content-addressed and announced (`workgraph.created`). |
 | `cynqra/objective_evidence.py` | Persisted objective evidence: immutable content-addressed bodies, an index with lifecycle (active, archived, invalidated, redacted), idempotent recording, an evidence version advanced atomically, tenant/workspace/objective-scoped queries, redaction and archival that keep hashes and causal links, and a refusal of any record that carries content or credentials. |
 | `cynqra/attribution.py` | Failure attribution: provider, account, network, tool, environment, specification, verification, execution, cancelled, human, intelligence. Only intelligence failures update quality; the rest is recorded as contaminated. `diagnose` moved here from `replacement.py` (still re-exported there). |
-| `cynqra/intelligence_layer/evidence.py` | The evidence model, pure: levels (objective verified, objective partial, historical, global; capability metadata and reputation never measure quality), per-item weight from relevance, verification quality, recency, environment and author conflict; caps on the lower levels; a Beta posterior with mean, an 80% band and effective sample size; maturity (none, thin, developing, mature); evidence strength components; exclusions with reasons; `superior` (verified superiority). |
-| `cynqra/intelligence_layer/router.py` | `hard_constraints` and `select`: a pure function of a decision snapshot. Hard constraints first (qualified for this family of work, available, context, output limit, modality, protocol fit from evidence, the founder's local-only constraint); then evidence per kind of work; then the risk tier's trade-off (quality first for HIGH, the lowest expected cost of a verified result among candidates that clear a quality floor for MEDIUM and LOW); then exploitation, bounded exploration, or keeping the incumbent. The legacy `estimate/rank/choose/staff` remain as the economics and forecast model. |
+| `cynqra/intelligence_layer/evidence.py` | The evidence model, pure: levels (objective verified, objective partial, historical, global; capability metadata and reputation never measure quality), per-item weight from relevance (the same work item, class, requirement or acceptance criteria, kind for another role, closest kind), verification quality, recency, environment and author conflict; tenant and workspace isolation by the isolation policy (objective evidence never crosses a workspace; other work only where the policy shares it; qualification is global); caps on the lower levels; a Beta posterior with mean, an 80% band and effective sample size; maturity (none, thin, developing, mature); evidence strength components; exclusions with reasons; `superior` (verified superiority). |
+| `cynqra/intelligence_layer/router.py` | `hard_constraints` and `select`: a pure function of a decision snapshot. Hard constraints first (qualified for this family of work, available, context, output limit, modality, the capabilities the work item needs, where only a provider's stated inability excludes and unknown is never unable, protocol fit from evidence, the founder's local-only constraint); the budget cap and evidence scope are enforced elsewhere (reservations and the breaker; the isolation policy), and the policy says so; then evidence per kind of work; then the risk tier's trade-off (quality first for HIGH, the lowest expected cost of a verified result among candidates that clear a quality floor for MEDIUM and LOW); then exploitation, bounded exploration, or keeping the incumbent. The legacy `estimate/rank/choose/staff` remain as the economics and forecast model. |
 | `cynqra/intelligence_layer/candidates.py` | Bounded candidate sets for qualification and calibration: provider-fair, family-diverse, newest of each family, metadata priority only, never quality. Used by `run_hosted_examination.py` and calibration. |
-| `cynqra/calibration.py` | Cold-start objective calibration on representative work items taken from the objective's own plan (code, forecasts, documents: what the platform can verify before the work is real), bounded candidates, upper-bound budget, stopping policy, frozen content-addressed items checked before each verdict, platform-owned verdicts, author-conflict marking. |
+| `cynqra/calibration.py` | Cold-start objective calibration on representative work items taken from the objective's own plan (code, forecasts, documents: what the platform can verify before the work is real), bounded candidates, upper-bound budget, stopping policy (never settling on a best candidate whose verified work has not covered the item's acceptance criteria), task coverage on the plan (every class of open work: calibrated, skipped with its reason, not verifiable before it is real, or beyond the class limit), frozen content-addressed items checked before each verdict, platform-owned verdicts, author-conflict marking. |
 | `cynqra/binding.py` | Worker bindings and work (task) bindings, both versioned with compare-and-set and a global sequence; the newest decision wins (`effective`). Every binding names its decision; a binding made by another engine's rule (a stand-in, a version pin, a return after an outage) still gets a persisted decision (`controller.record_direct`). |
 | `cynqra/budget.py` | Reservations: every model call during governed execution reserves its upper-bound cost before it starts; a call that would take spent plus reserved past the cap does not start. Ledger writes are transactional. |
 | `cynqra/db.py` | `Store.atomic()` (one transaction, `BEGIN IMMEDIATE`), `compare_and_put` (optimistic concurrency), `next_seq` / `next_id` (ids never handed out twice), per-aggregate event versions. |
@@ -193,10 +193,11 @@ intelligence aggregates), an idempotency key (evidence events are keyed by their
   tenant's registry history; `evidence.assess` weights them by level, relevance and verification quality;
   `router.select` orders feasible candidates by the tier's policy. New evidence triggers `controller.after_evidence`
   for future work of that kind, and `revalidate` when a task starts.
-* **Objective A excellent, Objective B poor: no contamination?** Objective evidence is queried by objective id
-  and tenant; another objective's evidence is never objective evidence, only capped historical evidence from the
+* **Objective A excellent, Objective B poor: no contamination?** Objective evidence is queried by objective id,
+  tenant and workspace; another objective's evidence is never objective evidence, only capped historical evidence from the
   registry of the same tenant, ranked below everything B produces about itself.
-* **HTTP 503?** `attribution.call_failure` says provider; the evidence record is contaminated (`clean: false`), no
+* **HTTP 503 (or 408, 409, 425, 429, a timeout, a dropped connection)?** The adapter waits and retries it;
+  `attribution.call_failure` says provider (or network); the evidence record is contaminated (`clean: false`), no
   registry outcome is written, the quality posterior is unchanged (`test_a_provider_outage_is_not_an_intelligence_failure`).
 * **A model version changes?** Evidence carries the served version (version and serving company); another
   version's evidence is excluded (`version_mismatch`); the gateway's version pin forces a regression check before a
@@ -217,6 +218,23 @@ intelligence aggregates), an idempotency key (evidence events are keyed by their
   `controller.attempt_kind` and `autonomy_of`, `objective_evidence.record` (idempotency), `controller.commit`
   (evidence-version check, binding compare-and-set), `objective_evidence.query` (tenant scope), `controller.replay`,
   `selection_policy_version` on every decision, `controller.py`, and `test_objective_intelligence.GuardTests`.
+
+### Audit against the mandate, 2 Oct
+
+A section-by-section audit of the mandate against the code found these gaps, now closed, each with a test in
+`poc/tests/test_mandate_audit.py`: HTTP 425 and dropped connections were not retried (16); verification and call
+records named their objective version only through their task, which a new version relabels (5); a work item's
+declared capability needs were not a hard constraint (46); calibration's acceptance coverage and task coverage were
+described but not computed (41); a cancelled objective left its work in flight unclassified (49); a founder-directed
+stand-in was not recorded as a human-directed reroute (50); workspace isolation of historical evidence did not follow
+the isolation policy (53); the rework and cut-off limits were module constants beside their policies (57); relevance
+ignored shared requirements and acceptance criteria (13); hard constraints, requirements, dimensions, preferences and
+thresholds had no explicit model (44). The policy's hard-constraint list also named two rules the router does not
+enforce as exclusions (the budget cap, evidence scope); it now lists them as enforced elsewhere.
+
+Unchanged and stated plainly: a task has no wall-clock time limit; it ends by its rework limit, the Replacement
+Engine, its budget, the breaker or the kill switch, and every model call has a timeout. No product action lets a
+person override a verdict, so `human_override` is defined (and excluded as evidence) but never produced.
 
 ## Identity contract
 

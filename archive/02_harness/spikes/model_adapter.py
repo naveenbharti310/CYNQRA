@@ -115,6 +115,7 @@ was built for a laptop. Three things differ for a hosted API:
 """
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import re
@@ -147,7 +148,7 @@ OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_MIN_MAX_TOKENS = 16000
 TIMEOUT_S = 600
-RETRY_STATUS = {408, 409, 429, 500, 502, 503, 504, 529}
+RETRY_STATUS = {408, 409, 425, 429, 500, 502, 503, 504, 529}  # the provider's side: worth a wait and a retry
 RETRY_WAITS_S = (2.0, 6.0)
 # a hosted free tier limits calls per minute: waits that outlast a one-minute window
 HOSTED_RETRY_WAITS_S = (5.0, 15.0, 30.0, 60.0)
@@ -224,8 +225,9 @@ def _post_once(url: str, body: bytes, headers: dict, timeout: float = TIMEOUT_S)
                 pass
             raise _Retryable(msg, wait) from exc
         raise RuntimeError(msg) from exc
-    except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
-        raise _Retryable(f"network error: {exc}") from exc
+    except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.HTTPException) as exc:
+        # a dropped connection or a reply cut off in transit (RemoteDisconnected, IncompleteRead) is the network's
+        raise _Retryable(f"network error: {type(exc).__name__}: {exc}") from exc
 
 
 def _post(url: str, payload: dict, headers: dict, timeout: float = TIMEOUT_S, retry: bool = True,

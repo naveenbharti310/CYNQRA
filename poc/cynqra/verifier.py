@@ -27,11 +27,11 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from . import attribution as attr
-from . import budget, deploy, numbers, roles
+from . import budget, deploy, numbers, policies, roles
 from .db import digest, now
 from .testrunner import NO_WINDOW, clean_env, failure_summary, python_exe, run_unittests
 
-MAX_ATTEMPTS = 3
+MAX_ATTEMPTS = policies.body("verification")["max_attempts"]  # verified attempts before the founder decides
 HOLDOUT = 14
 
 
@@ -234,7 +234,8 @@ def record(run, t: dict, *, verdict: str, method: str, checks: dict, test_ids: l
     from . import controller
     n = run.store.next_id("verification")
     mid, ver = controller.producer(run, t)
-    v = {"id": f"v_{n:03d}", "company_id": run.cid, "task_id": t["id"], "attempt": t["attempts"] + 1,
+    v = {"id": f"v_{n:03d}", "company_id": run.cid, "task_id": t["id"], **controller.stamp(run, t),
+         "attempt": t["attempts"] + 1,
          "risk_tier": t["risk_tier"], "method": method, "checks": checks,
          "reviewer_type": "human" if reviewer == "founder" else "service", "reviewer_id": reviewer, "verdict": verdict,
          "test_ids": test_ids, "output_hash": digest(json.dumps(checks, sort_keys=True, default=str)),
