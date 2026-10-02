@@ -176,7 +176,9 @@ def probe(supply, model_id: str, log=print) -> dict:
         result["qualification_status"] = {"provider_unavailable": "inconclusive_provider_error",
                                           "account_unavailable": "inconclusive_account_error"}.get(result["error_kind"],
                                                                                                     "failed")
-        log(f"  {m['name']}: model error: {exc}")
+        label = {"model_error": "model error", "provider_unavailable": "provider unavailable, inconclusive",
+                 "account_unavailable": "account problem, inconclusive"}[result["error_kind"]]
+        log(f"  {m['name']}: {label}: {exc}")
     result["performance"] = reg.profile(model_id)
     return result
 
