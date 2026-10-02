@@ -50,6 +50,23 @@ class ProviderFailureTests(unittest.TestCase):
         self.assertEqual(attr.call_failure("HTTP 425 from provider: too early")["kind"], "provider")
         self.assertEqual(attr.call_failure("network error: RemoteDisconnected: closed")["kind"], "network")
 
+    def test_an_empty_account_is_the_accounts_never_the_models(self):
+        """A real run: Anthropic answers an empty balance with HTTP 400. It is the account's, the founder is asked to
+        add credit, and a probe that met it is inconclusive, never a failed qualification."""
+        from cynqra import probe
+        low = ('HTTP 400 from provider: {"type":"error","error":{"type":"invalid_request_error","message":"Your credit '
+               'balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase '
+               'credits."}}')
+        self.assertEqual(attr.diagnose(low), "no_credit")
+        self.assertEqual(attr.call_failure(low)["kind"], "account")
+        self.assertEqual(attr.diagnose('HTTP 400 from provider: {"message":"max_tokens is too large"}'), "outage",
+                         "a 400 that says nothing about money stays the provider's side")
+        self.assertEqual(probe._provider_failure_kind(low), "account_unavailable")
+        self.assertEqual(probe._provider_failure_kind("HTTP 503 from provider: overloaded"), "provider_unavailable")
+        self.assertEqual(probe._provider_failure_kind("something nobody has seen before"), "provider_unavailable",
+                         "an unrecognised failure is the cautious reading: unknown, not the model's")
+        self.assertEqual(probe._provider_failure_kind("the model did not return a JSON object"), "model_error")
+
 
 class TraceabilityTests(unittest.TestCase):
     """Mandate 5: every record names its objective and the version it was made under."""

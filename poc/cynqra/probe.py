@@ -15,6 +15,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from . import attribution as attr
 from . import roles
 from .intelligence_layer.registry import served_version
 from .intelligence import OBJECTIVE_KEYS, IntelligenceError, ModelSource
@@ -134,15 +135,13 @@ def _speed(u: dict) -> str:
 
 
 def _provider_failure_kind(message: str) -> str:
-    """Classify transport/provider failures without treating them as evidence of poor intelligence."""
-    text = str(message or "").lower()
-    transient = (
-        "http 408", "http 409", "http 425", "http 429",
-        "http 500", "http 502", "http 503", "http 504",
-        "timed out", "timeout", "network error", "remote end closed",
-        "temporarily unavailable", "high demand", "service unavailable",
-    )
-    return "provider_unavailable" if any(x in text for x in transient) else "model_error"
+    """Why a probe call failed, by the same attribution as every other call (attribution.call_failure): only an
+    unusable reply is the model's (model_error); a provider outage, a timeout, the network (provider_unavailable) or
+    the account, an empty balance or a refused key (account_unavailable), says nothing about the intelligence."""
+    kind = attr.call_failure(str(message or ""))["kind"]
+    if kind == attr.INTELLIGENCE:
+        return "model_error"
+    return "account_unavailable" if kind == "account" else "provider_unavailable"
 
 def probe(supply, model_id: str, log=print) -> dict:
     """Run both probes on one registered model and record every round as an outcome. The result also settles the
@@ -174,7 +173,9 @@ def probe(supply, model_id: str, log=print) -> dict:
                         error=str(exc))
         result["error"] = str(exc)
         result["error_kind"] = _provider_failure_kind(str(exc))
-        result["qualification_status"] = "inconclusive_provider_error" if result["error_kind"] == "provider_unavailable" else "failed"
+        result["qualification_status"] = {"provider_unavailable": "inconclusive_provider_error",
+                                          "account_unavailable": "inconclusive_account_error"}.get(result["error_kind"],
+                                                                                                    "failed")
         log(f"  {m['name']}: model error: {exc}")
     result["performance"] = reg.profile(model_id)
     return result

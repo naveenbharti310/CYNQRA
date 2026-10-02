@@ -59,7 +59,8 @@ def diagnose(error: str) -> str:
         code = int(m.group(1))
         if code == 429 and _PER_MINUTE.search(e):  # a free tier's per-minute limit, however its message words it
             return "rate_limit"
-        if code == 402 or (code == 429 and _CREDIT.search(e)):  # an empty account can answer 429 too
+        # an empty account: 402, or a 400/403/429 that says so (Anthropic answers "credit balance is too low" with 400)
+        if code == 402 or (code in (400, 403, 429) and _CREDIT.search(e)):
             return "no_credit"
         if code in (401, 403):
             return "access"

@@ -25,6 +25,12 @@ on:
         description: Claude workspace ID (wrkspc_...), needed when the Claude key is not scoped to one workspace
         required: false
         default: ""
+      claude_key_secret:
+        description: Which saved Claude key to use
+        required: false
+        type: choice
+        options: [ANTHROPIC_API_KEY, Claude_key]
+        default: ANTHROPIC_API_KEY
 
 permissions:
   contents: read
@@ -39,7 +45,7 @@ jobs:
       NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
       # the Claude key: ANTHROPIC_API_KEY first, then the names this repository has also used (Claude_key; secret
       # names are not case-sensitive)
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY || secrets.CLAUDE_KEY || secrets.CLAUDE_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ inputs.claude_key_secret == 'Claude_key' && secrets.CLAUDE_KEY || secrets.ANTHROPIC_API_KEY || secrets.CLAUDE_KEY || secrets.CLAUDE_API_KEY }}
       # a key for several workspaces must name the one each request runs in: an identifier, not a credential
       ANTHROPIC_WORKSPACE_ID: ${{ inputs.anthropic_workspace_id || vars.ANTHROPIC_WORKSPACE_ID || secrets.ANTHROPIC_WORKSPACE_ID }}
       PYTHONUNBUFFERED: "1"
