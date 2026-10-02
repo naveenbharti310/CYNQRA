@@ -75,6 +75,11 @@ class RunAuditTests(unittest.TestCase):
                      "only qualified intelligence was selected", "producer and verifier kept apart"):
             got = checks(rep, name)
             self.assertTrue(got and all(c["status"] == run_audit.PASS for c in got), (name, got))
+        # where the objective's evidence changed a decision is on the record: a ranking it reordered (the incumbent
+        # kept without verified superiority) or a reselection it carried
+        infl = checks(rep, "objective evidence reached real selections")
+        self.assertTrue(any(c["data"]["reordered"] or c["data"]["reselected"] for c in infl), infl)
+        self.assertIn("put another candidate first", run_audit.render(rep))
         for r in rep["runs"]:
             self.assertEqual(r["lifecycle"], "OBJECTIVE_CLOSED")
             t = r["tables"]

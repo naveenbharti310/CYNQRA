@@ -49,6 +49,9 @@ TIMELINE = ("intelligence.selection.committed", "intelligence.reselection.trigge
             "worker.stand_in", "worker.returned", "worker.model_replaced", "worker.stopped", "task.rerouted",
             "tasks.waiting", "rework.created", "decision.created", "decision.approved", "decision.rejected",
             "intelligence.version_changed", "verification.completed")
+# Checks whose data an auditor reads even when they pass: where evidence changed a choice, and why work moved.
+SHOW_DATA = ("objective evidence reached real selections", "no replacement on one noisy failure",
+             "worker identity survives an intelligence change")
 # Shapes of provider keys, so a key is found even when its variable was not passed to the scan.
 KEY_SHAPES = re.compile(rb"sk-ant-[A-Za-z0-9_\-]{20,}|AIza[0-9A-Za-z_\-]{30,}|nvapi-[A-Za-z0-9_\-]{20,}|"
                         rb"hf_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9]{40,}")
@@ -239,7 +242,7 @@ def _decisions(out, c):
         _check(out, "4", "selection decisions", FAIL, "no selection decision was persisted")
         return
     missing, broken, changed, unreplayed, rows = [], [], [], [], []
-    influence, differ = 0, 0
+    influence, differ, reordered, moved = 0, 0, [], []
     for d in ds:
         miss = [k for k in DECISION_FIELDS if k not in d]
         if miss:
@@ -272,10 +275,20 @@ def _decisions(out, c):
                             "min": r.get("expected_minutes")} for r in d.get("ranking") or []][:4]}
         if d.get("scope") == "task" and d.get("selected_intelligence"):
             pc = controller.prior_choice(c["run"], d["decision_id"])
-            row.update(prior=pc.get("prior"), agrees_with_prior=pc.get("agrees"))
+            top = ((d.get("ranking") or [{}])[0]).get("id")
+            row.update(prior=pc.get("prior"), agrees_with_prior=pc.get("agrees"), top_ranked=top)
             if d.get("evidence_ids"):
                 influence += 1
                 differ += int(pc.get("agrees") is False)
+                # the objective's evidence put another candidate first, whether or not the choice followed it (an
+                # incumbent is kept unless the challenger's superiority is verified)
+                if top and pc.get("prior_ranking") and top != pc["prior_ranking"][0]:
+                    reordered.append({"decision": d["decision_id"], "work_item": d.get("work_item_id"),
+                                      "top_with_objective_evidence": top, "top_on_prior_alone": pc["prior_ranking"][0],
+                                      "chosen": row["selected"], "mode": d.get("selection_mode")})
+            if d.get("selection_mode") == "reselect" and d.get("status") == "committed":
+                moved.append({"decision": d["decision_id"], "work_item": d.get("work_item_id"), "to": row["selected"],
+                              "objective_evidence": len(d.get("evidence_ids") or []), "purpose": d.get("purpose")})
         rows.append(row)
     c.setdefault("tables", {})["decisions"] = rows
     _check(out, "4", "every decision has the mandated fields", FAIL if missing else PASS,
@@ -286,7 +299,9 @@ def _decisions(out, c):
            f"{len(ds) - len(unreplayed)} of {len(ds)} reproduced; snapshots broken: {broken[:5]}")
     _check(out, "4", "objective evidence reached real selections", PASS if influence else NOT_EXERCISED,
            f"{influence} work-item decision(s) read this objective's evidence; in {differ} of them the global prior "
-           "alone would have chosen differently")
+           f"alone would have chosen differently; in {len(reordered)} it put another candidate first than the prior "
+           f"alone would (the incumbent kept unless the challenger's superiority was verified); {len(moved)} "
+           "committed reselection(s) on verified superiority", reordered=reordered, reselected=moved)
     split = all(all(k in r for k in ("quality", "lcb", "ucb", "expected_usd", "expected_minutes"))
                 for d in ds for r in d.get("ranking") or [])
     _check(out, "4", "no universal score", PASS if split else FAIL,
@@ -642,10 +657,12 @@ def render(report: dict) -> str:
                      f"{r['evidence']} evidence records, {r['events']} events")
         for c in r["checks"]:
             lines.append(f"  [{c['status'].upper():13}] §{c['section']} {c['check']}: {c['detail']}")
+            if c.get("data") and (c["status"] == FAIL or c["check"] in SHOW_DATA):
+                lines.append("      " + json.dumps(c["data"], default=str, separators=(",", ":"))[:3000])
         for name, rows in (r.get("tables") or {}).items():
             lines.append(f"  -- {name} ({len(rows)})")
             for row in rows[:400]:
-                lines.append("    " + json.dumps(row, default=str, separators=(",", ":"))[:600])
+                lines.append("    " + json.dumps(row, default=str, separators=(",", ":"))[:1500])
     if report["failed"]:
         lines.append("\nFAILED: " + "; ".join(report["failed"]))
     return "\n".join(lines)
