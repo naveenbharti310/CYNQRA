@@ -4,17 +4,30 @@ on:
   workflow_dispatch:
     inputs:
       provider:
-        description: Hosted provider to examine
+        description: Hosted providers to examine
         required: true
         type: choice
-        options: [all, google, nvidia, anthropic]
-        default: all
+        options: [google+nvidia, all, google, nvidia, anthropic]
+        default: google+nvidia
       max_models:
         description: Maximum number of current candidates to probe
         required: true
         default: "4"
       objective:
-        description: Optional objective to run through the objective intelligence loop to its first bindings
+        description: Optional objective to run through the objective intelligence loop (to its first bindings, or to delivery)
+        required: false
+        default: ""
+      to_delivery:
+        description: Carry the objective on through the work to delivery
+        required: false
+        type: boolean
+        default: false
+      max_minutes:
+        description: Time limit for the work after the first bindings, in minutes
+        required: false
+        default: "300"
+      price_per_m:
+        description: "The providers' price per million tokens, input,output (0,0 for free tiers); empty: list or worst-case prices"
         required: false
         default: ""
       budget_usd:
@@ -45,7 +58,8 @@ jobs:
       NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
       # the Claude key: ANTHROPIC_API_KEY first, then the names this repository has also used (Claude_key; secret
       # names are not case-sensitive)
-      ANTHROPIC_API_KEY: ${{ inputs.claude_key_secret == 'Claude_key' && secrets.CLAUDE_KEY || secrets.ANTHROPIC_API_KEY || secrets.CLAUDE_KEY || secrets.CLAUDE_API_KEY }}
+      # only when Claude is asked for: a key in the environment is connected and examined
+      ANTHROPIC_API_KEY: ${{ (inputs.provider == 'all' || inputs.provider == 'anthropic') && (inputs.claude_key_secret == 'Claude_key' && secrets.CLAUDE_KEY || secrets.ANTHROPIC_API_KEY || secrets.CLAUDE_KEY || secrets.CLAUDE_API_KEY) || '' }}
       # a key for several workspaces must name the one each request runs in: an identifier, not a credential
       ANTHROPIC_WORKSPACE_ID: ${{ inputs.anthropic_workspace_id || vars.ANTHROPIC_WORKSPACE_ID || secrets.ANTHROPIC_WORKSPACE_ID }}
       PYTHONUNBUFFERED: "1"
@@ -56,6 +70,12 @@ jobs:
           SELECTED_PROVIDER: ${{ inputs.provider }}
         run: |
           case "$SELECTED_PROVIDER" in
+            google+nvidia)
+              if [ -z "$GEMINI_API_KEY" ] && [ -z "$NVIDIA_API_KEY" ]; then
+                echo "GEMINI_API_KEY and/or NVIDIA_API_KEY is required when provider=google+nvidia."
+                exit 1
+              fi
+              ;;
             google)
               if [ -z "$GEMINI_API_KEY" ]; then
                 echo "GEMINI_API_KEY is required when provider=google."
@@ -88,13 +108,17 @@ jobs:
       - name: Discover and examine candidates
         env:
           OBJECTIVE: ${{ inputs.objective }}
+          CYNQRA_PRICE_PER_M: ${{ inputs.price_per_m }}
         run: |
+          extra=""
+          if [ "${{ inputs.to_delivery }}" = "true" ]; then extra="--to-delivery"; fi
           python3 poc/run_hosted_examination.py \
             --provider "${{ inputs.provider }}" \
             --max-models "${{ inputs.max_models }}" \
             --objective "$OBJECTIVE" \
             --budget-usd "${{ inputs.budget_usd }}" \
-            --data-root "$RUNNER_TEMP/cynqra-hosted-examination"
+            --max-minutes "${{ inputs.max_minutes }}" \
+            --data-root "$RUNNER_TEMP/cynqra-hosted-examination" $extra
       - name: Publish examination evidence
         if: always()
         uses: actions/upload-artifact@v4

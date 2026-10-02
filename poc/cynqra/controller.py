@@ -835,6 +835,26 @@ def replay(run, decision_id: str) -> dict:
             "from_snapshot_only": True}
 
 
+def prior_choice(run, decision_id: str) -> dict:
+    """What the global prior alone would have chosen for this decision (roadmap 1: compare the objective-specific
+    choice against it): the decision's own snapshot, from its own inputs, with this objective's evidence removed and
+    no incumbent or exploration, so only qualification and other work speak. Pure, like replay."""
+    d = get_decision(run, decision_id)
+    if d is None:
+        raise ControlError(f"no decision {decision_id}")
+    snap = run.store.get_object(d["evidence_snapshot"])
+    if snap is None:
+        return {"decision_id": decision_id, "prior": None, "why": "its snapshot is missing"}
+    bare = dict(snap, evidence=[r for r in snap.get("evidence") or [] if r.get("src") != "objective"], incumbent=None,
+                exploration={"used": 10 ** 9, "spent_usd": 0.0})
+    res = router.select(bare)
+    chosen = (d.get("selected_intelligence") or {}).get("id")
+    return {"decision_id": decision_id, "work_item_id": d.get("work_item_id"), "chosen": chosen,
+            "chosen_mode": d.get("selection_mode"), "prior": res["selected"], "agrees": res["selected"] == chosen,
+            "objective_evidence_items": sum(1 for r in snap.get("evidence") or [] if r.get("src") == "objective"),
+            "prior_ranking": res["ranking"][:5]}
+
+
 def decisions(run, work_item_id: str | None = None) -> list[dict]:
     out = [d for d in run.store.all(KIND) if work_item_id is None or d["work_item_id"] == work_item_id]
     out.sort(key=lambda d: d["seq"])
