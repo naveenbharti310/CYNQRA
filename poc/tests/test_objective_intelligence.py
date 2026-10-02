@@ -44,6 +44,7 @@ class ModelsServer:
     def __init__(self):
         self.broken: set[str] = set()
         self.refused: dict[str, tuple[int, str]] = {}  # model -> (HTTP status, body): the provider refusing it
+        self.garbled: set[str] = set()  # models that answer in prose, never the JSON asked for
         self.requests: list[dict] = []
         outer = self
 
@@ -67,7 +68,9 @@ class ModelsServer:
                     return
                 tid = fake_model._task_in(prompt, "Task ")
                 code = tid in ("t_03", "t_04") and "=== FILE:" in prompt and "Assign task" not in prompt
-                if code and model in outer.broken:
+                if model in outer.garbled:
+                    text = "I have thought about this carefully and I am confident the work is fine."
+                elif code and model in outer.broken:
                     text = "```json\n" + json.dumps(BROKEN) + "\n```"
                 elif code:
                     text = "```json\n" + json.dumps(fake_model._resolve(fake_model.S["work"][tid][-1])) + "\n```"

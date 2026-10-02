@@ -365,5 +365,45 @@ class ControlPlaneFailoverTests(unittest.TestCase):
             e.close()
 
 
+class UnreadableReplyTests(unittest.TestCase):
+    """Real run 36990295187: in each of three objectives an intelligence answered a task in prose, not the JSON asked
+    for, and the run stopped ("the intelligence failed (model did not return a JSON object)") with nothing for the
+    founder to decide, although the Replacement Engine has a path for exactly this. The error did not name the
+    model, so the engine could not act on it. Now it is asked again, then replaced, and the work goes on."""
+
+    def setUp(self):
+        self.saved = no_model_env()
+        self.tmp = TempDir()
+        self.srv = ModelsServer()
+        self.srv.broken.add("Sloppy")
+        self.sup = supply_with(self.tmp.path, [("Steady", 0.2), ("Sloppy", 0.4), ("Careful", 0.6)], self.srv)
+
+    def tearDown(self):
+        self.sup.close()
+        self.srv.close()
+        self.tmp.cleanup()
+        restore_env(self.saved)
+
+    def test_a_reply_that_is_not_json_goes_to_the_replacement_engine_not_a_stop(self):
+        e = live_engine(self.tmp.path / "run", self.sup)
+        try:
+            self.srv.garbled.add("Steady")  # everyone's incumbent now answers in prose
+            run_journey(e, max_rounds=80)
+            self.assertNotEqual(e.meta["phase"], "stopped_error", e.meta.get("notice"))
+            self.assertEqual(e.meta["phase"], "accepted", e.meta.get("notice"))
+            errs = [x for x in e.store.all("call_error") if x["model_id"] == "steady"]
+            self.assertTrue(errs and all(x["cause"] == "reply" for x in errs), errs[:3])
+            self.assertTrue([r for r in e.store.all("replacement") if r["from"] == "steady"],
+                            "after the unusable replies its work moved to another intelligence")
+            # an unreadable reply is the intelligence's own failure, never the provider's
+            ev = [x for x in oe.query(e.store, objective_id=controller.objective_id(e), tenant_id="local")
+                  if x["intelligence_id"] == "steady" and (x.get("failure") or {}).get("reason") ==
+                  "the provider answered; the reply could not be used"]
+            self.assertFalse([x for x in ev if x["failure"]["kind"] != "intelligence"])
+            self.assertTrue(all(t["status"] == "VERIFIED" for t in e.tasks()))
+        finally:
+            e.close()
+
+
 if __name__ == "__main__":
     unittest.main()

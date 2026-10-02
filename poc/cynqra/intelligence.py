@@ -424,7 +424,9 @@ class ModelSource:
             out["tokens_in"] += out2["tokens_in"]
             out["tokens_out"] += out2["tokens_out"]
         if not isinstance(data, dict):
-            raise IntelligenceError("model did not return a JSON object")
+            # the provider answered and the intelligence's reply could not be read: named, so the Replacement Engine
+            # asks again and then replaces it (real run 36990295187 stopped three objectives here, unnamed)
+            raise IntelligenceError("model did not return a JSON object", model_id=model_id, usage=out)
         usage = {"tokens_in": out["tokens_in"], "tokens_out": out["tokens_out"], "estimated": out["estimated"],
                  "label": out.get("model") or model_id, "latency_s": out.get("latency_s", 0), "model_id": model_id}
         if out.get("speed"):
