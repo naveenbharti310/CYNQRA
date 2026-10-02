@@ -1,4 +1,6 @@
+import json
 import os
+from pathlib import Path
 import unittest
 from unittest import mock
 
@@ -171,6 +173,48 @@ class HostedEnvironmentTests(unittest.TestCase):
                 self.assertEqual(conns[0]["models"], [])
             finally:
                 supply.close()
+
+    def test_the_objective_run_is_summarised_for_the_job_log(self):
+        from cynqra.run_hosted_examination import objective_summary
+        run = {"stage": "first_bindings", "lifecycle": "active", "spent_usd": 0.12,
+               "calibration": {"status": "complete", "trials": [
+                   {"intelligence_id": "m1", "verified": True, "attribution": None},
+                   {"intelligence_id": "m2", "verified": None, "attribution": "provider"},
+                   {"intelligence_id": "m2", "verified": False, "attribution": "intelligence"}]},
+               "decisions": [{"selection_mode": "calibrated", "replayed": True, "selected": "m1"},
+                             {"selection_mode": "calibrated", "replayed": True, "selected": "m1"}]}
+        s = objective_summary(run)
+        self.assertEqual((s["calibration"]["trials"], s["calibration"]["verified"]), (3, 1))
+        self.assertEqual(s["calibration"]["by_candidate"], {"m1": [True], "m2": [None, False]})
+        self.assertEqual(s["calibration"]["failures_not_the_intelligence"], ["provider"],
+                         "a provider failure is reported as one, never as the model's")
+        self.assertEqual((s["decisions"], s["selection_modes"], s["all_replayed"], s["selected"]),
+                         (2, {"calibrated": 2}, True, ["m1"]))
+        self.assertIsNone(objective_summary({"stage": "objective", "error": "x"})["all_replayed"])
+
+    def test_the_examination_reports_why_a_provider_offered_nothing(self):
+        import io
+        import tempfile
+        from contextlib import redirect_stdout
+        from cynqra import run_hosted_examination as rhe
+        from cynqra.intelligence_layer.contracts import SupplyError
+        refused = SupplyError("https://api.anthropic.com/v1/models?limit=100 answered HTTP 401: "
+                              '{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}')
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch("cynqra.intelligence_layer.adapters._get_json", side_effect=refused), \
+                mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-ant-test-not-real"}, clear=False):
+            for k in ("OPENAI_API_KEY", "GEMINI_API_KEY", "NVIDIA_API_KEY", "HF_TOKEN", "CYNQRA_LOCAL_BASE_URL",
+                      "CYNQRA_OLLAMA_MODEL", "CYNQRA_S1_MODEL_CMD", "CYNQRA_ANTHROPIC_URL", "CYNQRA_MODEL"):
+                os.environ.pop(k, None)
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = rhe.main(["--provider", "anthropic", "--data-root", d])
+            manifest = json.loads((Path(d) / "manifest.json").read_text())
+        self.assertEqual(code, 1, "nothing examined is not a pass")
+        self.assertIn("Anthropic (environment): error", out.getvalue())
+        self.assertIn("HTTP 401", out.getvalue())
+        self.assertEqual(manifest["connections"][0]["status"], "error")
+        self.assertNotIn("sk-ant-test", out.getvalue() + json.dumps(manifest), "the key never reaches the evidence")
 
 if __name__ == "__main__":
     unittest.main()

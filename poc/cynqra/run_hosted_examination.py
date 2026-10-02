@@ -60,9 +60,14 @@ def main(argv: list[str] | None = None) -> int:
             needle = PROVIDERS[args.provider][1]
             allowed = {c["id"] for c in supply.connections.all() if c["name"] == needle}
             entries = [m for m in entries if m["connection_id"] in allowed]
+        connections = connection_report(supply)
+        print("Connections:")
+        for c in connections:  # a listing that failed says why here: the key refused, the provider down
+            print(f"  {c['name']}: {c['status']} ({c['note']})")
         limit = max(1, args.max_models)
         selected = select(entries, limit)
         manifest = {
+            "connections": connections,
             "discovery": selection_details(entries, selected, limit),
             "candidates": [{"id": m["id"], "ref": m["ref"], "name": m["name"],
                             "provider": m.get("access_provider") or m.get("provider"),
@@ -79,6 +84,7 @@ def main(argv: list[str] | None = None) -> int:
             manifest["results"].append(probe(supply, m["id"], log=print))
         if args.objective:
             manifest["objective_run"] = objective_run(supply, root / "objective-run", args.objective, args.budget_usd)
+            print("\nObjective run:\n" + json.dumps(objective_summary(manifest["objective_run"]), indent=2, default=str))
         (root / "manifest.json").write_text(json.dumps(manifest, indent=2, default=str), encoding="utf-8")
         passed = sum(bool(r.get("passed")) for r in manifest["results"])
         print(json.dumps({"models_examined": len(selected), "passed": passed,
@@ -86,6 +92,41 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if selected and passed else 1
     finally:
         supply.close()
+
+
+def connection_report(supply) -> list[dict]:
+    """Each environment connection's state after discovery: connected with what it offers, or the error its
+    provider gave. The credential is described by reference only (credentials.public), never its value."""
+    return [{"name": c["name"], "type": c["type"], "status": c.get("status"), "note": c.get("status_note") or "",
+             "offered": len(c.get("offered") or [])}
+            for c in (supply.connections.public(x["id"]) for x in supply.connections.all())
+            if c.get("origin") == "environment"]
+
+
+def objective_summary(run: dict) -> dict:
+    """What the objective run did, short enough for the job log (the manifest holds the whole record): how far it
+    got, calibration's trials and outcome, every decision's mode and whether it replays, and the spend."""
+    cal = run.get("calibration") or {}
+    trials = cal.get("trials") or []
+    decisions = run.get("decisions") or []
+    modes: dict[str, int] = {}
+    for d in decisions:
+        modes[str(d.get("selection_mode"))] = modes.get(str(d.get("selection_mode")), 0) + 1
+    by_candidate: dict[str, list] = {}  # each trial's outcome: True verified, False failed, None not measured
+    for t in trials:
+        by_candidate.setdefault(str(t.get("intelligence_id")), []).append(t.get("verified"))
+    return {"stage": run.get("stage"), "lifecycle": run.get("lifecycle"), "error": run.get("error"),
+            "notice": run.get("notice"),
+            "calibration": {"status": cal.get("status"), "reason": cal.get("reason"), "spent_usd": cal.get("spent_usd"),
+                            "trials": len(trials), "verified": sum(1 for t in trials if t.get("verified")),
+                            "failures_not_the_intelligence": sorted({str(t["attribution"]) for t in trials
+                                                                     if t.get("attribution")
+                                                                     and t["attribution"] != "intelligence"}),
+                            "by_candidate": by_candidate},
+            "decisions": len(decisions), "selection_modes": modes,
+            "all_replayed": all(d.get("replayed") for d in decisions) if decisions else None,
+            "selected": sorted({str(d.get("selected")) for d in decisions if d.get("selected")}),
+            "spent_usd": run.get("spent_usd")}
 
 
 def objective_run(supply, folder: Path, statement: str, budget_usd: float) -> dict:
