@@ -126,6 +126,36 @@ class ToDeliveryTests(unittest.TestCase):
         self.assertTrue(any("examination founder: submit again" in x for x in lines), lines[:5])
         self.assertEqual(len(calls), 2, "submitted again once, not more")
 
+    def test_the_examination_founder_resumes_once_after_the_roadmap_failed(self):
+        # real run 37028315336: "The roadmap failed: plan needs exactly 1 review_merge task. ... Resume to try again."
+        # stopped two objectives at the plan, after the model's one retry with the reason
+        from cynqra import planner
+        from cynqra.intelligence import IntelligenceError
+        real, calls = planner.plan, []
+
+        def flaky(run, note="", cycle=1):
+            calls.append(1)
+            if len(calls) == 1:
+                raise IntelligenceError("plan needs exactly 1 review_merge task")
+            return real(run, note, cycle=cycle)
+
+        lines = []
+        with mock.patch.object(planner, "plan", side_effect=flaky):
+            out = rhe.objective_run(self.sup, self.tmp.path / "resume", SCENARIO["messy"], 5.0, to_delivery=True,
+                                    max_minutes=10, log=lines.append)
+        self.assertEqual(out["stage"], "accepted", out.get("error"))
+        self.assertTrue(any("examination founder: resume" in x for x in lines), lines[:5])
+        self.assertEqual(len(calls), 2, "resumed once, not more")
+
+    def test_a_second_failure_after_resuming_ends_the_objective_as_it_happened(self):
+        from cynqra import planner
+        from cynqra.intelligence import IntelligenceError
+        with mock.patch.object(planner, "plan", side_effect=IntelligenceError("plan needs exactly 1 deploy task")):
+            out = rhe.objective_run(self.sup, self.tmp.path / "twice", SCENARIO["messy"], 5.0, to_delivery=True,
+                                    max_minutes=10, log=lambda *_: None)
+        self.assertEqual(out["stage"], "roadmap")
+        self.assertIn("plan needs exactly 1 deploy task", out["error"])
+
     def test_the_live_view_prints_every_saved_event_once_in_order(self):
         import re
         from cynqra.db import Store

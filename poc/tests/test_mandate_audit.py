@@ -425,3 +425,32 @@ class SpecialistFieldTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GroqLimitTests(unittest.TestCase):
+    """Real run 37028315336: Groq's free tier answered "Rate limit reached ... on tokens per day (TPD) ... Please try
+    again in 26m3s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing". The
+    billing link made it read as an empty account, the founder was asked to add credit, the examination founder
+    refused, and the objective stopped although Kimi K3 on NVIDIA was qualified and answering. A limit that says when
+    to try again passes: the provider's side, waited for or covered by a stand-in."""
+
+    TPD = ('HTTP 429 from provider: {"error":{"message":"Rate limit reached for model `openai/gpt-oss-120b` in '
+           'organization `org_x` service tier `on_demand` on tokens per day (TPD): Limit 200000, Used 199216, '
+           'Requested 4383. Please try again in 26m3.0s. Need more tokens? Upgrade to Dev Tier today at '
+           'https://console.groq.com/settings/billing","type":"tokens","code":"rate_limit_exceeded"}}')
+
+    def test_a_limit_that_says_when_to_try_again_is_the_providers(self):
+        from cynqra.attribution import call_failure, diagnose
+        self.assertEqual(diagnose(self.TPD), "rate_limit")
+        self.assertEqual(call_failure(self.TPD)["kind"], "provider")
+        tpm = self.TPD.replace("tokens per day (TPD)", "tokens per minute (TPM)").replace("26m3.0s", "7.2s")
+        self.assertEqual(diagnose(tpm), "rate_limit")
+
+    def test_an_empty_account_is_still_the_founders(self):
+        from cynqra.attribution import diagnose
+        self.assertEqual(diagnose(self.TPD.replace(" Please try again in 26m3.0s.", "")), "no_credit",
+                         "a billing limit with no time to try again is the account's")
+        self.assertEqual(diagnose('HTTP 400 from provider: {"error": {"message": "Your credit balance is too low"}}'),
+                         "no_credit")
+        self.assertEqual(diagnose("HTTP 402 from provider: payment required"), "no_credit")
+

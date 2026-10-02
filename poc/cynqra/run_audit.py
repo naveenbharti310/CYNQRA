@@ -330,7 +330,9 @@ def _execution(out, c):
         vs.setdefault(v["task_id"], []).append(v)
     rows, mismatch = [], []
     for tid, t in sorted(c["tasks"].items()):
-        ok = next((v for v in sorted(vs.get(tid, []), key=lambda v: v["id"]) if v["verdict"] == "VERIFIED"), None)
+        # the last verified attempt is the delivered one: a review can send verified work back for rework
+        ok = next((v for v in sorted(vs.get(tid, []), key=lambda v: v["id"], reverse=True) if v["verdict"] == "VERIFIED"),
+                  None)
         made = (work.get(tid) or [None])[-1]
         if ok and made and ok.get("model_id") and ok["model_id"] != made:
             mismatch.append({"task": tid, "verified_model": ok["model_id"], "last_work_call": made})
@@ -481,14 +483,17 @@ def _workers(out, c):
     workers = {w["id"]: w for w in store.all("worker")}
     bs = store.all("binding")
     changed = [b for b in bs if b.get("history")]
+    # a member the plan gave no work leaves before anything starts (worker.released): gone by design, not lost
+    released = {e["aggregate_id"] for e in c["events"] if e["event_type"] == "worker.released"}
     lost = [b["worker_id"] for b in bs if b["worker_id"] not in workers and b["worker_id"] != "system"
-            and not b["worker_id"].startswith("system")]
+            and not b["worker_id"].startswith("system") and b["worker_id"] not in released]
     reps = store.all("replacement")
     gone = [r["id"] for r in reps if r.get("worker_id") and r["worker_id"] not in workers]
     _check(out, "4", "worker identity survives an intelligence change", FAIL if lost or gone else
            (PASS if changed or reps else NOT_EXERCISED),
            f"{len(workers)} worker(s); {len(changed)} binding(s) changed intelligence with their history kept; "
-           f"{len(reps)} replacement(s), {len(gone)} leaving no seat", history=[
+           f"{len(reps)} replacement(s), {len(gone)} leaving no seat; {len(lost)} binding(s) of a worker who is gone; "
+           f"{len(released)} released by the plan before any work", lost=lost[:5], gone=gone[:5], history=[
                {"worker": b["worker_id"], "now": b["intelligence_id"], "before": [h.get("intelligence_id")
                                                                                  for h in b["history"]]}
                for b in changed][:10])

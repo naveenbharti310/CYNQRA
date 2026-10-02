@@ -183,6 +183,54 @@ class RunAuditTests(unittest.TestCase):
         finally:
             s.close()
 
+    def test_work_reworked_after_a_review_is_judged_by_its_last_verification(self):
+        # real run 37028315336: t_05 verified on gpt-oss-120b, sent back by its review, reworked on a stand-in and
+        # verified again; the delivered work is the last verified attempt, made by the last work call
+        root = self.copy()
+        s = Store(str(root / "objective-run-1" / "cynqra.db"))
+        try:
+            v = next(x for x in sorted(s.all("verification"), key=lambda x: x["id"]) if x["verdict"] == "VERIFIED"
+                     and x.get("model_id"))
+            s.put("verification", "v_000", v | {"id": "v_000", "model_id": "an-earlier-attempt"})
+        finally:
+            s.close()
+        c = checks(run_audit.audit(root), "the selected intelligence did the work")[0]
+        self.assertEqual(c["status"], run_audit.PASS, c)
+        s = Store(str(root / "objective-run-1" / "cynqra.db"))
+        try:  # the last verified attempt credited to an intelligence whose call did not make it: still caught
+            last = max((x for x in s.all("verification") if x["task_id"] == v["task_id"] and x["verdict"] == "VERIFIED"),
+                       key=lambda x: x["id"])
+            s.put("verification", last["id"], last | {"model_id": "not-the-maker"})
+        finally:
+            s.close()
+        self.assertEqual(checks(run_audit.audit(root), "the selected intelligence did the work")[0]["status"],
+                         run_audit.FAIL)
+
+    def test_a_member_the_plan_released_is_gone_by_design_not_lost(self):
+        # real run 37028315336: w_fe had no work in the plan and left before anything started; its binding stays
+        root = self.copy()
+        s = Store(str(root / "objective-run-1" / "cynqra.db"))
+        try:
+            b = next(x for x in s.all("binding") if str(x.get("worker_id", "")).startswith("w_"))
+            s.put("binding", "w_gone", b | {"worker_id": "w_gone"})
+        finally:
+            s.close()
+        name = "worker identity survives an intelligence change"
+        c = checks(run_audit.audit(root), name)[0]
+        self.assertEqual(c["status"], run_audit.FAIL, "a binding whose worker vanished is a lost seat")
+        self.assertEqual(c["data"]["lost"], ["w_gone"])
+        s = Store(str(root / "objective-run-1" / "cynqra.db"))
+        try:
+            meta = s.get("meta", "run")
+            s.append(company_id=meta["company_id"], event_type="worker.released", aggregate_type="worker",
+                     aggregate_id="w_gone", actor_type="service", actor_id="execution_planner",
+                     payload={"role": "FrontendEngineer", "why": "no work in the plan"}, correlation_id="w_gone")
+        finally:
+            s.close()
+        c = checks(run_audit.audit(root), name)[0]
+        self.assertNotEqual(c["status"], run_audit.FAIL, c)
+        self.assertEqual(c["data"]["lost"], [])
+
     def test_the_command_line_writes_the_report_and_says_how_it_ended(self):
         out = self.tmp.path / "audit.json"
         buf = io.StringIO()

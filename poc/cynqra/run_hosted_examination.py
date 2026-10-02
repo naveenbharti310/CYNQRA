@@ -246,6 +246,23 @@ def examination_answer(d: dict) -> str:
     return "reject" if d.get("kind") in REFUSED else "approve"
 
 
+def once_more(step, again, what: str, log=print):
+    """A step the engine stopped with an intelligence error, asking the founder to "Submit again" or "Resume to try
+    again" (the model's reply was refused twice, with the reason): the examination founder does as asked, once. A
+    second failure ends the objective, recorded as it happened."""
+    try:
+        return step()
+    except IntelligenceError as exc:
+        log(f"  examination founder: {what} ({str(exc)[:160]})")
+        return again()
+
+
+def _resume(e) -> None:
+    e.resume()
+    if e.meta.get("phase") == "founder":  # the founder step failed: define the founder again, as the engine asks
+        e.define_founder()
+
+
 def objective_run(supply, folder: Path, statement: str, budget_usd: float, *, to_delivery: bool = False,
                   max_minutes: float = 300.0, log=print, live: bool = False) -> dict:
     """A real objective through the control plane, with the qualified hosted intelligence: the objective structured
@@ -263,16 +280,12 @@ def objective_run(supply, folder: Path, statement: str, budget_usd: float, *, to
         e.set_guardrails(budget_usd=budget_usd, time_value_per_hour=10)
         out["stage"] = "objective"
         e.draft_objective(statement)
-        try:
-            e.submit_objective()
-        except IntelligenceError as exc:  # "Submit again to retry": the examination founder does, once
-            log(f"  examination founder: submit again ({str(exc)[:160]})")
-            e.submit_objective()
+        once_more(e.submit_objective, e.submit_objective, "submit again", log)
         out["stage"] = "workforce"
         d = next(x for x in e.pending_decisions() if x["kind"] == "approve_workforce")
         e.decide(d["id"], "approve")
         out["stage"] = "roadmap"
-        e.define_founder()
+        once_more(e.define_founder, lambda: _resume(e), "resume", log)
         out["stage"] = "first_bindings"
         if to_delivery:
             out["journey"] = journey(e, max_minutes, log)
@@ -367,7 +380,7 @@ def selection_report(e, plan: dict | None) -> dict:
         t = tasks[tid]
         pc = controller.prior_choice(e, first[tid]["decision_id"])
         vs = sorted(ver.get(tid, []), key=lambda v: v["id"])
-        done = next((v for v in vs if v["verdict"] == "VERIFIED"), None)
+        done = next((v for v in reversed(vs) if v["verdict"] == "VERIFIED"), None)  # the last: rework re-verifies
         evs = oe.query(e.store, objective_id=oid, tenant_id=controller.context(e)["tenant_id"], work_item_id=tid,
                        stage="objective_execution")
         items.append({"work_item_id": tid, "kind": t["kind"], "status": t["status"],

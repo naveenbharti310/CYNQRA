@@ -33,9 +33,10 @@ INTELLIGENCE = "intelligence"
 # as the provider's side, the cautious reading: waiting costs time, replacing a capable AI costs its record.
 _STATUS = re.compile(r"\bHTTP (\d{3})\b")
 _CREDIT = re.compile(r"credits?\b|billing|payment required|insufficient[_ ](quota|credit|balance|funds)", re.I)
-# Google's free tier answers every limit with "check your plan and billing details"; the limit's name or its "retry in"
-# says whether it passes within the minute (a rate limit) or only tomorrow (the free allowance is used up)
-_PER_MINUTE = re.compile(r"per ?minute|retry in \d", re.I)
+# A free tier's limit often names billing (Google: "check your plan and billing details"; Groq links its billing page
+# under "Please try again in 26m3s"): the limit's name, or the provider saying when to try again, marks a limit that
+# passes (a rate limit, the provider's side), not an empty account
+_PER_MINUTE = re.compile(r"per ?minute|(?:retry|try again) in \d", re.I)
 PHRASES = (
     ("no_credit", _CREDIT),
     ("access", re.compile(r"invalid api key|unauthori[sz]ed|forbidden|authentication|is not set\b|"
