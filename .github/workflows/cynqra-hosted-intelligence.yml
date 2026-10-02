@@ -99,6 +99,9 @@ jobs:
           fi
           echo "providers with a key:$found"
       - name: Discover and examine candidates
+        # below the job's 360, so the audit and the evidence are kept even when real providers make the run long
+        # (run 37044180144 ended 9 minutes before the job limit)
+        timeout-minutes: 340
         env:
           OBJECTIVE: ${{ inputs.objective }}
           CYNQRA_PRICE_PER_M: ${{ inputs.price_per_m }}

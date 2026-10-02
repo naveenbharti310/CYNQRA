@@ -454,3 +454,81 @@ class GroqLimitTests(unittest.TestCase):
                          "no_credit")
         self.assertEqual(diagnose("HTTP 402 from provider: payment required"), "no_credit")
 
+
+class ProviderFailedCallsTests(unittest.TestCase):
+    """Real run 37044180144: the SaaS objective's QA seat lost Qwen 3.8 27B for good, "2 of 3 calls failed", where both
+    failures were Groq not answering. Every failed call is recorded, but only the intelligence's own (a reply that
+    could not be used) counts against it; a provider's outage or limit never replaces anyone."""
+
+    def _store(self, causes):
+        from cynqra.db import Store
+        tmp = TempDir()
+        self.addCleanup(tmp.cleanup)
+        s = Store(str(tmp.path / "cards.db"))
+        self.addCleanup(s.close)
+        s.put("call", "c_1", {"id": "c_1", "worker": "w_qa", "model_id": "qwen", "tokens_in": 10, "tokens_out": 10})
+        for i, cause in enumerate(causes, 1):
+            s.put("call_error", f"ce_{i}", {"id": f"ce_{i}", "worker_id": "w_qa", "model_id": "qwen", "cause": cause,
+                                            "error": "HTTP 503 from provider" if cause != "reply" else
+                                            "model did not return a JSON object"})
+        return s
+
+    def test_a_providers_failures_are_recorded_and_never_cross_a_threshold(self):
+        from cynqra import performance
+        card = performance.scorecard(self._store(["rate_limit", "outage"]), "w_qa", "qwen")
+        self.assertEqual(card["reliability"]["failed_calls"], 0)
+        self.assertEqual(card["reliability"]["not_its_failed_calls"], 2)
+        self.assertFalse([r for r in performance.below(card) if "calls failed" in r], performance.below(card))
+
+    def test_its_own_unusable_replies_still_count(self):
+        from cynqra import performance
+        card = performance.scorecard(self._store(["reply", "reply"]), "w_qa", "qwen")
+        self.assertEqual(card["reliability"]["failed_calls"], 2)
+        self.assertIn("2 of 3 calls failed", performance.below(card))
+        # a record from before causes were kept is read from its error
+        s = self._store([])
+        s.put("call_error", "ce_9", {"id": "ce_9", "worker_id": "w_qa", "model_id": "qwen",
+                                     "error": "HTTP 429 from provider: rate limit"})
+        self.assertEqual(performance.scorecard(s, "w_qa", "qwen")["reliability"]["failed_calls"], 0)
+
+
+class HostedTimeoutTests(unittest.TestCase):
+    """Real run 37044180144: one call to a provider that held it open took 51 minutes (five attempts of ten), and the
+    objective's 70 minutes became 140. A call that timed out fails at once, as the provider's side; one refused fast
+    is still retried."""
+
+    def test_a_call_that_timed_out_is_not_sent_again(self):
+        import threading
+        import time
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from cynqra import model_adapter
+        from cynqra.attribution import call_failure, diagnose
+        hits = []
+
+        class Slow(BaseHTTPRequestHandler):
+            def do_POST(self):
+                hits.append(1)
+                time.sleep(1.5)
+                try:
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(b"{}")
+                except OSError:
+                    pass
+
+            def log_message(self, *_):
+                pass
+
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), Slow)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        started = time.time()
+        with self.assertRaises(RuntimeError) as ctx:
+            model_adapter._post(f"http://127.0.0.1:{srv.server_address[1]}/v1/chat/completions", {}, {},
+                                timeout=0.3, waits=model_adapter.HOSTED_RETRY_WAITS_S)
+        self.assertEqual(len(hits), 1, "sent once")
+        self.assertLess(time.time() - started, 4.0, "no retry waits")
+        self.assertEqual(diagnose(str(ctx.exception)), "timeout")
+        self.assertIn(call_failure(str(ctx.exception))["kind"], ("provider", "network"))
+

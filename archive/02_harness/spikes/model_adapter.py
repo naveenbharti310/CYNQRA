@@ -230,9 +230,20 @@ def _post_once(url: str, body: bytes, headers: dict, timeout: float = TIMEOUT_S)
                 pass
             raise _Retryable(msg, wait) from exc
         raise RuntimeError(msg) from exc
-    except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.HTTPException) as exc:
+    except TimeoutError as exc:
+        raise _timed_out(timeout) from exc
+    except (urllib.error.URLError, ConnectionError, http.client.HTTPException) as exc:
+        if isinstance(getattr(exc, "reason", None), TimeoutError):
+            raise _timed_out(timeout) from exc
         # a dropped connection or a reply cut off in transit (RemoteDisconnected, IncompleteRead) is the network's
         raise _Retryable(f"network error: {type(exc).__name__}: {exc}") from exc
+
+
+def _timed_out(timeout: float) -> RuntimeError:
+    """The provider held the call open for the whole limit. Sending it again would wait as long again (one call held
+    real run 37044180144 for 51 minutes, five attempts of ten), so it fails now, as the provider's side: the work
+    waits, or a stand-in covers it. A refusal that comes back fast (429, 5xx, a dropped connection) is still retried."""
+    return RuntimeError(f"network error: the provider timed out after {timeout:.0f} s")
 
 
 def _post(url: str, payload: dict, headers: dict, timeout: float = TIMEOUT_S, retry: bool = True,

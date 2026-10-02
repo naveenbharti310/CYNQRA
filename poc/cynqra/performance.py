@@ -3,7 +3,9 @@
 Product definition, Stage 10. Intelligence is measured at the worker and task level, on the work itself:
 
   quality          acceptance rate, test pass rate, defect escape
-  reliability      failure rate of its calls, protocol violations, tool errors
+  reliability      failure rate of its own calls (a reply that could not be used; a provider's, network's or
+                   account's failure is recorded beside it, never counted against the intelligence),
+                   protocol violations, tool errors
   efficiency       latency, retries, tokens per verified outcome
   economics        cost per verified task
   capability fit   the model's result on Cynqra's role/workload benchmark (probe and regression work)
@@ -16,7 +18,7 @@ Replacement Engine must look at the alternatives.
 """
 from __future__ import annotations
 
-from . import policies
+from . import attribution as attr, policies
 from .binding import all_bindings
 from .budget import dollars
 from .roles import BUILD_TYPES
@@ -37,7 +39,11 @@ def scorecard(store, worker_id: str, model_id: str | None, reg=None) -> dict:
     code = [v for v in ver if (tasks.get(v["task_id"]) or {}).get("kind") in BUILD_TYPES]
     calls = [c for c in store.all("call") if c.get("worker") == worker_id
              and (model_id is None or c.get("model_id") == model_id)]
-    errors = [c for c in store.all("call_error") if mine(c)]
+    failed = [c for c in store.all("call_error") if mine(c)]
+    # the intelligence's own failed calls only: an outage, a rate limit, a dropped connection or an empty account is
+    # the provider's or the account's, and never replaces anyone (the replacement policy: provider_outage_replaces)
+    errors = [c for c in failed
+              if attr.CALL_CAUSE.get(c.get("cause") or attr.diagnose(c.get("error") or "")) == attr.INTELLIGENCE]
     violations = [x for x in store.all("violation") if mine(x)]
     denied = [a for a in store.all("action") if a.get("worker_id") == worker_id and a.get("status") == "denied"
               and (model_id is None or a.get("model_id") == model_id)]
@@ -55,6 +61,7 @@ def scorecard(store, worker_id: str, model_id: str | None, reg=None) -> dict:
                     "test_pass_rate": _rate(sum(1 for v in code if v["verdict"] == "VERIFIED"), len(code)),
                     "defect_escapes": len(escapes), "false_rejections": len(false_rej)},
         "reliability": {"calls": len(calls), "failed_calls": len(errors),
+                        "not_its_failed_calls": len(failed) - len(errors),
                         "failure_rate": _rate(len(errors), len(calls) + len(errors)),
                         "protocol_violations": len(violations), "tool_errors": len(denied)},
         "efficiency": {"latency_s": round(sum(float(c.get("latency_s") or 0) for c in calls) / len(calls), 1) if calls else None,
