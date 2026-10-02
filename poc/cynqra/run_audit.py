@@ -44,6 +44,11 @@ DECISION_FIELDS = ("decision_id", "objective_id", "objective_version", "work_ite
                    "eligible_candidates", "excluded_candidates", "hard_constraints", "selection_policy_version",
                    "evidence_snapshot", "evidence_version", "selected_intelligence", "selection_reason",
                    "expected_cost", "expected_latency_minutes", "risk_state", "decision_timestamp", "binding_version")
+# The events that change which intelligence does the work, or say why: the audit's timeline.
+TIMELINE = ("intelligence.selection.committed", "intelligence.reselection.triggered", "intelligence.rerouted",
+            "worker.stand_in", "worker.returned", "worker.model_replaced", "worker.stopped", "task.rerouted",
+            "tasks.waiting", "rework.created", "decision.created", "decision.approved", "decision.rejected",
+            "intelligence.version_changed", "verification.completed")
 # Shapes of provider keys, so a key is found even when its variable was not passed to the scan.
 KEY_SHAPES = re.compile(rb"sk-ant-[A-Za-z0-9_\-]{20,}|AIza[0-9A-Za-z_\-]{30,}|nvapi-[A-Za-z0-9_\-]{20,}|"
                         rb"hf_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9]{40,}")
@@ -497,7 +502,10 @@ def _events(out, c):
         or any(t.get("review_rounds") or t.get("rework_history") for t in c["tasks"].values()),
         "reselected": any(d.get("selection_mode") == "reselect" and d.get("status") == "committed"
                           or d.get("purpose") == "reselection" for d in c["decisions"]),
-        "rerouted": any(r.get("rerouted") for r in store.all("replacement")),
+        # work moved to another intelligence: a replacement that rerouted it, or a reselection the controller
+        # committed when the evidence moved (controller.revalidate reports both the trigger and the reroute)
+        "rerouted": any(r.get("rerouted") for r in store.all("replacement"))
+        or any(d.get("purpose") == "reselection" and d.get("status") == "committed" for d in c["decisions"]),
         "production": bool(store.all("production_verification")),
         "completed": c["meta"].get("phase") == "accepted"}
     rows, missing, unbacked = [], [], []
@@ -519,6 +527,28 @@ def _events(out, c):
            f"events without the state change they report: {unbacked}")
     _check(out, "5", "the event log is intact", PASS if store.verify_event_chain() else FAIL,
            f"{len(c['events'])} events, hash chain verified")
+    # what an auditor reads to see why work moved: every change of intelligence, in order, with its cause
+    keys = ("task_id", "worker_id", "from", "to", "cause", "decision_id", "kind", "mode", "why", "verdict", "attempt",
+            "intelligence_id", "headline")
+    c.setdefault("tables", {})["intelligence_timeline"] = [
+        {"seq": e.get("seq") or e.get("id"), "at": e.get("created_at") or e.get("timestamp"), "event": e["event_type"],
+         "on": e["aggregate_id"], **{k: (str(e["payload"][k])[:140] if isinstance(e["payload"].get(k), str)
+                                         else e["payload"][k]) for k in keys if e["payload"].get(k) is not None}}
+        for e in c["events"] if e["event_type"] in TIMELINE]
+    c["tables"]["replacements"] = [
+        {k: (str(r.get(k))[:160] if k == "reason" else r.get(k)) for k in
+         ("id", "task_id", "worker_id", "from", "to", "temporary", "active", "rerouted", "human_directed", "authority",
+          "reason", "at")} for r in sorted(store.all("replacement"), key=lambda r: r["id"])]
+    by: dict = {}
+    for e in c["evidence"]:
+        row = by.setdefault((e["intelligence_id"], e.get("stage")), {"intelligence": e["intelligence_id"],
+                                                                     "stage": e.get("stage"), "verified": 0,
+                                                                     "failed": 0, "inconclusive": 0, "causes": {}})
+        row["verified" if e.get("verified") else "failed" if e.get("verified") is False else "inconclusive"] += 1
+        k = (e.get("failure") or {}).get("kind")
+        if k:
+            row["causes"][k] = row["causes"].get(k, 0) + 1
+    c["tables"]["evidence_by_intelligence"] = sorted(by.values(), key=lambda r: (r["intelligence"], r["stage"] or ""))
 
 
 # --- across the data root ----------------------------------------------------------------------------------------
@@ -609,7 +639,7 @@ def render(report: dict) -> str:
             lines.append(f"  [{c['status'].upper():13}] §{c['section']} {c['check']}: {c['detail']}")
         for name, rows in (r.get("tables") or {}).items():
             lines.append(f"  -- {name} ({len(rows)})")
-            for row in rows[:60]:
+            for row in rows[:400]:
                 lines.append("    " + json.dumps(row, default=str, separators=(",", ":"))[:600])
     if report["failed"]:
         lines.append("\nFAILED: " + "; ".join(report["failed"]))

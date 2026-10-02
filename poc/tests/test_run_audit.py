@@ -155,6 +155,29 @@ class RunAuditTests(unittest.TestCase):
         c = [x for x in checks(rep, "no event reports what did not happen") if x["status"] == run_audit.FAIL]
         self.assertTrue(c and "intelligence.rerouted" in c[0]["detail"], c)
 
+    def test_a_reroute_is_owed_by_a_committed_reselection(self):
+        # real run 36972596704: controller.revalidate moved a planned task on new evidence, reporting the trigger
+        # and the reroute; the reroute is backed by that committed reselection, not only by a replacement
+        s = Store(str(self.tmp.path / f"reroute_{self.id()[-6:]}.db"))
+        try:
+            s.append(company_id="co", event_type="intelligence.rerouted", aggregate_type="task", aggregate_id="t_02",
+                     actor_type="system", actor_id="intelligence_controller", payload={"from": "a", "to": "b"},
+                     correlation_id="t_02")
+            ctx = {"types": {"intelligence.rerouted": 1}, "store": s, "events": s.events(), "tasks": {},
+                   "evidence": [], "meta": {}, "decisions": [{"decision_id": "sd_1", "purpose": "reselection",
+                                                              "status": "committed"}]}
+            out = []
+            run_audit._events(out, ctx)
+            got = {c["check"]: c["status"] for c in out}
+            self.assertEqual(got["no event reports what did not happen"], run_audit.PASS)
+            out = []
+            run_audit._events(out, ctx | {"decisions": []})
+            self.assertEqual({c["check"]: c["status"] for c in out}["no event reports what did not happen"],
+                             run_audit.FAIL)
+            self.assertEqual([r["event"] for r in ctx["tables"]["intelligence_timeline"]], ["intelligence.rerouted"])
+        finally:
+            s.close()
+
     def test_the_command_line_writes_the_report_and_says_how_it_ended(self):
         out = self.tmp.path / "audit.json"
         buf = io.StringIO()
