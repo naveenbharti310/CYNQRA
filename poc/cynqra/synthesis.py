@@ -22,6 +22,8 @@ Every approval, rejection and override is a labelled decision in the audit trail
 """
 from __future__ import annotations
 
+import re
+
 from . import people, lessons, policy, roles, seats
 from .budget import dollars
 from .intelligence_layer import router
@@ -104,9 +106,13 @@ def _entry(merged: dict, r, where: str) -> dict:
     q = as_int(r.get("quantity"), 1) or 1
     if name == "Specialist":
         field = str(r.get("field") or "").strip()
-        if not field:
-            raise IntelligenceError("a Specialist needs its field, such as food safety or maritime law")
-        title = str(r.get("title") or "").strip() or f"{field.title()} Specialist"
+        title = str(r.get("title") or "").strip()
+        if not field and title:  # the field it named in the title ("Geospatial Data Specialist"): read, not invented
+            field = re.sub(r"\bspecialist\b", "", title, flags=re.I).strip(" -–—,:")
+        if not field:  # said exactly, so the one retry can put it where it belongs
+            raise IntelligenceError('a Specialist needs its field as "field", for example {"role": "Specialist", '
+                                    '"field": "food safety", "title": "Food Safety Specialist"}')
+        title = title or f"{field.title()} Specialist"
         m = merged.setdefault(f"Specialist:{roles.field_slug(field)}", {
             "role": name, "field": field, "title": title[:60], "quantity": 0, "why": "", "requirement_ids": [],
             "supports": [], "risk_ids": []})

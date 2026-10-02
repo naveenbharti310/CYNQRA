@@ -21,6 +21,7 @@ import os
 import time
 from pathlib import Path
 
+from .intelligence import IntelligenceError
 from .intelligence_layer import IntelligenceSupply
 from .intelligence_layer.candidates import details, family_key, priority, provider_key
 from .intelligence_layer.candidates import select as _select
@@ -262,7 +263,11 @@ def objective_run(supply, folder: Path, statement: str, budget_usd: float, *, to
         e.set_guardrails(budget_usd=budget_usd, time_value_per_hour=10)
         out["stage"] = "objective"
         e.draft_objective(statement)
-        e.submit_objective()
+        try:
+            e.submit_objective()
+        except IntelligenceError as exc:  # "Submit again to retry": the examination founder does, once
+            log(f"  examination founder: submit again ({str(exc)[:160]})")
+            e.submit_objective()
         out["stage"] = "workforce"
         d = next(x for x in e.pending_decisions() if x["kind"] == "approve_workforce")
         e.decide(d["id"], "approve")

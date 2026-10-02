@@ -405,5 +405,23 @@ class UnreadableReplyTests(unittest.TestCase):
             e.close()
 
 
+class SpecialistFieldTests(unittest.TestCase):
+    """Real run 37013721424: each of three objectives stopped at the workforce ("a Specialist needs its field") after
+    the one retry, the model proposing a Specialist without the "field" key; the reason did not name the key."""
+
+    def test_a_specialist_titled_by_its_field_keeps_it_and_one_with_neither_is_told_the_key(self):
+        from cynqra import synthesis
+        from cynqra.intelligence import IntelligenceError
+        merged = {}
+        m = synthesis._entry(merged, {"role": "Specialist", "title": "Geospatial Data Specialist", "quantity": 1,
+                                      "why": "routes"}, "team")
+        self.assertEqual((m["field"], m["title"]), ("Geospatial Data", "Geospatial Data Specialist"))
+        m = synthesis._entry({}, {"role": "Specialist", "field": "food safety"}, "team")
+        self.assertEqual((m["field"], m["title"]), ("food safety", "Food Safety Specialist"))
+        with self.assertRaises(IntelligenceError) as ctx:
+            synthesis._entry({}, {"role": "Specialist", "why": "domain"}, "team")
+        self.assertIn('"field"', str(ctx.exception), "the retry is told exactly where the field goes")
+
+
 if __name__ == "__main__":
     unittest.main()

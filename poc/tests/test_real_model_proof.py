@@ -106,6 +106,26 @@ class ToDeliveryTests(unittest.TestCase):
         self.assertEqual(summary["journey"]["ended"], "accepted")
         self.assertEqual(summary["journey"]["refused"], [])
 
+    def test_the_examination_founder_submits_again_once_after_a_failed_step(self):
+        # real run 37013721424: "Objective intelligence failed: ... Submit again to retry." stopped every objective
+        from cynqra import synthesis
+        from cynqra.intelligence import IntelligenceError
+        real, calls = synthesis.propose, []
+
+        def flaky(run, note=""):
+            calls.append(1)
+            if len(calls) == 1:
+                raise IntelligenceError("a Specialist needs its field")
+            return real(run, note)
+
+        lines = []
+        with mock.patch.object(synthesis, "propose", side_effect=flaky):
+            out = rhe.objective_run(self.sup, self.tmp.path / "again", SCENARIO["messy"], 5.0, to_delivery=True,
+                                    max_minutes=10, log=lines.append)
+        self.assertEqual(out["stage"], "accepted", out.get("error"))
+        self.assertTrue(any("examination founder: submit again" in x for x in lines), lines[:5])
+        self.assertEqual(len(calls), 2, "submitted again once, not more")
+
     def test_the_live_view_prints_every_saved_event_once_in_order(self):
         import re
         from cynqra.db import Store
