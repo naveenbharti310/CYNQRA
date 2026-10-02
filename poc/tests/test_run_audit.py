@@ -168,7 +168,7 @@ class RunAuditTests(unittest.TestCase):
             s.append(company_id="co", event_type="intelligence.rerouted", aggregate_type="task", aggregate_id="t_02",
                      actor_type="system", actor_id="intelligence_controller", payload={"from": "a", "to": "b"},
                      correlation_id="t_02")
-            ctx = {"types": {"intelligence.rerouted": 1}, "store": s, "events": s.events(), "tasks": {},
+            ctx = {"types": {"intelligence.rerouted": 1}, "store": s, "events": s.events(), "tasks": {}, "obj": {},
                    "evidence": [], "meta": {}, "decisions": [{"decision_id": "sd_1", "purpose": "reselection",
                                                               "status": "committed"}]}
             out = []
@@ -197,6 +197,39 @@ class RunAuditTests(unittest.TestCase):
             self.assertEqual(run_audit.main([str(empty)]), 0)
         rep = run_audit.audit(empty)
         self.assertEqual(checks(rep, "objective A/B isolation")[0]["status"], run_audit.NOT_EXERCISED)
+
+
+class StoppedEarlyTests(unittest.TestCase):
+    """Real run 36986998224 stopped at the first step of each objective (the provider's daily quota used up). A run
+    that stops early owes only the events of what it did: nothing it never reached is reported as missing."""
+
+    def test_a_run_stopped_before_its_objective_was_structured_fails_no_control(self):
+        from cynqra import model_adapter
+        from cynqra.engine import Engine
+        from cynqra.intelligence import IntelligenceError
+        saved, waits = no_model_env(), model_adapter.HOSTED_RETRY_WAITS_S
+        model_adapter.HOSTED_RETRY_WAITS_S = (0.01, 0.01, 0.01, 0.01)
+        tmp, srv = TempDir(), ModelsServer()
+        srv.refused["Only"] = (429, '{"error": {"code": 429, "message": "You exceeded your current quota."}}')
+        sup = supply_with(tmp.path, [("Only", 0.1)], srv)
+        try:
+            e = Engine(tmp.path / "objective-run-1", supply=sup)
+            e.create_company("Harbor Recruiting", "live")
+            with self.assertRaises(IntelligenceError):
+                e.draft_objective(SCENARIO["messy"])
+            e.close()
+            sup.close()
+            rep = run_audit.audit(tmp.path)
+            self.assertEqual(rep["failed"], [], rep["failed"])
+            self.assertEqual(checks(rep, "objective identity")[0]["status"], run_audit.NOT_EXERCISED)
+            ev = {r["event"]: r for r in rep["runs"][0]["tables"]["events"]}
+            self.assertFalse(ev["requirements.created"]["owed"] or ev["workforce.created"]["owed"])
+            self.assertTrue(ev["intelligence.selection.proposed"]["owed"] and ev["intelligence.selection.proposed"]["count"])
+        finally:
+            model_adapter.HOSTED_RETRY_WAITS_S = waits
+            srv.close()
+            tmp.cleanup()
+            restore_env(saved)
 
 
 class ObjectiveSetTests(unittest.TestCase):

@@ -237,13 +237,33 @@ class Engine:
         mid, pin = self._resolve(worker_id)
         self._reserve(worker_id, mid, request)
         try:
-            return self._call(mid, request, pin)
+            out = self._call(mid, request, pin)
         except VersionChanged as exc:
             replacement.version_changed(self, who, exc, task_id=self._task_ctx())  # kept after its check, or rebound
             mid, pin = self._resolve(worker_id)
-            return self._call(mid, request, pin)
+            out = self._call(mid, request, pin)
         except SupplyError as exc:
             raise IntelligenceError(str(exc), model_id=mid) from exc
+        if who == binding.SYSTEM and out.get("error"):
+            out = self._system_failover(request, mid, out)
+        return out
+
+    def _system_failover(self, request: dict, mid: str, out: dict) -> dict:
+        """The control plane's call failed on the provider's or the account's side: the next qualified intelligence
+        takes the control plane's work (controller.system_failover), each at most once for this call. A failure the
+        intelligence caused, or no alternative left, comes back as it was."""
+        from . import attribution as attr
+        tried = [mid]
+        while out.get("error") and not attr.clean(attr.call_failure(out["error"])):
+            alt = controller.system_failover(self, tried[-1], out["error"], tried=tried)
+            if alt is None or alt in tried:
+                break
+            tried.append(alt)
+            try:
+                out = self._call(alt, request, (binding.current(self.store, binding.SYSTEM) or {}).get("version"))
+            except SupplyError as exc:
+                raise IntelligenceError(str(exc), model_id=alt) from exc
+        return out
 
     def _reserve(self, worker_id: str, mid: str, request: dict) -> None:
         tid = self._task_ctx()

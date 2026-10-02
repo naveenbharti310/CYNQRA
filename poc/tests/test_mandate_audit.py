@@ -6,6 +6,7 @@ prove the control plane's mechanics, never the quality of a real model.
 from __future__ import annotations
 
 import http.client
+import json
 import io
 import unittest
 import urllib.error
@@ -289,6 +290,79 @@ class ProviderBackOffTests(unittest.TestCase):
             sup.close()
             srv.close()
             tmp.cleanup()
+
+
+class ControlPlaneFailoverTests(unittest.TestCase):
+    """Real run 36986998224: the control plane's intelligence had used its provider's free daily quota (HTTP 429,
+    "retry in 14h57m"), and structuring each of three objectives failed although another qualified intelligence was
+    available. The control plane's own work now goes to the next qualified intelligence, on the record."""
+
+    QUOTA = json.dumps({"error": {"code": 429, "status": "RESOURCE_EXHAUSTED", "message": "You exceeded your current "
+                                  "quota, please check your plan and billing details. Please retry in 14h57m16s."}})
+
+    def setUp(self):
+        self.saved = no_model_env()
+        self.waits = model_adapter.HOSTED_RETRY_WAITS_S
+        model_adapter.HOSTED_RETRY_WAITS_S = (0.01, 0.01, 0.01, 0.01)
+        self.tmp = TempDir()
+        self.srv = ModelsServer()
+        self.sup = supply_with(self.tmp.path, [("Quota", 0.1), ("Steady", 0.2)], self.srv)
+
+    def tearDown(self):
+        model_adapter.HOSTED_RETRY_WAITS_S = self.waits
+        self.sup.close()
+        self.srv.close()
+        self.tmp.cleanup()
+        restore_env(self.saved)
+
+    def test_a_refused_provider_moves_the_control_planes_work_to_the_next_qualified_intelligence(self):
+        from cynqra.engine import Engine
+        from helpers import SCENARIO
+        self.srv.refused["Quota"] = (429, self.QUOTA)
+        e = Engine(self.tmp.path / "run", supply=self.sup)
+        try:
+            e.create_company("Harbor Recruiting", "live")
+            e.draft_objective(SCENARIO["messy"])
+            self.assertTrue((e.objective() or {}).get("structured"), e.meta.get("notice"))
+            ds = e.decisions()
+            self.assertEqual(ds[0]["selected_intelligence"]["id"], "quota", "the cheaper one was chosen first")
+            fo = [d for d in ds if d["purpose"] == "failover"]
+            self.assertEqual(len(fo), 1)
+            self.assertEqual((fo[0]["selected_intelligence"]["id"], fo[0]["status"]), ("steady", "committed"))
+            why = next(x for x in fo[0]["excluded_candidates"] if x["id"] == "quota")["violations"][0]["why"]
+            self.assertIn("provider refused the call", why)
+            self.assertTrue(controller.replay(e, fo[0]["decision_id"])["reproduced"])
+            ev = e.store.events()
+            moved = [x for x in ev if x["event_type"] == "intelligence.rerouted"]
+            self.assertEqual([(x["payload"]["from"], x["payload"]["to"], x["payload"]["cause"]) for x in moved],
+                             [("quota", "steady", "provider")])
+            proposed = {x["payload"]["decision_id"] if "decision_id" in x["payload"] else x["aggregate_id"]
+                        for x in ev if x["event_type"] == "intelligence.selection.proposed"}
+            self.assertTrue({d["decision_id"] for d in ds} <= proposed, "every decision is shown as proposed")
+            # the refusal is the provider's: nothing about the intelligence is learned from it
+            self.assertFalse([o for o in e.registry.store.all("outcome") if o.get("model_id") == "quota"])
+            self.assertFalse(oe.query(e.store, objective_id=controller.objective_id(e), tenant_id="local"))
+            # and the next call of the control plane's goes straight to the one that answers
+            n = len(self.srv.requests)
+            e.submit_objective()
+            self.assertTrue(all(r["model"] == "Steady" for r in self.srv.requests[n:]), self.srv.requests[n:])
+        finally:
+            e.close()
+
+    def test_with_no_other_intelligence_the_failure_is_reported_as_before(self):
+        from cynqra.engine import Engine
+        from cynqra.intelligence import IntelligenceError
+        from helpers import SCENARIO
+        self.srv.refused.update({"Quota": (429, self.QUOTA), "Steady": (503, "{}")})
+        e = Engine(self.tmp.path / "run", supply=self.sup)
+        try:
+            e.create_company("Harbor Recruiting", "live")
+            with self.assertRaises(IntelligenceError):
+                e.draft_objective(SCENARIO["messy"])
+            fo = [d for d in e.decisions() if d["purpose"] == "failover"]
+            self.assertEqual([d["status"] for d in fo], ["committed", "no_selection"])
+        finally:
+            e.close()
 
 
 if __name__ == "__main__":

@@ -30,13 +30,13 @@ PASS, FAIL, NOT_EXERCISED, INFO = "pass", "fail", "not_exercised", "info"
 # The founder-visible events the source mandate names (section 23), and when each is owed: always, or only when what
 # it reports actually happened in the run.
 EVENTS = {
-    "objective.created": "always", "requirements.created": "always", "workgraph.created": "always",
-    "workforce.created": "always", "intelligence.discovered": "always",
-    "intelligence.candidate_set.created": "always", "intelligence.calibration.started": "calibrated",
-    "intelligence.calibration.completed": "always", "intelligence.selection.proposed": "always",
-    "intelligence.selection.committed": "always", "worker.bound": "always", "task.started": "always",
-    "review.started": "reviewed", "verification.completed": "always", "rework.created": "reworked",
-    "intelligence.evidence.updated": "always", "intelligence.reselection.triggered": "reselected",
+    "objective.created": "objective", "requirements.created": "requirements", "workgraph.created": "workgraph",
+    "workforce.created": "workforce", "intelligence.discovered": "always",
+    "intelligence.candidate_set.created": "decided", "intelligence.calibration.started": "calibrated",
+    "intelligence.calibration.completed": "calibration_plan", "intelligence.selection.proposed": "decided",
+    "intelligence.selection.committed": "committed", "worker.bound": "bound", "task.started": "worked",
+    "review.started": "reviewed", "verification.completed": "verified", "rework.created": "reworked",
+    "intelligence.evidence.updated": "evidenced", "intelligence.reselection.triggered": "reselected",
     "intelligence.rerouted": "rerouted", "production.verification.started": "production",
     "production.verification.completed": "production", "objective.completed": "completed",
 }
@@ -139,6 +139,10 @@ def audit_run(folder: Path, store: Store, control: Store | None) -> dict:
 def _identity(out, c):
     obj, meta = c["obj"], c["meta"]
     ok = bool(obj.get("objective_id") and obj.get("version"))
+    if not obj and not c["tasks"] and not c["evidence"]:  # stopped before the objective was structured
+        _check(out, "3", "objective identity", NOT_EXERCISED, f"the run stopped before its objective was structured "
+               f"(phase {meta.get('phase')}): {str(meta.get('notice') or '')[:200]}")
+        return
     _check(out, "3", "objective identity", PASS if ok else FAIL,
            f"objective {obj.get('objective_id')} version {obj.get('version')}; run phase {meta.get('phase')}; "
            f"lifecycle {(obj.get('lifecycle') or {}).get('state')}",
@@ -512,7 +516,14 @@ def _production(out, c):
 def _events(out, c):
     types, store = c["types"], c["store"]
     # what each event reports is read from the state it reports, never from the event itself
-    owed = {"always": True, "calibrated": any(p.get("trials") or p.get("status") in ("running", "completed")
+    reached_work = bool(c["tasks"]) and any(t["status"] != "PLANNED" for t in c["tasks"].values())
+    owed = {"always": True, "objective": bool(c["obj"].get("objective_id")),
+            "requirements": store.get("requirements", "req_1") is not None, "workgraph": bool(c["tasks"]),
+            "workforce": bool(store.all("worker")), "decided": bool(c["decisions"]),
+            "committed": any(d.get("status") == "committed" for d in c["decisions"]),
+            "bound": bool(store.all("binding") or store.all("work_binding")),
+            "calibration_plan": bool(store.all("calibration_plan")), "worked": reached_work,
+            "verified": bool(store.all("verification")), "evidenced": bool(c["evidence"]), "calibrated": any(p.get("trials") or p.get("status") in ("running", "completed")
                                               for p in store.all("calibration_plan")),
         "reviewed": any(x.get("purpose") == "review" for x in store.all("call")),
         # rework is what sent a work item back: a verification that asked for it, a cofounder's send-back, the
@@ -525,16 +536,14 @@ def _events(out, c):
         # work moved to another intelligence: a replacement that rerouted it, or a reselection the controller
         # committed when the evidence moved (controller.revalidate reports both the trigger and the reroute)
         "rerouted": any(r.get("rerouted") for r in store.all("replacement"))
-        or any(d.get("purpose") == "reselection" and d.get("status") == "committed" for d in c["decisions"]),
+        or any(d.get("purpose") in ("reselection", "failover") and d.get("status") == "committed"
+               for d in c["decisions"]),
         "production": bool(store.all("production_verification")),
         "completed": c["meta"].get("phase") == "accepted"}
     rows, missing, unbacked = [], [], []
-    reached_work = bool(c["tasks"]) and any(t["status"] != "PLANNED" for t in c["tasks"].values())
     for name, when in EVENTS.items():
         n = types.get(name, 0)
-        due = owed[when] if when != "always" else True
-        if name in ("task.started", "verification.completed", "intelligence.evidence.updated") and not reached_work:
-            due = False
+        due = owed[when]
         rows.append({"event": name, "count": n, "owed": bool(due)})
         if due and not n:
             missing.append(name)

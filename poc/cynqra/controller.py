@@ -270,16 +270,16 @@ def _persist(run, work, purpose, snap, res, revalidates=None, supersedes=None, s
            "result_hash": digest({"selected": res["selected"], "mode": res["mode"], "ranking": res["ranking"]})}
     rec["content_hash"] = run.store.put_object("json", {k: v for k, v in rec.items() if k != "status"})
     run.store.put(KIND, did, rec)
-    if work["scope"] in ("task", "worker", "verification"):
-        run.event("intelligence.candidate_set.created", "work_item", work["work_item_id"],
-                  {"decision_id": did, "candidates": len(rec["candidate_set"]), "eligible": len(rec["eligible_candidates"]),
-                   "excluded": [{"id": x["id"], "why": x["violations"][0]["why"][:120]} for x in res["excluded"]][:12]},
-                  actor="intelligence_controller", correlation_id=work["work_item_id"])
-        run.event("intelligence.selection.proposed", "selection_decision", did, {
-            "work_item_id": work["work_item_id"], "selected": (rec["selected_intelligence"] or {}).get("id"),
-            "mode": rec["selection_mode"], "policy": rec["selection_policy_version"],
-            "evidence_version": rec["evidence_version"], "reason": rec["selection_reason"][:300]},
-            actor="intelligence_controller", correlation_id=work["work_item_id"], aggregate_version=None)
+    # every decision, the control plane's own included, is shown as proposed before it is committed
+    run.event("intelligence.candidate_set.created", "work_item", work["work_item_id"],
+              {"decision_id": did, "candidates": len(rec["candidate_set"]), "eligible": len(rec["eligible_candidates"]),
+               "excluded": [{"id": x["id"], "why": x["violations"][0]["why"][:120]} for x in res["excluded"]][:12]},
+              actor="intelligence_controller", correlation_id=work["work_item_id"])
+    run.event("intelligence.selection.proposed", "selection_decision", did, {
+        "work_item_id": work["work_item_id"], "selected": (rec["selected_intelligence"] or {}).get("id"),
+        "mode": rec["selection_mode"], "policy": rec["selection_policy_version"],
+        "evidence_version": rec["evidence_version"], "reason": rec["selection_reason"][:300]},
+        actor="intelligence_controller", correlation_id=work["work_item_id"], aggregate_version=None)
     return rec
 
 
@@ -448,6 +448,31 @@ def system_intelligence(run, purpose: str = "objective intelligence and workforc
         raise IntelligenceError("no available intelligence in the registry")
     commit(run, d, work, reason=purpose, by="intelligence_router", purpose="system", candidates_rows=legacy_rows(d))
     return d["selected_intelligence"]["id"]
+
+
+def system_failover(run, failed: str, error: str, tried=()) -> str | None:
+    """The control plane's own work has no seat to wait in: when its intelligence's provider or account refuses a
+    call (never the intelligence's fault, and never learned as one), the controller decides again without it and
+    the work goes on with the next qualified intelligence, if there is one. The new decision and the reroute are on
+    the record, with the reason."""
+    cause = attr.call_failure(error)
+    out = sorted(set(tried) | {failed})
+    work = work_for_system(run, "control_plane")
+    why = f"its {cause['kind']} refused the call ({cause['reason']})"
+    d = decide(run, work, "failover", exclude=out, exclude_why={m: why for m in out})
+    if d["selected_intelligence"] is None:
+        _mark(run, d["decision_id"], status="no_selection",
+              note="no other qualified intelligence is available for the control plane's work")
+        return None
+    b = commit(run, d, work, reason=f"the control plane's intelligence {failed}: {why}; decided again without it",
+               by="intelligence_controller", purpose="failover", exclude=out, exclude_why={m: why for m in out},
+               candidates_rows=legacy_rows(d))
+    if b is None:
+        return None
+    run.event("intelligence.rerouted", "work_item", work["work_item_id"], {
+        "from": failed, "to": b["intelligence_id"], "worker_id": binding.SYSTEM, "decision_id": b["decision_id"],
+        "cause": cause["kind"], "why": why[:200]}, actor="intelligence_controller", correlation_id=work["work_item_id"])
+    return b["intelligence_id"]
 
 
 def revalidate(run, t: dict) -> dict | None:

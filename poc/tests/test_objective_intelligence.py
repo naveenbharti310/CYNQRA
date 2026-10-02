@@ -43,6 +43,7 @@ class ModelsServer:
 
     def __init__(self):
         self.broken: set[str] = set()
+        self.refused: dict[str, tuple[int, str]] = {}  # model -> (HTTP status, body): the provider refusing it
         self.requests: list[dict] = []
         outer = self
 
@@ -55,6 +56,15 @@ class ModelsServer:
                 prompt = body["messages"][-1]["content"]
                 model = body.get("model")
                 outer.requests.append({"model": model, "prompt": prompt[:300]})
+                if model in outer.refused:
+                    code, msg = outer.refused[model]
+                    raw = msg.encode()
+                    self.send_response(code)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(raw)))
+                    self.end_headers()
+                    self.wfile.write(raw)
+                    return
                 tid = fake_model._task_in(prompt, "Task ")
                 code = tid in ("t_03", "t_04") and "=== FILE:" in prompt and "Assign task" not in prompt
                 if code and model in outer.broken:
