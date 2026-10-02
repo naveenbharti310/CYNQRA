@@ -54,7 +54,7 @@ SHOW_DATA = ("objective evidence reached real selections", "no replacement on on
              "worker identity survives an intelligence change")
 # Shapes of provider keys, so a key is found even when its variable was not passed to the scan.
 KEY_SHAPES = re.compile(rb"sk-ant-[A-Za-z0-9_\-]{20,}|AIza[0-9A-Za-z_\-]{30,}|nvapi-[A-Za-z0-9_\-]{20,}|"
-                        rb"hf_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9]{40,}")
+                        rb"hf_[A-Za-z0-9]{30,}|gsk_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{40,}")
 
 
 class _Run:

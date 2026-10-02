@@ -7,8 +7,8 @@ on:
         description: Hosted providers to examine
         required: true
         type: choice
-        options: [google+nvidia, all, google, nvidia, anthropic]
-        default: google+nvidia
+        options: [nvidia+groq+mistral, google+nvidia+groq+mistral, google+nvidia, all, nvidia, groq, mistral, groq+mistral, google, anthropic]
+        default: nvidia+groq+mistral
       max_models:
         description: Maximum number of current candidates to probe
         required: true
@@ -62,6 +62,8 @@ jobs:
     env:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY || secrets.GROQ_KEY || secrets.GROQ }}
+      MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY || secrets.MISTRAL_KEY || secrets.MISTRAL }}
       # the Claude key: ANTHROPIC_API_KEY first, then the names this repository has also used (Claude_key; secret
       # names are not case-sensitive)
       # only when Claude is asked for: a key in the environment is connected and examined
@@ -74,43 +76,28 @@ jobs:
       - name: Check provider credentials
         env:
           SELECTED_PROVIDER: ${{ inputs.provider }}
+        # each provider named (joined with +) and the key it needs; at least one must be set (the run says which
+        # were skipped). The key itself is never printed.
         run: |
-          case "$SELECTED_PROVIDER" in
-            google+nvidia)
-              if [ -z "$GEMINI_API_KEY" ] && [ -z "$NVIDIA_API_KEY" ]; then
-                echo "GEMINI_API_KEY and/or NVIDIA_API_KEY is required when provider=google+nvidia."
-                exit 1
-              fi
-              ;;
-            google)
-              if [ -z "$GEMINI_API_KEY" ]; then
-                echo "GEMINI_API_KEY is required when provider=google."
-                exit 1
-              fi
-              ;;
-            nvidia)
-              if [ -z "$NVIDIA_API_KEY" ]; then
-                echo "NVIDIA_API_KEY is required when provider=nvidia."
-                exit 1
-              fi
-              ;;
-            anthropic)
-              if [ -z "$ANTHROPIC_API_KEY" ]; then
-                echo "The Claude key (secret ANTHROPIC_API_KEY or Claude_key) is required when provider=anthropic."
-                exit 1
-              fi
-              ;;
-            all)
-              if [ -z "$GEMINI_API_KEY" ] && [ -z "$NVIDIA_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ]; then
-                echo "Add GEMINI_API_KEY, NVIDIA_API_KEY and/or ANTHROPIC_API_KEY in repository Actions secrets before running this workflow."
-                exit 1
-              fi
-              ;;
-            *)
-              echo "Unknown provider: $SELECTED_PROVIDER"
-              exit 1
-              ;;
-          esac
+          key_for() {
+            case "$1" in
+              google) echo GEMINI_API_KEY ;; nvidia) echo NVIDIA_API_KEY ;; anthropic) echo ANTHROPIC_API_KEY ;;
+              groq) echo GROQ_API_KEY ;; mistral) echo MISTRAL_API_KEY ;; *) echo "" ;;
+            esac
+          }
+          names="$SELECTED_PROVIDER"
+          if [ "$names" = "all" ]; then names="google+nvidia+anthropic+groq+mistral"; fi
+          found=""
+          for p in $(echo "$names" | tr '+' ' '); do
+            var="$(key_for "$p")"
+            if [ -z "$var" ]; then echo "Unknown provider: $p"; exit 1; fi
+            if [ -n "${!var}" ]; then found="$found $p"; else echo "provider $p: $var is not set"; fi
+          done
+          if [ -z "$found" ]; then
+            echo "None of the keys for provider=$SELECTED_PROVIDER is set in the repository's Actions secrets."
+            exit 1
+          fi
+          echo "providers with a key:$found"
       - name: Discover and examine candidates
         env:
           OBJECTIVE: ${{ inputs.objective }}
@@ -136,7 +123,7 @@ jobs:
           root="$RUNNER_TEMP/cynqra-hosted-examination"
           if [ ! -d "$root" ]; then echo "no data root: nothing to audit"; exit 0; fi
           python3 -m cynqra.run_audit "$root" --json "$RUNNER_TEMP/run-audit.json" \
-            --secret-env GEMINI_API_KEY NVIDIA_API_KEY ANTHROPIC_API_KEY
+            --secret-env GEMINI_API_KEY NVIDIA_API_KEY ANTHROPIC_API_KEY GROQ_API_KEY MISTRAL_API_KEY
       - name: Publish examination evidence
         if: always()
         uses: actions/upload-artifact@v4

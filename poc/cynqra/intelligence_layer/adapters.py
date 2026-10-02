@@ -233,7 +233,11 @@ class OpenAICompatibleAdapter(ProviderAdapter):
         "api.openai.com": "openai",
         "generativelanguage.googleapis.com": "gemini",
         "integrate.api.nvidia.com": "nvidia",
+        "api.groq.com": "groq",
+        "api.mistral.ai": "mistral",
     }
+    # hosted providers reached as OpenAI-compatible servers: the hosted timeout and the provider's retries apply
+    HOSTED_FLAVORS = ("gemini", "nvidia", "groq", "mistral")
 
     @classmethod
     def flavor(cls, conn: dict) -> str:
@@ -338,7 +342,7 @@ class OpenAICompatibleAdapter(ProviderAdapter):
             r.update({"kind": "openai", "OPENAI_API_KEY": secret,
                       **({"CYNQRA_OPENAI_URL": ep + "/chat/completions"} if ep else {})})
             _hosted(r, conn)
-        elif flavor in ("gemini", "nvidia"):
+        elif flavor in self.HOSTED_FLAVORS:
             r.update({"kind": "local", "CYNQRA_LOCAL_BASE_URL": ep,
                       "CYNQRA_LOCAL_API_KEY": secret})
             _hosted(r, conn)
@@ -367,6 +371,16 @@ class OpenAICompatibleAdapter(ProviderAdapter):
                         "endpoint": "https://integrate.api.nvidia.com/v1",
                         "auth": {"method": "env", "env_var": "NVIDIA_API_KEY"}, "models": [],
                         "metadata": {"flavor": "nvidia"}, **(_env_price())})
+        # free tiers paced below the provider's stated per-minute limit (Groq 30 a minute, Mistral one a second), so
+        # concurrent workers wait their turn instead of being refused
+        if os.environ.get("GROQ_API_KEY"):
+            out.append({"type": self.type, "name": "Groq (environment)", "endpoint": "https://api.groq.com/openai/v1",
+                        "auth": {"method": "env", "env_var": "GROQ_API_KEY"}, "models": [],
+                        "metadata": {"flavor": "groq"}, "rate_limits": {"calls_per_minute": 25}, **(_env_price())})
+        if os.environ.get("MISTRAL_API_KEY"):
+            out.append({"type": self.type, "name": "Mistral (environment)", "endpoint": "https://api.mistral.ai/v1",
+                        "auth": {"method": "env", "env_var": "MISTRAL_API_KEY"}, "models": [],
+                        "metadata": {"flavor": "mistral"}, "rate_limits": {"calls_per_minute": 50}, **(_env_price())})
         return out
 
 

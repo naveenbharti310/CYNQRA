@@ -33,7 +33,9 @@ _family_key, _candidate_score, _provider_key = family_key, priority, provider_ke
 # The hosted providers an examination can be limited to: the key each needs and the environment connection it makes
 PROVIDERS = {"google": ("GEMINI_API_KEY", "Google Gemini (environment)"),
              "nvidia": ("NVIDIA_API_KEY", "NVIDIA (environment)"),
-             "anthropic": ("ANTHROPIC_API_KEY", "Anthropic (environment)")}
+             "anthropic": ("ANTHROPIC_API_KEY", "Anthropic (environment)"),
+             "groq": ("GROQ_API_KEY", "Groq (environment)"),
+             "mistral": ("MISTRAL_API_KEY", "Mistral (environment)")}
 
 
 def parse_providers(value: str) -> list[str] | None:

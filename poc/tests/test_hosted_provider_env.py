@@ -28,6 +28,33 @@ class HostedEnvironmentTests(unittest.TestCase):
         self.assertEqual(by_name["Google Gemini (environment)"]["models"], [])
         self.assertEqual(by_name["NVIDIA (environment)"]["models"], [])
 
+    def test_groq_and_mistral_are_paced_hosted_openai_compatible_connections(self):
+        from cynqra import live_events
+        from cynqra import run_hosted_examination as rhe
+        adapter = OpenAICompatibleAdapter()
+        with mock.patch.dict(os.environ, {"GROQ_API_KEY": "set", "MISTRAL_API_KEY": "set"}, clear=False):
+            specs = {s["name"]: s for s in adapter.environment_specs(None)}
+        groq, mistral = specs["Groq (environment)"], specs["Mistral (environment)"]
+        self.assertEqual((groq["endpoint"], groq["auth"]), ("https://api.groq.com/openai/v1",
+                                                            {"method": "env", "env_var": "GROQ_API_KEY"}))
+        self.assertEqual((mistral["endpoint"], mistral["auth"]), ("https://api.mistral.ai/v1",
+                                                                  {"method": "env", "env_var": "MISTRAL_API_KEY"}))
+        self.assertEqual((groq["models"], mistral["models"]), ([], []), "every model they list is discovered")
+        # paced below each free tier's stated limit (Groq 30 a minute, Mistral one a second)
+        self.assertLess(groq["rate_limits"]["calls_per_minute"], 30)
+        self.assertLess(mistral["rate_limits"]["calls_per_minute"], 60)
+        for spec, flavor in ((groq, "groq"), (mistral, "mistral")):
+            conn = dict(spec, origin="environment")
+            self.assertEqual(adapter.flavor(conn), flavor)
+            route = adapter.route(conn, "not-a-real-secret", {"ref": "model-x"})
+            self.assertEqual((route["kind"], route["CYNQRA_LOCAL_BASE_URL"]), ("local", spec["endpoint"]))
+            self.assertIn("CYNQRA_TIMEOUT", route, "a hosted call has the hosted time limit")
+        self.assertEqual(rhe.parse_providers("nvidia+groq+mistral"), ["nvidia", "groq", "mistral"])
+        self.assertEqual(rhe.PROVIDERS["groq"], ("GROQ_API_KEY", "Groq (environment)"))
+        self.assertNotIn("gsk_" + "A" * 40, live_events.redact("key gsk_" + "A" * 40))
+        self.assertIn("GROQ_API_KEY", live_events.SECRET_ENV)
+        self.assertIn("MISTRAL_API_KEY", live_events.SECRET_ENV)
+
     def test_environment_discovery_keeps_the_complete_provider_chat_catalogue(self):
         adapter = OpenAICompatibleAdapter()
         listing = {"data": [
