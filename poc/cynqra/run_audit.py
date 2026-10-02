@@ -334,11 +334,23 @@ def _execution(out, c):
         made = (work.get(tid) or [None])[-1]
         if ok and made and ok.get("model_id") and ok["model_id"] != made:
             mismatch.append({"task": tid, "verified_model": ok["model_id"], "last_work_call": made})
-        rows.append({"task": tid, "kind": t["kind"], "status": t["status"], "work_calls_by": sorted(set(work.get(tid, []))),
+        owner = store.get("worker", t.get("owner_worker_id") or "") or {}
+        rows.append({"task": tid, "title": str(t.get("title") or "")[:80], "owner": t.get("owner_worker_id"),
+                     "role": owner.get("role"), "kind": t["kind"], "tier": t.get("risk_tier"), "status": t["status"],
+                     "work_calls_by": sorted(set(work.get(tid, []))),
                      "verifications": [v["verdict"] for v in sorted(vs.get(tid, []), key=lambda v: v["id"])],
                      "verified_model": (ok or {}).get("model_id"),
                      "outputs": [o.get("file") for o in t.get("outputs") or [] if isinstance(o, dict)][:8]})
     c.setdefault("tables", {})["tasks"] = rows
+    # the workforce: each seat, its role, the work it owned and the intelligence behind it over the run
+    bindings = {b["worker_id"]: b for b in store.all("binding")}
+    c["tables"]["workers"] = [
+        {"worker": w["id"], "role": w.get("role"), "title": w.get("title"),
+         "owns": sorted(x["id"] for x in c["tasks"].values() if x.get("owner_worker_id") == w["id"]),
+         "intelligence_now": (bindings.get(w["id"]) or {}).get("intelligence_id"),
+         "history": [h.get("intelligence_id") for h in (bindings.get(w["id"]) or {}).get("history") or []][:12],
+         "decision": (bindings.get(w["id"]) or {}).get("decision_id")}
+        for w in sorted(store.all("worker"), key=lambda w: w["id"])]
     did = [r for r in rows if r["work_calls_by"]]
     _check(out, "4", "the selected intelligence did the work", FAIL if mismatch else (PASS if did else NOT_EXERCISED),
            f"{len(did)} work item(s) with real work calls; {sum(1 for r in rows if r['status'] == 'VERIFIED')} verified; "
