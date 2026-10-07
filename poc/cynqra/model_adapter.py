@@ -236,10 +236,98 @@ _OPENER = urllib.request.build_opener(_NoRedirect)
 USER_AGENT = "cynqra/1.0"
 
 
+# Pacing from the provider's own rate-limit headers (R7 of the architecture review). A provider that says how many
+# requests or tokens are left in its window, and when the window resets, is not called again until it has room: the
+# calls of every worker on that key wait together instead of each running into a 429 and backing off on its own.
+# A Retry-After on a refusal holds every call on that key, not only the refused one.
+LIMIT_HEADERS = (  # (remaining, reset): OpenAI, Groq, NVIDIA, Mistral and most OpenAI-compatible APIs; Anthropic; IETF
+    ("x-ratelimit-remaining-requests", "x-ratelimit-reset-requests", 0),
+    ("x-ratelimit-remaining-tokens", "x-ratelimit-reset-tokens", 4000),
+    ("anthropic-ratelimit-requests-remaining", "anthropic-ratelimit-requests-reset", 0),
+    ("anthropic-ratelimit-input-tokens-remaining", "anthropic-ratelimit-input-tokens-reset", 4000),
+    ("anthropic-ratelimit-output-tokens-remaining", "anthropic-ratelimit-output-tokens-reset", 1000),
+    ("x-ratelimit-remaining", "x-ratelimit-reset", 0),
+    ("ratelimit-remaining", "ratelimit-reset", 0),
+)
+PACE_MAX_WAIT_S = 120.0  # one wait is never longer; the call then goes, and a refusal is retried as before
+_PACE: dict[str, float] = {}  # key (host and a digest of the credential) -> not before (time.time())
+_PACE_LOCK = threading.Lock()
+_PACE_STATS = {"waits": 0, "seconds": 0.0}
+_DURATION = re.compile(r"(\d+(?:\.\d+)?)(ms|h|m|s)")
+_RETRY_DELAY = re.compile(r'"retryDelay"\s*:\s*"([^"]+)"')
+
+
+def _seconds_until(value) -> float | None:
+    """A reset as providers write it: "20ms", "6m0s", "1h2m3.5s", plain seconds, or an RFC 3339 time."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return max(0.0, float(text))
+    except ValueError:
+        pass
+    parts = _DURATION.findall(text)
+    if parts and "".join(n + u for n, u in parts) == text.replace(" ", ""):
+        return sum(float(n) * {"ms": 0.001, "s": 1, "m": 60, "h": 3600}[u] for n, u in parts)
+    try:
+        from datetime import datetime
+        return max(0.0, datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp() - time.time())
+    except ValueError:
+        return None
+
+
+def _pace_key(url: str, headers: dict) -> str:
+    import hashlib
+    from urllib.parse import urlsplit
+    cred = next((str(v) for k, v in headers.items()
+                 if k.lower() in ("authorization", "x-api-key", "x-goog-api-key", "api-key")), "")
+    return urlsplit(url).netloc + "|" + hashlib.sha256(cred.encode("utf-8")).hexdigest()[:12]
+
+
+def _limit_wait(reply_headers, retry_after: float | None = None) -> float:
+    """How long the provider's headers say to hold the next call on this key."""
+    wait = float(retry_after or 0)
+    get = (lambda k: reply_headers.get(k)) if reply_headers is not None else (lambda k: None)
+    for remaining, reset, floor in LIMIT_HEADERS:
+        try:
+            left = float(get(remaining))
+        except (TypeError, ValueError):
+            continue
+        if left <= floor:
+            wait = max(wait, _seconds_until(get(reset)) or 0.0)
+    return min(wait, PACE_MAX_WAIT_S)
+
+
+def _note_limits(url: str, headers: dict, reply_headers, retry_after: float | None = None) -> None:
+    wait = _limit_wait(reply_headers, retry_after)
+    if wait > 0:
+        key = _pace_key(url, headers)
+        with _PACE_LOCK:
+            _PACE[key] = max(_PACE.get(key, 0.0), time.time() + wait)
+
+
+def _await_pace(url: str, headers: dict) -> None:
+    key = _pace_key(url, headers)
+    with _PACE_LOCK:
+        wait = min(PACE_MAX_WAIT_S, _PACE.get(key, 0.0) - time.time())
+        if wait > 0:
+            _PACE_STATS["waits"] += 1
+            _PACE_STATS["seconds"] += wait
+    if wait > 0:
+        time.sleep(wait)
+
+
+def pace_stats() -> dict:
+    with _PACE_LOCK:
+        return {"waits": _PACE_STATS["waits"], "seconds": round(_PACE_STATS["seconds"], 1)}
+
+
 def _post_once(url: str, body: bytes, headers: dict, timeout: float = TIMEOUT_S) -> dict:
     req = urllib.request.Request(url, data=body, headers={"User-Agent": USER_AGENT, **headers}, method="POST")
+    _await_pace(url, headers)
     try:
         with _OPENER.open(req, timeout=timeout) as resp:
+            _note_limits(url, headers, resp.headers)
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = ""
@@ -253,7 +341,9 @@ def _post_once(url: str, body: bytes, headers: dict, timeout: float = TIMEOUT_S)
             try:
                 wait = min(60.0, float(exc.headers.get("retry-after")))
             except (TypeError, ValueError):
-                pass
+                delay = _RETRY_DELAY.search(detail)  # Google says it in the body: "retryDelay": "37s"
+                wait = min(60.0, _seconds_until(delay.group(1)) or 0.0) if delay else None
+            _note_limits(url, headers, exc.headers, wait)  # every call on this key holds, not only this one
             raise _Retryable(msg, wait, overload=exc.code in OVERLOAD_STATUS or bool(_OVERLOAD.search(detail))) \
                 from exc
         raise RuntimeError(msg) from exc

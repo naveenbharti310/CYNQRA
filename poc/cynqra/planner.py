@@ -96,7 +96,11 @@ def validate_plan(plan: dict, workers: list[dict], requirement_ids: list[str] | 
         crit = t.get("acceptance_criteria")
         crit = [crit] if isinstance(crit, str) else crit if isinstance(crit, list) else []
         crit = [str(x).strip() for x in crit if str(x).strip()]
+        files = t.get("files") if isinstance(t.get("files"), list) else []
+        files = [f for f in dict.fromkeys(str(x).strip().removeprefix("./") for x in files)
+                 if f and ".." not in f.split("/") and not f.startswith("/")] if kind in roles.BUILD_TYPES else []
         out = {"id": t["id"], "workstream_id": str(t["workstream_id"]).strip(), "kind": kind, "owner_worker_id": owner_id,
+               "files": files[:40],
                "title": str(t["title"]).strip(), "inputs": str(t.get("inputs") or ""),
                "expected_output": str(t.get("expected_output") or ""), "dependencies": clean_deps,
                "acceptance_criteria": crit or [str(t.get("expected_output") or t["title"])],
@@ -193,8 +197,36 @@ def coordination(owner: dict, workers: list[dict]) -> dict:
             "reviewed_by": lead}
 
 
+def waves(tasks: list[dict]) -> list[list[str]]:
+    """The work as waves: each task in the first wave after every task it depends on. Tasks in one wave can run side
+    by side; the number of waves is the plan's sequential depth."""
+    level: dict[str, int] = {}
+    for t in tasks:
+        level[t["id"]] = 1 + max((level[d] for d in t.get("dependencies") or [] if d in level), default=-1)
+    out: list[list[str]] = [[] for _ in range(max(level.values(), default=-1) + 1)]
+    for t in tasks:
+        out[level[t["id"]]].append(t["id"])
+    return out
+
+
+def _ancestors(tasks: list[dict]) -> dict[str, set]:
+    up: dict[str, set] = {}
+    for t in tasks:
+        up[t["id"]] = set()
+        for d in t.get("dependencies") or []:
+            up[t["id"]] |= {d} | up.get(d, set())
+    return up
+
+
 def enrich(plan: dict, workers: list[dict]) -> dict:
     by_id = {w["id"]: w for w in workers}
+    # contract-first: a build task learns the files the builds running alongside it own (no dependency either way)
+    up = _ancestors(plan["tasks"])
+    builds = [t for t in plan["tasks"] if t["kind"] in roles.BUILD_TYPES]
+    for t in builds:
+        t["others_files"] = {f: o["id"] for o in builds if o is not t and o["id"] not in up[t["id"]]
+                             and t["id"] not in up[o["id"]] for f in o.get("files") or []
+                             if f not in (t.get("files") or [])}
     for t in plan["tasks"]:
         owner = by_id[t["owner_worker_id"]]
         t.update({"risk_tier": roles.risk(t["kind"]), "verification_gate": GATES[t["kind"]], "tools": TOOLS[t["kind"]],
@@ -202,7 +234,9 @@ def enrich(plan: dict, workers: list[dict]) -> dict:
                   "authority_policy_id": f"{policy.POLICY_VERSION}:{owner['role']}"})
     leads = {w["id"]: [x["id"] for x in workers if x.get("reports_to") == w["id"]] for w in workers
              if w.get("tier") == "cofounder"}
-    plan.update({"critical_path": critical_path(plan["tasks"]), "escalation_conditions": list(ESCALATION_CONDITIONS),
+    w = waves(plan["tasks"])
+    plan.update({"critical_path": critical_path(plan["tasks"]), "waves": w, "sequential_depth": len(w),
+                 "escalation_conditions": list(ESCALATION_CONDITIONS),
                  "reporting": {w["id"]: w["reports_to"] for w in workers},
                  "coordination": {"cofounders": leads, "planner": roles.planner(workers),
                                   "answers_blockers": roles.answerers(workers),
@@ -261,6 +295,7 @@ def plan(run, note: str = "", cycle: int = 1) -> dict:
                   "milestone": t["milestone_id"]}, actor=boss, actor_type="worker", correlation_id=t["id"])
     record = {k: p[k] for k in ("workstreams", "milestones", "critical_path", "escalation_conditions", "reporting",
                                 "coordination", "uncovered_requirements")}
+    record.update(waves=p.get("waves") or [], sequential_depth=p.get("sequential_depth"))
     record["assumption_tests"] = assumption_tests(p["tasks"], p["milestones"],
                                                   run.requirements().get("assumptions") or []) if cycle == 1 else \
         (run.store.get("plan", "plan_1") or {}).get("assumption_tests", [])
@@ -271,7 +306,8 @@ def plan(run, note: str = "", cycle: int = 1) -> dict:
     record["work_graph"] = {**graph, "hash": run.store.put_object("json", graph)}
     run.event("workgraph.created", "plan", "plan_1", {"objective_id": oid, "version": version, "cycle": cycle,
               "work_items": len(graph["nodes"]), "dependencies": len(graph["edges"]),
-              "critical_path": p["critical_path"], "graph_hash": record["work_graph"]["hash"]}, actor=boss,
+              "critical_path": p["critical_path"], "sequential_depth": p.get("sequential_depth"),
+              "graph_hash": record["work_graph"]["hash"]}, actor=boss,
               actor_type="worker" if (boss or "").startswith("w_") else "service")
     before = run.store.get("plan", "plan_1") if cycle > 1 else None
     history = (before or {}).get("earlier_cycles", []) + ([{"cycle": cycle - 1, "milestones": before["milestones"],

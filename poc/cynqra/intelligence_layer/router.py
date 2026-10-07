@@ -139,6 +139,7 @@ def staff(reg: Registry, settings: dict, workers: list[dict], workload: dict[str
 #       ordered differently for different work, objectives and tiers
 #   then exploitation or bounded exploration, and an incumbent kept unless a challenger is verifiably superior
 from . import evidence as _evidence  # noqa: E402
+from . import weather as _weather  # noqa: E402
 
 TIERS = ("LOW", "MEDIUM", "HIGH")
 
@@ -208,10 +209,11 @@ def _economics(c: dict, per_kind: list[dict], sel: dict, budget: dict, tv: float
     A = int(sel.get("attempts") or ATTEMPTS)
     usd = minutes = value = 0.0
     out_kinds = []
+    wait = _weather.expected_wait_s(c.get("weather"))  # the provider's recent failures, as time (weather.py)
     for a in per_kind:
         k = a["kind"]
         meas = (c.get("measured") or {}).get(k) or {}
-        cost, secs = float(meas.get("usd_per_attempt") or 0.0), float(meas.get("seconds_per_attempt") or 0.0)
+        cost, secs = float(meas.get("usd_per_attempt") or 0.0), float(meas.get("seconds_per_attempt") or 0.0) + wait
         p = max(1e-3, float(a["quality"]["mean"]))
         P = 1 - (1 - p) ** A
         E = P / p
@@ -223,7 +225,8 @@ def _economics(c: dict, per_kind: list[dict], sel: dict, budget: dict, tv: float
                           "basis": meas.get("basis")})
     head = float(budget.get("headroom") if budget.get("headroom") is not None else 1e18)
     return {"expected_usd": round(usd, 6), "expected_minutes": round(minutes, 2),
-            "expected_value_cost": round(value, 6), "fits_budget": usd <= head + 1e-9, "by_kind": out_kinds}
+            "expected_value_cost": round(value, 6), "fits_budget": usd <= head + 1e-9, "by_kind": out_kinds,
+            "weather": (c.get("weather") or {}).get("state") or "clear", "expected_wait_s_per_attempt": round(wait, 1)}
 
 
 def select(snap: dict) -> dict:
@@ -237,6 +240,8 @@ def select(snap: dict) -> dict:
     for r in snap.get("evidence") or []:
         by.setdefault(r.get("intelligence_id"), []).append(r)
     tv = float((snap.get("budget") or {}).get("time_value_per_hour") or 0.0)
+    plan_slot = work.get("schedule") or {}  # critical-path routing: time on the critical path weighs more
+    tv *= float(plan_slot.get("time_weight") or 1.0)
     rows = []
     for c in snap["candidates"]:
         per_kind = [_evidence.assess(by.get(c["id"], []), ctx, pol, k) for k in work["kinds"]]
@@ -250,9 +255,11 @@ def select(snap: dict) -> dict:
     feasible = [r for r in rows if not r["violations"]]
     tier = work.get("risk_tier") if work.get("risk_tier") in TIERS else "LOW"
     tp = sel["tiers"][tier]
-    kq = lambda r: (not r["economics"]["fits_budget"], -r["quality"]["lcb"], -r["quality"]["mean"],  # noqa: E731
-                    r["economics"]["expected_value_cost"], r["id"])
-    ke = lambda r: (not r["economics"]["fits_budget"], r["economics"]["expected_value_cost"],  # noqa: E731
+    # a stormy intelligence (weather.py) is ranked after every feasible one that is not; it stays feasible
+    storm = lambda r: r["economics"].get("weather") == "stormy"  # noqa: E731
+    kq = lambda r: (not r["economics"]["fits_budget"], storm(r), -r["quality"]["lcb"],  # noqa: E731
+                    -r["quality"]["mean"], r["economics"]["expected_value_cost"], r["id"])
+    ke = lambda r: (not r["economics"]["fits_budget"], storm(r), r["economics"]["expected_value_cost"],  # noqa: E731
                     -r["quality"]["lcb"], r["id"])
     clears = [r for r in feasible if r["quality"][tp["floor"]] >= tp["quality_floor"]]
     if tp["tradeoff"] == "quality_first" or not clears:
@@ -279,8 +286,8 @@ def select(snap: dict) -> dict:
     inc_row = next((r for r in feasible if r["id"] == inc.get("intelligence_id")
                     and r["served_version"] == (inc.get("served_version") or r["served_version"])), None)
     if inc_row is not None and inc_row is not top:
-        if _evidence.superior(top["quality"], inc_row["quality"]):
-            mode = "reselect"
+        if _evidence.superior(top["quality"], inc_row["quality"]) or (storm(inc_row) and not storm(top)):
+            mode = "reselect"  # verified superiority, or an incumbent in a storm the top candidate is not in
         else:  # stability: a challenger must demonstrate verified superiority before it replaces the incumbent
             chosen, mode = inc_row, "keep_incumbent"
     elif inc_row is not None:
@@ -309,6 +316,15 @@ def select(snap: dict) -> dict:
         f"{q['objective_n']} weighted samples on this objective ({q['maturity']}); expected ${e['expected_usd']} and "
         f"{e['expected_minutes']} min per verified result. {len(feasible) - 1} feasible alternative(s) considered, "
         f"{len(rows) - len(feasible)} excluded by hard constraints."))
+    if plan_slot.get("critical"):
+        out["reason"] += (f" On the critical path: its time weighed {plan_slot.get('time_weight')} times the value of "
+                          "the founder's time.")
+    elif plan_slot.get("slack_minutes"):
+        out["reason"] += f" {plan_slot['slack_minutes']} min of slack: its time weighed {plan_slot.get('time_weight')}."
+    if inc_row is not None and mode == "reselect" and storm(inc_row) and not storm(chosen):
+        w = next((c.get("weather") for c in snap["candidates"] if c["id"] == inc_row["id"]), None) or {}
+        out["reason"] += (f" The incumbent's provider is stormy: {w.get('errors')} of its last {w.get('calls')} calls "
+                          f"failed ({w.get('overloads')} overloaded, {w.get('limited')} limited).")
     return out
 
 

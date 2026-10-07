@@ -183,10 +183,10 @@ def plan_schema(worker_ids: list[str]) -> dict:
             "id": S, "workstream_id": S, "milestone_id": S, "kind": {"type": "string", "enum": list(roles.TASK_TYPES)},
             "owner_worker_id": {"type": "string", "enum": list(worker_ids)}, "title": S, "inputs": S,
             "expected_output": S, "acceptance_criteria": LIST, "requirement_ids": LIST, "documents": LIST,
-            "dependencies": LIST, "deadline_day": {"type": "integer"}},
+            "dependencies": LIST, "files": LIST, "deadline_day": {"type": "integer"}},
             "required": ["id", "workstream_id", "milestone_id", "kind", "owner_worker_id", "title", "inputs",
                          "expected_output", "acceptance_criteria", "requirement_ids", "documents", "dependencies",
-                         "deadline_day"]}}}})
+                         "files", "deadline_day"]}}}})
 
 
 def _unfence(body: str) -> str:
@@ -252,10 +252,25 @@ FORECAST_CONTRACT = ("Forecast contract. forecast.py at the repository root defi
                      "week before.")
 
 
+# Contract-first build (R10 of the architecture review): build tasks chained one after another made a dozen
+# multi-minute calls in a row. The contract fixes the boundaries first; the builds then run side by side.
+CONTRACT_FIRST = ("Plan the build contract first. An early document task fixes the contract: which build task owns "
+                  "which files, the routes and the data shapes between them. Each build task then depends on that "
+                  "contract and not on another build task, unless it truly needs that task's code, so the builds run "
+                  "side by side; no two build tasks write the same file, and files lists each build task's own files "
+                  "(app.py belongs to exactly one). review_merge depends on every build task.\n")
+
+
 def task_brief(task: dict) -> str:
-    """What a task's type asks of its owner, from the catalog."""
+    """What a task's type asks of its owner, from the catalog, and for a build task the files it owns and the files
+    the builds working alongside it own (contract-first, CONTRACT_FIRST)."""
     kind = task["kind"]
     out = f"Task type {kind}: {roles.TASK_TYPES[kind]['about']}.\n"
+    if task.get("files"):
+        out += f"Files this task owns: {', '.join(task['files'])}.\n"
+    if task.get("others_files"):
+        out += ("Builds working alongside this one own these files; do not write them, and fit them by the contract: "
+                + ", ".join(f"{f} ({t})" for f, t in sorted(task["others_files"].items())) + ".\n")
     if kind == "document":
         out += ("Write these documents, one Markdown file each, and cite in them the requirement ids this task covers ("
                 + (", ".join(task.get("requirement_ids") or []) or "none") + "):\n"
@@ -653,7 +668,7 @@ class ModelSource:
                   "requirement ids it satisfies; a document task names the document types it writes, from those its "
                   f"owner writes. Task types:\n{types}\n"
                   "A task's owner must be a worker who may own its type. Ids t_01, t_02 and so on; dependencies may "
-                  "only name earlier tasks.\n"
+                  "only name earlier tasks.\n" + CONTRACT_FIRST
                   + (f"This is cycle {cycle}: the product is live. Done in earlier cycles, not to plan again:\n"
                      + "\n".join(f"* {x}" for x in done or []) + "\nPlan only the new work the founder asks for, "
                      "ending with one review_merge and one deploy, with at least one code task.\nThe founder asks: "
@@ -661,7 +676,7 @@ class ModelSource:
                      (f"The founder rejected the previous roadmap: {note}\n" if note else "")) +
                   'Return JSON: {"workstreams": [{"id", "name"}], "milestones": [{"id", "name", "due_day"}], '
                   '"tasks": [{"id", "workstream_id", "milestone_id", "kind", "owner_worker_id", "title", "inputs", '
-                  '"expected_output", "acceptance_criteria", "requirement_ids", "documents", "dependencies", '
+                  '"expected_output", "acceptance_criteria", "requirement_ids", "documents", "dependencies", "files", '
                   '"deadline_day"}]}' + self._refused(feedback))
         return self._call(prompt, max_tokens=4000, schema=plan_schema([w["id"] for w in workers]), worker=planner)
 

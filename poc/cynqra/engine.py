@@ -37,7 +37,7 @@ from pathlib import Path
 
 from . import binding, budget, calibration, controller, delivery, deploy, execution, gateway, numbers, objective
 from . import objective_evidence, people, performance, planner, policies, policy, replacement, roles, seats, synthesis
-from . import attribution, model_adapter
+from . import attribution, model_adapter, telemetry
 from . import settings as project_settings
 from .db import IST, Store, digest, now, scrub
 from .intelligence import SCENARIOS, IntelligenceError, ModelSource, ScriptedSource
@@ -278,11 +278,11 @@ class Engine:
         mid, pin = self._resolve(worker_id)
         self._reserve(worker_id, mid, request)
         try:
-            out = self._call(mid, request, pin)
+            out = self._call(mid, request, pin, worker_id)
         except VersionChanged as exc:
             replacement.version_changed(self, who, exc, task_id=self._task_ctx())  # kept after its check, or rebound
             mid, pin = self._resolve(worker_id)
-            out = self._call(mid, request, pin)
+            out = self._call(mid, request, pin, worker_id)
         except SupplyError as exc:
             raise IntelligenceError(str(exc), model_id=mid) from exc
         if out.get("error") and (who == binding.SYSTEM or not self._task_ctx()):
@@ -304,7 +304,7 @@ class Engine:
                 break
             tried.append(alt)
             try:
-                out = self._call(alt, request, (binding.current(self.store, who) or {}).get("version"))
+                out = self._call(alt, request, (binding.current(self.store, who) or {}).get("version"), who)
             except SupplyError as exc:
                 raise IntelligenceError(str(exc), model_id=alt) from exc
         return out
@@ -355,22 +355,34 @@ class Engine:
                       extra={"needed_cap": max(cap * 1.5, need), "reservation": res["id"]})
         objective.transition(self, "OBJECTIVE_BLOCKED", "the budget cap would be passed", by="budget_engine")
 
-    def _call(self, mid: str, request: dict, pin: str | None) -> dict:
+    def _call(self, mid: str, request: dict, pin: str | None, worker_id: str | None = None) -> dict:
         """The model call itself, the slow part, made without holding the run: while one worker waits for its
-        intelligence, the others record their results. Everything before and after the call is serialized."""
-        local = bool(self.registry.get(mid).get("local"))
+        intelligence, the others record their results. Everything before and after the call is serialized. Each
+        call is a span in the run's traces.jsonl (telemetry.py)."""
+        entry = self.registry.get(mid)
+        local = bool(entry.get("local"))
         owned = self.lock._is_owned()
         state = self.lock._release_save() if owned else None
         # a live run journals its calls in its own folder: reopened after a crash or a restart, it never pays
         # twice for an answer it already has (model_adapter.journal)
         path = self.dir / "journal.jsonl" if self.meta.get("mode") == "live" else None
+        start, out, failure = time.time_ns(), None, ""
         try:
             with model_adapter.journal(path):
                 if local:
                     with _LOCAL_CALLS:
-                        return self.supply.gateway.invoke(mid, request, pinned_version=pin)
-                return self.supply.gateway.invoke(mid, request, pinned_version=pin)
+                        out = self.supply.gateway.invoke(mid, request, pinned_version=pin)
+                else:
+                    out = self.supply.gateway.invoke(mid, request, pinned_version=pin)
+                return out
+        except Exception as exc:
+            failure = f"{type(exc).__name__}: {exc}"
+            raise
         finally:
+            telemetry.call(self.dir / "traces.jsonl", run_id=self.meta.get("company_id") or "",
+                           task_id=self._task_ctx(),
+                           worker_id=worker_id, entry=entry, request=request, out=out, start_ns=start,
+                           end_ns=time.time_ns(), error=failure)
             if owned:
                 self.lock._acquire_restore(state)
 

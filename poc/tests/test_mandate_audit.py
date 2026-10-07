@@ -848,6 +848,263 @@ class SandboxTests(unittest.TestCase):
         self.assertNotIn("wrote", out.stdout + out.stderr)
 
 
+class TraceTests(unittest.TestCase):
+    """A run's calls and decisions were in its own store only. Each run now writes traces.jsonl: OpenTelemetry
+    OTLP/JSON, a GenAI client span per model call and an internal span per selection decision, loadable into any
+    OpenTelemetry backend as it is; measurements only, never a prompt, a reply or a credential."""
+
+    def test_a_live_run_traces_its_calls_and_decisions_by_the_genai_conventions(self):
+        from test_objective_intelligence import ModelsServer as Server, live_engine, supply_with
+        saved = no_model_env()
+        self.addCleanup(restore_env, saved)
+        tmp = TempDir()
+        self.addCleanup(tmp.cleanup)
+        srv = Server()
+        self.addCleanup(srv.close)
+        sup = supply_with(tmp.path, [("Steady", 0.2)], srv)
+        self.addCleanup(sup.close)
+        e = live_engine(tmp.path / "run", sup)
+        self.addCleanup(e.close)
+        lines = (tmp.path / "run" / "traces.jsonl").read_text(encoding="utf-8").splitlines()
+        spans = [json.loads(x)["resourceSpans"][0]["scopeSpans"][0]["spans"][0] for x in lines]
+        calls = [s for s in spans if s["name"].startswith("chat ")]
+        decisions = [s for s in spans if s["name"].startswith("select")]
+        self.assertEqual(len(calls), len(srv.requests), "a span for every call made")
+        self.assertTrue(decisions, "selection decisions are traced")
+        attrs = {a["key"]: list(a["value"].values())[0] for a in calls[0]["attributes"]}
+        self.assertEqual(attrs["gen_ai.operation.name"], "chat")
+        for key in ("gen_ai.provider.name", "gen_ai.request.model", "gen_ai.usage.input_tokens",
+                    "gen_ai.usage.output_tokens", "cynqra.intelligence_id"):
+            self.assertIn(key, attrs)
+        self.assertEqual(calls[0]["kind"], 3)
+        self.assertEqual(len(calls[0]["traceId"]), 32)
+        self.assertLessEqual(int(calls[0]["startTimeUnixNano"]), int(calls[0]["endTimeUnixNano"]))
+        text = "\n".join(lines)
+        self.assertNotIn("Delivery contract", text, "no prompt in a trace")
+
+    def test_a_failed_call_is_an_error_span_with_its_type_and_no_secret(self):
+        from cynqra import telemetry
+        tmp = TempDir()
+        self.addCleanup(tmp.cleanup)
+        path = tmp.path / "traces.jsonl"
+        telemetry.call(path, run_id="co_1", task_id="t_01", worker_id="w_eng", entry={"id": "m1", "ref": "model-x",
+                       "access_provider": "Google AI Studio"}, request={"max_tokens": 100}, out=None, start_ns=1,
+                       end_ns=2, error="RuntimeError: HTTP 401 key AIzaSyA1234567890abcdefghijklmnopqrstu refused")
+        span = json.loads(path.read_text())["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
+        attrs = {a["key"]: list(a["value"].values())[0] for a in span["attributes"]}
+        self.assertEqual((span["status"]["code"], attrs["error.type"], attrs["gen_ai.provider.name"]),
+                         (2, "RuntimeError", "gcp.gemini"))
+        self.assertNotIn("AIzaSyA1234567890", path.read_text())
+        self.assertEqual(span["traceId"], telemetry.trace_id("co_1", "t_01"), "a task's spans share its trace")
+
+
+class RateLimitPacingTests(unittest.TestCase):
+    """Every worker on one key ran into the provider's limit on its own: a 429 each, then each backed off on its own
+    schedule. A provider that says how much of its window is left, and when it resets, now paces every call on that
+    key; a Retry-After (or Google's retryDelay) holds them all, not only the refused one."""
+
+    def setUp(self):
+        model_adapter._PACE.clear()
+        self.addCleanup(model_adapter._PACE.clear)
+
+    def test_resets_are_read_as_providers_write_them(self):
+        from cynqra.model_adapter import _limit_wait, _seconds_until
+        self.assertEqual([_seconds_until(v) for v in ("20ms", "6m0s", "1h2m3.5s", "2.5", "soon")],
+                         [0.02, 360.0, 3723.5, 2.5, None])
+        self.assertEqual(_limit_wait({"x-ratelimit-remaining-requests": "0", "x-ratelimit-reset-requests": "1.5s"}), 1.5)
+        self.assertEqual(_limit_wait({"x-ratelimit-remaining-requests": "9", "x-ratelimit-reset-requests": "1.5s"}), 0)
+        self.assertEqual(_limit_wait({"x-ratelimit-remaining-tokens": "120", "x-ratelimit-reset-tokens": "2s"}), 2.0,
+                         "too few tokens left for a prompt")
+        self.assertEqual(_limit_wait({"x-ratelimit-remaining-requests": "0", "x-ratelimit-reset-requests": "9h"}),
+                         model_adapter.PACE_MAX_WAIT_S, "never one wait longer than the cap")
+
+    def test_an_exhausted_window_holds_the_next_call_on_that_key_only(self):
+        import time as _t
+        srv, url, seen = fake_provider(lambda body, n: (200, reply(), {"x-ratelimit-remaining-requests": "0",
+                                                                       "x-ratelimit-reset-requests": "1s"}))
+        self.addCleanup(stop, srv)
+        route = hosted_route(url)
+        self.assertIsNone(model_adapter.complete("one", max_tokens=50, route=route)["error"])
+        start = _t.time()
+        self.assertIsNone(model_adapter.complete("two", max_tokens=50, route=route)["error"])
+        self.assertGreaterEqual(_t.time() - start, 0.8, "the second call waited for the window")
+        model_adapter._PACE.clear()
+        other = model_adapter._pace_key(url + "/chat/completions", {"Authorization": "Bearer another"})
+        self.assertNotIn(other, model_adapter._PACE, "another key on the same host is not held")
+
+    def test_googles_retry_delay_holds_every_call_on_the_key(self):
+        body = {"error": {"code": 429, "status": "RESOURCE_EXHAUSTED",
+                          "details": [{"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "2s"}]}}
+        srv, url, seen = fake_provider(lambda b, n: (429, body, None) if n == 1 else (200, reply(), None))
+        self.addCleanup(stop, srv)
+        with mock.patch.object(model_adapter.time, "sleep") as slept:
+            out = model_adapter.complete("hi", max_tokens=50, route=hosted_route(url))
+        self.assertIsNone(out["error"])
+        self.assertIn(2.0, [c.args[0] for c in slept.call_args_list])
+        self.assertTrue(any(v > model_adapter.time.time() for v in model_adapter._PACE.values()),
+                        "the other calls on this key are held too")
+
+
+class ProviderWeatherTests(unittest.TestCase):
+    """Paid run 37589136743 lost about two hours learning, call by call, that Google's preview models were overloaded.
+    Each candidate now carries the weather: its provider-side failures in the last half hour, from every run on this
+    installation. A stormy intelligence is ranked after one that is not, an unsettled one's expected time includes
+    the waiting its failures cost, and a stormy incumbent gives way; the shareable report holds no content."""
+
+    def calls(self, ok, failed, ago=60, error="HTTP 503 from provider: high demand"):
+        from cynqra.db import IST
+        from datetime import datetime, timedelta
+        at = (datetime.now(IST) - timedelta(seconds=ago)).isoformat()
+        return ([{"at": at, "error": "", "seconds": 20.0} for _ in range(ok)]
+                + [{"at": at, "error": error, "seconds": 40.0} for _ in range(failed)])
+
+    def test_recent_provider_failures_make_the_weather(self):
+        from cynqra.intelligence_layer import weather
+        self.assertEqual(weather.of(self.calls(10, 0))["state"], "clear")
+        self.assertEqual(weather.of(self.calls(1, 1))["state"], "clear", "two calls say nothing either way")
+        self.assertEqual(weather.of(self.calls(7, 3))["state"], "unsettled")
+        storm = weather.of(self.calls(2, 4))
+        self.assertEqual((storm["state"], storm["overloads"], storm["p50_s"]), ("stormy", 4, 20.0))
+        self.assertEqual(weather.of(self.calls(0, 6, ago=3 * 3600))["state"], "clear", "an old storm has passed")
+        self.assertEqual(weather.of(self.calls(1, 3, error="HTTP 429: rate limit"))["limited"], 3)
+        self.assertEqual(weather.expected_wait_s({"state": "clear", "error_rate": 0.1}), 0.0)
+        self.assertAlmostEqual(weather.expected_wait_s({"state": "stormy", "error_rate": 0.5, "failed_call_s": 40}), 40.0)
+
+    def test_the_router_ranks_a_stormy_intelligence_last_and_a_stormy_incumbent_gives_way(self):
+        from cynqra.intelligence_layer import router, weather
+        from test_objective_intelligence import cand, raw, snap
+        storm, clear = weather.of(self.calls(2, 4)), weather.of(self.calls(10, 0))
+        ev = [raw(i, "code", True) for i in ("a", "b") for _ in range(6)]
+        r = router.select(snap([cand("a", price=0.1, weather=storm), cand("b", price=3.0, weather=clear)], ev))
+        self.assertEqual(r["ranking"], ["b", "a"], "the cheaper one is in a storm")
+        row = next(x for x in r["rows"] if x["id"] == "a")
+        self.assertEqual(row["economics"]["weather"], "stormy")
+        self.assertGreater(row["economics"]["expected_wait_s_per_attempt"], 0)
+        r = router.select(snap([cand("a", weather=storm), cand("b", weather=clear)], ev, scope="worker",
+                               incumbent={"intelligence_id": "a", "served_version": ""}))
+        self.assertEqual((r["selected"], r["mode"]), ("b", "reselect"))
+        self.assertIn("stormy", r["reason"])
+        r = router.select(snap([cand("a", weather=storm)], ev))
+        self.assertEqual(r["selected"], "a", "stormy is ranked last, never excluded")
+
+    def test_the_shareable_report_holds_counts_and_rates_only(self):
+        from cynqra.intelligence_layer import weather
+
+        class Reg:
+            def models(self):
+                return [{"id": "m1", "ref": "gemini-x", "access_provider": "Google"}]
+
+            def calls(self, mid):
+                return ProviderWeatherTests.calls(None, 2, 4)
+
+        rows = weather.report(Reg())
+        self.assertEqual((rows[0]["provider"], rows[0]["model"], rows[0]["state"]), ("Google", "gemini-x", "stormy"))
+        self.assertEqual(set(rows[0]) - {"provider", "model"}, {"state", "calls", "errors", "overloads", "limited",
+                                                               "error_rate", "p50_s", "p95_s", "failed_call_s",
+                                                               "window_min"})
+
+
+class CriticalPathRoutingTests(unittest.TestCase):
+    """The objective finishes when its critical path does, yet each task's intelligence was chosen on its own merits.
+    Every task decision now knows whether the task is on the critical path of the work still to do and its slack;
+    on the path the Router weighs time three times the founder's value of it, with slack half, and says so."""
+
+    class Run:
+        def __init__(self, tasks):
+            self._tasks = tasks
+
+        def tasks(self):
+            return self._tasks
+
+    def test_the_critical_path_and_slack_are_solved_from_the_work_still_to_do(self):
+        from cynqra.controller import schedule
+        tasks = [{"id": "t_01", "kind": "code", "dependencies": [], "status": "PLANNED"},
+                 {"id": "t_02", "kind": "code", "dependencies": ["t_01"], "status": "PLANNED"},
+                 {"id": "t_03", "kind": "document", "dependencies": [], "status": "PLANNED"},
+                 {"id": "t_04", "kind": "deploy", "dependencies": ["t_02", "t_03"], "status": "PLANNED"}]
+        run = self.Run(tasks)
+        self.assertEqual([schedule(run, i)["critical"] for i in ("t_01", "t_02", "t_03", "t_04")],
+                         [True, True, False, True])
+        self.assertEqual(schedule(run, "t_03")["slack_minutes"], 60.0, "90 min of code against 30 of document")
+        tasks[0]["status"] = tasks[1]["status"] = "VERIFIED"
+        self.assertTrue(schedule(run, "t_03")["critical"], "with the code done, the document is the path")
+
+    def test_time_on_the_critical_path_buys_a_faster_intelligence_and_slack_buys_a_cheaper_one(self):
+        from cynqra.intelligence_layer import router
+        from test_objective_intelligence import cand, raw, snap
+        ev = [raw(i, "code", True) for i in ("fast", "slow") for _ in range(6)]
+        fast = cand("fast", measured={"code": {"usd_per_attempt": 0.2, "seconds_per_attempt": 30}})
+        slow = cand("slow", measured={"code": {"usd_per_attempt": 0.01, "seconds_per_attempt": 120}})
+
+        def pick(critical):
+            s = snap([fast, slow], ev)
+            s["work"]["schedule"] = {"critical": critical, "slack_minutes": 0.0 if critical else 60.0,
+                                     "time_weight": 3.0 if critical else 0.5}
+            return router.select(s)
+
+        on, off = pick(True), pick(False)
+        self.assertEqual((on["selected"], off["selected"]), ("fast", "slow"))
+        self.assertIn("critical path", on["reason"])
+        self.assertIn("slack", off["reason"])
+
+
+class ContractFirstBuildTests(unittest.TestCase):
+    """Build tasks chained one after another made a dozen multi-minute calls in a row. The planner is now asked for
+    the contract first (which build owns which files, the routes and data shapes) and for builds that depend on it,
+    not on each other; each build is told the files it owns and those the builds alongside it own, and the plan
+    records its waves and sequential depth."""
+
+    def test_the_plan_is_read_as_waves(self):
+        from cynqra.planner import waves
+        tasks = [{"id": "t_01", "dependencies": []}, {"id": "t_02", "dependencies": ["t_01"]},
+                 {"id": "t_03", "dependencies": ["t_01"]}, {"id": "t_04", "dependencies": ["t_02", "t_03"]}]
+        self.assertEqual(waves(tasks), [["t_01"], ["t_02", "t_03"], ["t_04"]])
+
+    def test_builds_alongside_each_other_know_whose_files_are_whose(self):
+        from cynqra import roles
+        from cynqra.intelligence import task_brief
+        from cynqra.planner import enrich
+        from helpers import M1_ROLES
+        workers = roles.instantiate(M1_ROLES)
+        eng = next(w["id"] for w in workers if w["role"] == "Engineer")
+        tasks = [{"id": "t_01", "kind": "code", "owner_worker_id": eng, "dependencies": [], "files": ["app.py"]},
+                 {"id": "t_02", "kind": "code", "owner_worker_id": eng, "dependencies": [], "files": ["store.py"]},
+                 {"id": "t_03", "kind": "code", "owner_worker_id": eng, "dependencies": ["t_01"],
+                  "files": ["web.py"]}]
+        plan = enrich({"tasks": tasks}, workers)
+        by = {t["id"]: t for t in plan["tasks"]}
+        self.assertEqual(by["t_01"]["others_files"], {"store.py": "t_02"}, "t_03 follows t_01: not alongside it")
+        self.assertEqual(by["t_02"]["others_files"], {"app.py": "t_01", "web.py": "t_03"})
+        self.assertEqual((plan["waves"], plan["sequential_depth"]), ([["t_01", "t_02"], ["t_03"]], 2))
+        brief = task_brief({**by["t_02"], "kind": "code"})
+        self.assertIn("Files this task owns: store.py", brief)
+        self.assertIn("app.py (t_01)", brief)
+
+    def test_the_planner_is_asked_for_the_contract_first(self):
+        from cynqra import intelligence, roles
+        from helpers import M1_ROLES
+        asked = []
+
+        class Access:
+            def intelligence_for(self, worker):
+                return "m1"
+
+            def invoke(self, worker, request):
+                asked.append(request)
+                return {"text": '{"workstreams": [], "milestones": [], "tasks": []}', "tokens_in": 1, "tokens_out": 1,
+                        "estimated": False, "error": None}
+
+        src = intelligence.ModelSource()
+        src.bind(Access())
+        workers = roles.instantiate(M1_ROLES)
+        for cycle in (1, 2):
+            src.plan({}, workers, {"requirements": []}, cycle=cycle, done=["t_01 x"] if cycle > 1 else None)
+            self.assertIn(intelligence.CONTRACT_FIRST, asked[-1]["prompt"])
+        task = asked[-1]["schema"]["properties"]["tasks"]["items"]
+        self.assertIn("files", task["properties"])
+        self.assertIn("files", task["required"])
+
+
 class ReasoningTokensTests(unittest.TestCase):
     """Paid run 37589136743: Gemini 3.1 Pro Preview took 186 s for 170 counted output tokens. Google's
     OpenAI-compatible route reports its hidden reasoning only in total_tokens and bills it as output; Cynqra counted

@@ -311,6 +311,11 @@ def main(argv: list[str] | None = None) -> int:
             from .model_adapter import cassette_stats
             manifest["replay"] = cassette_stats()
             print("\nReplay: " + json.dumps(manifest["replay"]))
+        from .intelligence_layer.weather import report as weather_report
+        from .model_adapter import pace_stats
+        manifest["weather"] = weather_report(supply.registry)  # shareable: counts and rates, no content
+        manifest["pacing"] = pace_stats()  # waits the providers' rate-limit headers asked for
+        print("\nProvider weather: " + json.dumps(manifest["weather"], default=str))
         (root / "manifest.json").write_text(json.dumps(manifest, indent=2, default=str), encoding="utf-8")
         passed = sum(bool(r.get("passed")) for r in manifest["results"])
         print(json.dumps({"models_examined": len(selected), "passed": passed,

@@ -1,6 +1,6 @@
 # 3. Status and roadmap
 
-Last updated: 1 October 2026.
+Last updated: 7 October 2026.
 
 **What** this covers: what works today, what is proven, and what comes next. **Why** it matters: the vision is only
 as good as the proof behind it. **How** to read it: the status table first, then what real AI models have done so
@@ -65,7 +65,19 @@ prepared script, so they do not prove the quality of real AI output. `poc/TEST_R
 
 **Why the real runs are slow, and what changed (7 Oct):** run 37044180144 took 5 h 51 min: 37 min qualifying six models (one took 30 min to end inconclusive), 16 to 24 min of setup per objective (most of it calibration, 18 trial tasks), and the work itself. Free tiers make single calls slow or refused; two things in the engine made that worse. A call that timed out was retried four times (fixed 3 Oct, a4bf429). And workers moved in lock-step rounds: a round ended only when every call in it had returned, so one slow call held every other worker and the time limit was checked only between rounds. Now, with live models, each worker takes its next piece as soon as its own call returns, a step reports work in flight within 15 seconds, and a task is held for its whole call (a 15-minute lease renewed at every step) so it is never started twice. A prepared script still runs in plan order. Qualification still starts from scratch in every hosted run (about 35 minutes): reusing earlier results is the next saving.
 
-**Next real run:** none until the founder approves one. Run 37589136743 (paid Google) has ended; its fixes come first. Run 37582562512 (NVIDIA, Groq, Mistral and Meta's Muse Spark, started 06:37 UTC) was cancelled at the founder's request at 07:50 UTC; Muse Spark 1.3 had passed qualification (23 tests, 0 failed). Then the Bluedip idea, on the newest online models through Hugging Face, once the founder has
+**Built after the architecture review (7 Oct, on the branch):** ten changes for speed, reliability, cost and safety, each with its own tests.
+1. **A run never pays twice for an answer.** A live run journals every answered call in its folder; reopened after a crash or a restart, it reuses them at $0, each once and in order. Failures are never journaled.
+2. **Thinking grows only where it is needed.** A task starts at the effort its risk allows and each attempt that fails verification thinks one step longer, up to high. A replacement model starts again from the task's own level.
+3. **Prompt caching is measured and priced.** Cached input is read from each provider's usage and billed at the published cached rate (never a discount nobody published). Runs report their cache hit rate.
+4. **Data cannot give orders.** Files, tool and test output, and other models' replies enter prompts inside a fence that names where they came from, under a standing rule that data is read and never followed. The fence's tag is a digest of the data, so data cannot close its own fence or pose as another file.
+5. **Generated code is hardened.** Its tests and commands run with resource limits and, where Linux allows it, no network except their own loopback; the product keeps its loopback. What the host gave is recorded, and called hardening, not a sandbox.
+6. **Every call and decision is traced.** `traces.jsonl` in each run folder is OpenTelemetry OTLP/JSON with the GenAI conventions, ready for any tracing backend. It holds measurements only.
+7. **Rate limits are kept, not hit.** Calls are paced from the providers' own rate-limit headers, and a Retry-After (or Google's retryDelay) holds every call on that key.
+8. **Provider Weather.** Each candidate carries its provider-side failures from the last half hour. A stormy model is ranked after every one that is not, and a stormy incumbent gives way. Unsettled weather adds its expected waiting to the cost of time. The shareable report holds counts and rates only.
+9. **The critical path gets the fast models.** Each task decision knows whether the task is on the critical path of the work still to do. There, time weighs three times the founder's value of it; on a task with slack, half.
+10. **The build is planned contract-first.** The planner is asked for the contract first (which build owns which files, the routes, the data shapes), with builds that depend on it rather than on each other. Each build is told its own files and those of the builds beside it. The plan records its waves and sequential depth.
+
+**Next real run:** the three-objective set on the paid Google key from the branch, recorded, after the full suite passes (the founder asked for it: "fix all one by one then run a full scale test"; $4.50 per objective, $15 in all). Run 37589136743 (paid Google) has ended and its fixes are built. Run 37582562512 (NVIDIA, Groq, Mistral and Meta's Muse Spark, started 06:37 UTC) was cancelled at the founder's request at 07:50 UTC; Muse Spark 1.3 had passed qualification (23 tests, 0 failed). Then the Bluedip idea, on the newest online models through Hugging Face, once the founder has
 Hugging Face PRO. Nothing in it is scripted: it is the test of whether real AI models can do what the demo shows.
 
 ## What to build next, in order
@@ -88,8 +100,10 @@ Hugging Face PRO. Nothing in it is scripted: it is the test of whether real AI m
 ## Known limits
 
 - **Code the AI team writes runs on this computer without a sandbox**, as the same user, when it is tested and put
-  live. Keys are kept out of its environment, but it could read files the user can read. Run only ideas you trust
-  on a computer that holds nothing sensitive until the sandbox (roadmap 11) is built.
+  live. Keys are kept out of its environment. Its processes have resource limits, and its tests and commands have
+  no network where Linux allows a network namespace (`sandbox.isolation()` says what the host gave; set
+  `CYNQRA_SANDBOX_NETWORK=0` to turn that off). It could still read files the user can read. Run only ideas you trust
+  on a computer that holds nothing sensitive until the sandbox (roadmap 12) is built.
 - A release whose code listens on every network address (so anyone on the same network could use it) is refused
   before preview. The check looks for the usual ways of writing that in the code. It can miss an unusual one, so
   the sandbox is still needed.
