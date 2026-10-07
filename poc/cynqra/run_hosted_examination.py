@@ -621,8 +621,13 @@ def minutes_worked(e) -> float:
     limit an earlier process used."""
     from datetime import datetime
     events = e.store.events()
+    def to(x: dict) -> str | None:
+        pl = x.get("payload")
+        pl = json.loads(pl) if isinstance(pl, str) else (pl or {})  # the store hands it back decoded
+        return pl.get("to")
+
     start = next((x for x in events if x["event_type"] == "objective.state_changed"
-                  and '"OBJECTIVE_EXECUTING"' in str(x.get("payload")) and '"to"' in str(x.get("payload"))), None)
+                  and to(x) == "OBJECTIVE_EXECUTING"), None)
     if start is None or not events:
         return 0.0
     t = lambda x: datetime.fromisoformat(str(x["created_at"])).timestamp()  # noqa: E731

@@ -2058,10 +2058,14 @@ class ResumeTests(unittest.TestCase):
         orphan = budget.reserve(e.store, worker_id="w_be", task_id="t_99", model_id="m", usd=0.5,
                                 purpose="model_call")  # a call in flight when the process stopped
         self.assertEqual(orphan["status"], "held")
+        worked = rhe.minutes_worked(e)
+        self.assertGreater(worked, 0, "its work had started: the time it took is counted against its limit")
         e.close()
 
         lines = []
         r = rhe.resume_objective_run(self.sup, folder, max_minutes=30, log=lines.append)
+        self.assertTrue(any(f"{worked:.1f} minutes worked before the stop" in x and "what its 30 have left" in x
+                            for x in lines), lines)
         self.assertNotIn("error", r, r.get("error"))
         self.assertEqual((r["stage"], r["resumed"], r["lifecycle"]), ("accepted", True, "OBJECTIVE_CLOSED"))
         self.assertTrue(any("resumed from its saved state" in x for x in lines), lines)
