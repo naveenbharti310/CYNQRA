@@ -278,8 +278,10 @@ def main(argv: list[str] | None = None) -> int:
             return probe(supply, m["id"], log=print)
 
         selected, results = examine(entries, limit, examined, served)
+        from .sandbox import isolation
         manifest = {
             "connections": connections,
+            "isolation": isolation(),  # what this host gave the code the team wrote (sandbox.py)
             "discovery": selection_details(entries, selected, limit),
             "candidates": [{"id": m["id"], "ref": m["ref"], "name": m["name"],
                             "provider": m.get("access_provider") or m.get("provider"),

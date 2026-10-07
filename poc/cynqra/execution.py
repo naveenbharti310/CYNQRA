@@ -163,7 +163,8 @@ def work(run, t: dict) -> dict:
                 use["malformed"] += 1
                 run.save_task(t)
                 raise ProtocolError("tool write content must be text")
-            g = run.gateway(owner, t["id"], action, target=target, content=content)
+            g = run.gateway(owner, t["id"], action, target=target, content=content,
+                            provenance="a tool call in a model's reply, written after reading data")
             # tool use is evidence too: a request the rules refuse is the intelligence's; a broken tool is not
             if g.get("status") == "executed":
                 use["executed"] += 1

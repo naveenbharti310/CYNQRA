@@ -21,7 +21,7 @@ import os
 import re
 from pathlib import Path
 
-from . import model_adapter, roles
+from . import model_adapter, provenance, roles
 
 HERE = Path(__file__).resolve().parent
 SCENARIOS = HERE.parent / "scenarios"
@@ -471,7 +471,8 @@ class ModelSource:
         """The start of every role's prompt. What stays the same through a run comes first (the contract, the
         objective, then the rules, which only grow), the role after it: a local server reuses its cache for the
         part a prompt shares with the one before, so a change of speaker does not mean reading it all again."""
-        return DELIVERY_CONTRACT + "\n\n" + ModelSource._ctx(objective, rules) + "\n" + (persona or "") + "\n\n"
+        return (DELIVERY_CONTRACT + "\n\n" + provenance.RULE + "\n\n" + ModelSource._ctx(objective, rules) + "\n"
+                + (persona or "") + "\n\n")
 
     @staticmethod
     def _ctx(objective: dict, rules: list[str]) -> str:
@@ -680,16 +681,19 @@ class ModelSource:
              inbox: dict[str, str], feedback: str = "", answers: list[dict] | None = None,
              previous: dict[str, str] | None = None, repo_files: list[str] | None = None, persona: str = "",
              answerers: list[str] | None = None, **_) -> tuple[dict, dict]:
-        files = "".join(f"=== FILE: {k} ===\n{v.rstrip()}\n=== END FILE ===\n" for k, v in inbox.items()) or "none"
+        # what others wrote, tools printed and generated code output is fenced as data (provenance.py)
+        files = provenance.files(inbox, "files team members wrote") if inbox else "none"
         extra = ""
         if answers:
-            extra += "\nAnswers to your Blockers:\n" + "\n".join(a.get("acceptance_check", "") for a in answers)
+            extra += "\nAnswers to your Blockers:\n" + provenance.data(
+                "\n".join(a.get("acceptance_check", "") for a in answers), "your cofounder's answers")
         if feedback:
-            extra += "\nYour last attempt failed a check. Fix it:\n" + feedback
+            extra += "\nYour last attempt failed a check. Fix it:\n" + provenance.data(
+                feedback, "Cynqra's checks and tools (what they quote came from the code and the tools)")
         if previous:
             extra += ("\nYour files so far. They are kept as they are: send only the files you change or add, each one "
                       'complete. To remove a file, add "delete": ["name"] to the JSON object.\n'
-                      + "".join(f"=== FILE: {k} ===\n{v.rstrip()}\n=== END FILE ===\n" for k, v in previous.items()))
+                      + provenance.files(previous, "your own files so far"))
         kind = task["kind"]
         delivers_files = kind in roles.FILE_TYPES
         shape = None if delivers_files else (
@@ -724,20 +728,15 @@ class ModelSource:
         """A cofounder reviews its team member's work before it counts: files that passed the platform's checks, or
         a proposal before it goes to the founder."""
         crit = "; ".join(task.get("acceptance_criteria") or [])
-        body, left = "", 14000
-        for name, text in (work.get("files") or {}).items():
-            piece = f"=== FILE: {name} ===\n{text[:left].rstrip()}\n=== END FILE ===\n"
-            body += piece
-            left -= len(piece)
-            if left <= 0:
-                body += "(the rest of the files are not shown)\n"
-                break
+        body = provenance.files(work["files"], f"files {owner} wrote", limit=14000) \
+            if work.get("files") else ""
         if work.get("proposal"):
-            body += "Proposal for the founder:\n" + json.dumps(work["proposal"], indent=1) + "\n"
+            body += "Proposal for the founder:\n" + provenance.data(json.dumps(work["proposal"], indent=1),
+                                                                    f"{owner}'s proposal")
         prompt = (self._head(persona, objective, rules) +
                   f"{owner}, on your team, finished task {task['id']} ({task['title']}). Expected output: "
-                  f"{task['expected_output']}.\n" + (f"Acceptance criteria: {crit}\n" if crit else "") +
-                  f"{work.get('checks') or ''}\n{body}"
+                  f"{task['expected_output']}.\n" + (f"Acceptance criteria: {crit}\n" if crit else "")
+                  + (provenance.data(work["checks"], "Cynqra's checks") if work.get("checks") else "\n") + body +
                   "Review it as the cofounder accountable for this area, before it counts. Approve it if it does what "
                   "was asked and is right for this company. Send it back only for a concrete problem, and say exactly "
                   "what to change; the platform has already run its automatic checks.\n"
@@ -747,8 +746,9 @@ class ModelSource:
     def answer_blocker(self, task: dict, worker: str, objective: dict, rules: list[str], blocker: dict,
                        artifact_index: list[str], persona: str = "", **_) -> tuple[dict, dict]:
         prompt = (self._head(persona, objective, rules) +
-                  f"{blocker.get('raised_by')} raised a Blocker on {task['id']} ({task['title']}): "
-                  f"{blocker.get('description')}\nArtifacts that exist: {json.dumps(artifact_index)}\n"
+                  f"{blocker.get('raised_by')} raised a Blocker on {task['id']} ({task['title']}):\n"
+                  + provenance.data(str(blocker.get("description") or ""), f"{blocker.get('raised_by')}'s Blocker") +
+                  f"Artifacts that exist: {json.dumps(artifact_index)}\n"
                   "Clear it using only the objective, the decided rules and the artifacts. If it needs a new product "
                   "decision, say so plainly and give the safest reading for now.\n"
                   'Return JSON: {"artifacts": [ids], "context_ref": "...", "acceptance_check": "the missing facts"}')

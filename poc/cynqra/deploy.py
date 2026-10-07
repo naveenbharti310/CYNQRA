@@ -33,8 +33,9 @@ def start(folder: Path, port: int, data_file: Path, log_file: Path | None = None
     """Start app.py. Its output goes to log_file so a crash can be shown, not guessed at."""
     log = open(log_file, "wb") if log_file else subprocess.DEVNULL
     try:
+        from . import sandbox  # limits; the product keeps the host's loopback, where it is checked
         proc = subprocess.Popen(
-            [python_exe(), "app.py"], cwd=str(folder),
+            sandbox.wrap([python_exe(), "app.py"], network=True), cwd=str(folder),
             env=clean_env({"PORT": str(port), "DATA_FILE": str(data_file)}),
             stdout=log, stderr=subprocess.STDOUT if log_file else subprocess.DEVNULL, stdin=subprocess.DEVNULL,
             **own_process_group(),

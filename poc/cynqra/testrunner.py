@@ -11,6 +11,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from . import sandbox
+
 # unittest -v writes "name (module.Class.name) ... ok". The result can come lines later: after a docstring, or after
 # whatever the code under test printed meanwhile (http.server logs every request to stderr, mid-line).
 START = re.compile(r"^(\w+) \((\w+\.[\w.]+)\)")
@@ -79,8 +81,9 @@ def run_unittests(folder: Path, timeout: int = 120) -> dict:
     # Output goes to temporary files. With pipes, something a test started and left running would hold a pipe open,
     # and the run would look hung after its tests had finished.
     with tempfile.TemporaryFile() as out_f, tempfile.TemporaryFile() as err_f:
-        proc = subprocess.Popen(
-            [python_exe(), "-m", "unittest", "discover", "-s", str(folder), "-p", "test_*.py", "-v"],
+        proc = subprocess.Popen(  # under the sandbox launcher: limits, and no network where the host allows it
+            sandbox.wrap([python_exe(), "-m", "unittest", "discover", "-s", str(folder), "-p", "test_*.py", "-v"],
+                         cpu_s=timeout + 10),
             cwd=str(folder), stdout=out_f, stderr=err_f, stdin=subprocess.DEVNULL, env=clean_env(),
             **own_process_group(),
         )
@@ -126,7 +129,7 @@ def run_unittests(folder: Path, timeout: int = 120) -> dict:
                    "unittest could report: the code under test ended the process (os._exit, or sys.exit outside a "
                    "test) or crashed.")
     return {"ran": ran, "passed": code == 0 and ran > 0, "tests": tests, "failed": failed,
-            "output": out[-3000:], "returncode": code, "problem": problem}
+            "output": out[-3000:], "returncode": code, "problem": problem, "isolation": sandbox.isolation()["level"]}
 
 
 def failure_summary(report: dict) -> str:
