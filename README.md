@@ -84,7 +84,7 @@ come anyway also pay half. It suggests 20% off instead, which **makes money**.
 
 ## Where it stands
 
-The engine, the screens and the objective intelligence control loop are built and covered by 481 automated tests (`cd poc && python3 -m unittest discover -s tests -t tests`). On real hosted models (the free tiers of Google, NVIDIA, Groq and Mistral so far), the loop chooses an intelligence for each piece of work from evidence it gathers on that objective, and objectives have been delivered and accepted end to end; free-tier limits still stop many runs before delivery. Every real run, what it showed and what was fixed because of it is in [docs/3_STATUS_AND_ROADMAP.md](docs/3_STATUS_AND_ROADMAP.md); how to start one is in [docs/4_RUN_AND_TEST.md](docs/4_RUN_AND_TEST.md).
+The engine, the screens and the objective intelligence control loop are built and covered by 484 automated tests (`cd poc && python3 -m unittest discover -s tests -t tests`). On real hosted models (the free tiers of Google, NVIDIA, Groq and Mistral so far), the loop chooses an intelligence for each piece of work from evidence it gathers on that objective, and objectives have been delivered and accepted end to end; free-tier limits still stop many runs before delivery. Every real run, what it showed and what was fixed because of it is in [docs/3_STATUS_AND_ROADMAP.md](docs/3_STATUS_AND_ROADMAP.md); how to start one is in [docs/4_RUN_AND_TEST.md](docs/4_RUN_AND_TEST.md).
 
 ## Start in one minute
 

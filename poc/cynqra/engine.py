@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 import time
@@ -36,8 +37,9 @@ from pathlib import Path
 
 from . import binding, budget, calibration, controller, delivery, deploy, execution, gateway, numbers, objective
 from . import objective_evidence, people, performance, planner, policies, policy, replacement, roles, seats, synthesis
+from . import attribution
 from . import settings as project_settings
-from .db import IST, Store, digest, now
+from .db import IST, Store, digest, now, scrub
 from .intelligence import SCENARIOS, IntelligenceError, ModelSource, ScriptedSource
 from .intelligence_layer import IntelligenceSupply, SupplyError, VersionChanged, router
 from .intelligence_layer.registry import RegistryError
@@ -65,6 +67,39 @@ class BudgetHold(RuntimeError):
     def __init__(self, message: str, reservation: dict):
         super().__init__(message)
         self.reservation = reservation
+
+
+_PROVIDER_SAYS = re.compile(r'"message"\s*:\s*"([^"]{1,200})')
+
+
+def _why_not_qualified(sup, tried: list[dict]) -> str:
+    """Why nothing connected could do its qualification work, provider by provider, in its own words: an empty
+    account or a refused key is the founder's to fix, and a run refused for it says so (paid run 37587595496: every
+    call to Google came back 402, "prepayment credits are depleted", and the founder was told only to connect a
+    provider)."""
+    why: dict[tuple, list] = {}
+    for r in tried:
+        if not r.get("error") and r.get("qualification_status") != "failed":
+            continue
+        m = sup.registry.get(r["model_id"])
+        conn = sup.connections.find_id(m.get("connection_id")) or {}
+        if not r.get("error") or r.get("error_kind") == "model_error":
+            what, fix, said = "did not pass its qualification work", "", ""
+        else:
+            cause = attribution.diagnose(r["error"])
+            what = replacement.PLAIN.get(cause, "its provider did not answer")
+            fix = {"no_credit": "add credit to the account",
+                   "access": "give Cynqra a key the provider accepts"}.get(cause, "")
+            found = _PROVIDER_SAYS.search(r["error"])
+            said = scrub(found.group(1).strip()) if found else ""  # a provider can quote the key it refused
+        why.setdefault((conn.get("name") or "", what, fix, said), []).append(m["name"])
+    if not why:
+        return ""
+    parts = []
+    for (name, what, fix, said), models in why.items():
+        parts.append(f"{name + ': ' if name else ''}{', '.join(models)}: {what}"
+                     + (f' (the provider says: "{said}")' if said else "") + (f"; {fix}" if fix else ""))
+    return ". Qualification could not pass: " + "; ".join(parts)
 
 
 def scenarios() -> list[dict]:
@@ -175,14 +210,15 @@ class Engine:
             sup = self._shared or self._local_supply()
             if not sup.registry.available():
                 sup.connect_environment()
+            tried = []
             if strict and not sup.registry.available():
                 # discovered is not qualified: what is connected does its qualification work first (bounded), and
                 # only what passes may be assigned
-                sup.qualify()
+                tried = sup.qualify()
             if strict and not sup.registry.available():
                 raise EngineError("live mode needs intelligence: connect a provider (OpenAI-compatible, Anthropic or "
                                   "a model on this machine), or name one in the environment; what is connected must "
-                                  "pass its qualification work first")
+                                  "pass its qualification work first" + _why_not_qualified(sup, tried))
             source = self._injected or ModelSource()
         source.bind(self)
         self.supply, self.intel = sup, source

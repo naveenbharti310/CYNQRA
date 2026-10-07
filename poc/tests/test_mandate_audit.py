@@ -575,6 +575,67 @@ class HostedTimeoutTests(unittest.TestCase):
         self.assertIn(call_failure(str(ctx.exception))["kind"], ("provider", "network"))
 
 
+class NoQualifiedIntelligenceTests(unittest.TestCase):
+    """Paid run 37587595496: Google answered every qualification call with HTTP 402, "Your prepayment credits are
+    depleted", and one model with 404; the founder was told only "live mode needs intelligence: connect a provider".
+    A run refused because nothing qualified says, provider by provider and in the provider's words, what stopped it
+    and what the founder can do."""
+
+    def setUp(self):
+        from cynqra.intelligence_layer import IntelligenceSupply
+        self.saved = no_model_env()
+        self.tmp = TempDir()
+        self.srv = ModelsServer()
+        self.sup = IntelligenceSupply(self.tmp.path / "control")
+        self.sup.connect({"type": "openai_compatible", "name": "Paid Provider", "endpoint": self.srv.url,
+                          "auth": {"method": "none"}, "models": ["flash-preview", "old-pro"], "price_per_m": [1, 4]})
+
+    def tearDown(self):
+        self.sup.close()
+        self.srv.close()
+        self.tmp.cleanup()
+        restore_env(self.saved)
+
+    def _refused(self) -> str:
+        from cynqra.engine import Engine, EngineError
+        e = Engine(self.tmp.path / "run", supply=self.sup)
+        with self.assertRaises(EngineError) as ctx:
+            e.create_company("Harbor Recruiting", "live")
+        return str(ctx.exception)
+
+    def test_an_empty_prepaid_account_is_named_with_the_providers_words_and_the_fix(self):
+        depleted = json.dumps([{"error": {"code": 402, "status": "RESOURCE_EXHAUSTED", "message":
+                                          "Your prepayment credits are depleted. Please go to AI Studio to manage "
+                                          "your project and billing."}}])
+        gone = json.dumps([{"error": {"code": 404, "status": "NOT_FOUND",
+                                      "message": "This model is no longer available to new users."}}])
+        self.srv.refused = {"flash-preview": (402, depleted), "old-pro": (404, gone)}
+        said = self._refused()
+        self.assertIn("live mode needs intelligence", said)
+        self.assertIn("Paid Provider: flash-preview: the provider account has no credit", said)
+        self.assertIn("Your prepayment credits are depleted", said, "in the provider's own words")
+        self.assertIn("add credit to the account", said, "what the founder can do")
+        self.assertIn("old-pro: it can no longer be used", said)
+        self.assertNotIn("old-pro: the provider account", said, "each model's own reason")
+
+    def test_a_refused_key_says_so_without_repeating_the_key(self):
+        key = "sk-proj-" + "Ab1_" * 10
+        self.srv.refused = {m: (401, json.dumps({"error": {"message": f"Incorrect API key provided: {key}"}}))
+                            for m in ("flash-preview", "old-pro")}
+        said = self._refused()
+        self.assertIn("Paid Provider: flash-preview, old-pro: the provider refused the key", said, "one line per reason")
+        self.assertIn("give Cynqra a key the provider accepts", said)
+        self.assertIn("Incorrect API key provided", said)
+        self.assertNotIn(key, said, "a key the provider quotes is never repeated")
+
+    def test_a_model_that_cannot_do_the_work_is_not_called_an_account_problem(self):
+        self.srv.garbled = {"flash-preview", "old-pro"}
+        said = self._refused()
+        self.assertIn("did not pass its qualification work", said)
+        self.assertNotIn("credit", said)
+        self.assertNotIn("refused the key", said)
+
+
 class NoRoundBarrierTests(unittest.TestCase):
     """Real run 37044180144: workers moved in lock-step rounds, and a round ended only when every call in it had
     returned, so one call held open ten minutes five times kept every other worker waiting 51 minutes, and the
