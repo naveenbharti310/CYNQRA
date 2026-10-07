@@ -127,6 +127,7 @@ def validate_plan(plan: dict, workers: list[dict], requirement_ids: list[str] | 
     builds = [t["id"] for t in tasks if t["kind"] in roles.BUILD_TYPES]
     if any(tasks.index(merge) < [x["id"] for x in tasks].index(b) for b in builds):
         raise IntelligenceError("review_merge must come after every build task")
+    _contract_safe(tasks, merge)
     ws = [{"id": str(w["id"]).strip(), "name": str(w.get("name") or w["id"]).strip()}
           for w in (plan.get("workstreams") if isinstance(plan.get("workstreams"), list) else []) if isinstance(w, dict) and str(w.get("id") or "").strip()]
     for t in tasks:
@@ -207,6 +208,25 @@ def waves(tasks: list[dict]) -> list[list[str]]:
     for t in tasks:
         out[level[t["id"]]].append(t["id"])
     return out
+
+
+def _contract_safe(tasks: list[dict], merge: dict) -> None:
+    """Builds side by side only where that is safe (contract-first, intelligence.CONTRACT_FIRST): two builds that own
+    the same file run one after the other, the later depending on the earlier, so neither's verified work is
+    copied over by the other at integration; and review_merge depends on every build, so nothing is merged or
+    deployed while a build is still running. Repaired here, in plan order, rather than refused."""
+    builds = [t for t in tasks if t["kind"] in roles.BUILD_TYPES]
+    for i, b in enumerate(builds):
+        for a in builds[:i]:
+            up = _ancestors(tasks)
+            if set(a.get("files") or []) & set(b.get("files") or []) and a["id"] not in up[b["id"]] \
+                    and b["id"] not in up[a["id"]]:
+                b["dependencies"].append(a["id"])
+    up = _ancestors(tasks)
+    for b in builds:
+        if b["id"] not in up[merge["id"]]:
+            merge["dependencies"].append(b["id"])
+            up = _ancestors(tasks)
 
 
 def _ancestors(tasks: list[dict]) -> dict[str, set]:

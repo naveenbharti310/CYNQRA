@@ -1135,6 +1135,99 @@ class ContractFirstBuildTests(unittest.TestCase):
         self.assertIn("files", task["required"])
 
 
+class SecondReviewTests(unittest.TestCase):
+    """What the second Codex review of pull request 4 found, each kept fixed."""
+
+    def setUp(self):
+        model_adapter._NO_EFFORT.clear()
+        self.addCleanup(model_adapter._NO_EFFORT.clear)
+
+    def test_a_replay_of_every_provider_needs_no_key_and_claude_code_stays_opt_in(self):
+        from cynqra.run_hosted_examination import PROVIDERS, REPLAY_KEY, replay_keys
+        saved = no_model_env()
+        self.addCleanup(restore_env, saved)
+        for env, _ in PROVIDERS.values():
+            os.environ.pop(env, None)
+        filled = replay_keys(None)
+        self.assertEqual(set(filled), set(PROVIDERS) - {"claude-code"})
+        self.assertEqual(os.environ["GEMINI_API_KEY"], REPLAY_KEY)
+        self.assertNotIn("CYNQRA_CLAUDE_CODE", os.environ, "Claude Code is connected only when named")
+        for env, _ in PROVIDERS.values():
+            os.environ.pop(env, None)
+
+    def _anthropic(self, handler, **route):
+        srv, url, seen = fake_provider(handler)
+        self.addCleanup(stop, srv)
+        r = {"kind": "anthropic", "label": "claude-sonnet-5-5", "local": False, "ANTHROPIC_API_KEY": "sk-ant-test",
+             "CYNQRA_ANTHROPIC_URL": url + "/v1/messages", "CYNQRA_TIMEOUT": "20", **route}
+        return r, seen
+
+    def test_anthropic_takes_each_calls_effort_and_a_model_that_refuses_it_is_asked_without(self):
+        ok = {"content": [{"type": "text", "text": '{"a": 1}'}], "stop_reason": "end_turn",
+              "usage": {"input_tokens": 5, "output_tokens": 2}}
+        route, seen = self._anthropic(lambda body, n: (200, ok, None))
+        self.assertIsNone(model_adapter.complete("hi", max_tokens=100, route=route, effort="low")["error"])
+        self.assertEqual(seen[-1]["output_config"], {"effort": "low"})
+        refuse = lambda body, n: ((400, {"error": {"message": "effort is not supported on this model"}}, None)  # noqa
+                                  if "output_config" in body else (200, ok, None))
+        route2, seen2 = self._anthropic(refuse, label="claude-haiku-4-5")
+        self.assertIsNone(model_adapter.complete("hi", max_tokens=100, route=route2, effort="high")["error"])
+        self.assertNotIn("output_config", seen2[-1])
+        model_adapter.complete("hi", max_tokens=100, route=route2, effort="high")
+        self.assertEqual(len(seen2), 3, "remembered: not asked with it again")
+
+    def test_hosted_transports_keep_the_routes_deadline(self):
+        for kind, extra in (("anthropic", {"ANTHROPIC_API_KEY": "x"}), ("openai", {"OPENAI_API_KEY": "x"})):
+            with mock.patch.object(model_adapter, "_post", side_effect=RuntimeError("stop")) as post:
+                model_adapter.complete("hi", max_tokens=100, route={"kind": kind, "label": "m", "local": False,
+                                                                   "CYNQRA_TIMEOUT": "240", **extra})
+            self.assertEqual(post.call_args.args[3], 240.0, kind)
+
+    def test_a_cut_off_reply_is_charged_even_when_its_retry_fails(self):
+        from cynqra.intelligence import IntelligenceError, ModelSource
+        answers = [{"text": "", "tokens_in": 100, "tokens_out": 16000, "estimated": False,
+                    "error": "RuntimeError: reply truncated at max_tokens=16000"},
+                   {"text": "", "tokens_in": 5, "tokens_out": 0, "estimated": False,
+                    "error": "RuntimeError: HTTP 503 from provider: high demand"}]
+
+        class Access:
+            def intelligence_for(self, worker):
+                return "m1"
+
+            def invoke(self, worker, request):
+                return answers.pop(0)
+
+        src = ModelSource()
+        src.bind(Access())
+        with self.assertRaises(IntelligenceError) as caught:
+            src._call("q")
+        self.assertEqual((caught.exception.usage["tokens_in"], caught.exception.usage["tokens_out"]), (105, 16000))
+
+    def test_builds_sharing_a_file_run_in_turn_and_the_merge_waits_for_every_build(self):
+        from cynqra import planner, roles
+        from helpers import M1_ROLES
+        workers = roles.instantiate(M1_ROLES)
+        eng = next(w["id"] for w in workers if w["role"] == "Engineer")
+        cto = next(w["id"] for w in workers if w["role"] == "CTO")
+        plan = {"tasks": [
+            {"id": "t_01", "workstream_id": "w", "kind": "code", "owner_worker_id": eng, "title": "api",
+             "files": ["app.py", "api.py"]},
+            {"id": "t_02", "workstream_id": "w", "kind": "code", "owner_worker_id": eng, "title": "page",
+             "files": ["app.py", "page.py"]},
+            {"id": "t_03", "workstream_id": "w", "kind": "code", "owner_worker_id": eng, "title": "store",
+             "files": ["store.py"]},
+            {"id": "t_04", "workstream_id": "w", "kind": "review_merge", "owner_worker_id": cto, "title": "merge",
+             "dependencies": ["t_01"]},
+            {"id": "t_05", "workstream_id": "w", "kind": "deploy", "owner_worker_id": cto, "title": "deploy",
+             "dependencies": ["t_04"]}]}
+        p = planner.validate_plan(plan, workers)
+        by = {t["id"]: t for t in p["tasks"]}
+        self.assertEqual(by["t_02"]["dependencies"], ["t_01"], "both own app.py: the later waits for the earlier")
+        self.assertEqual(by["t_03"]["dependencies"], [], "its own files: it runs alongside")
+        self.assertEqual(sorted(by["t_04"]["dependencies"]), ["t_01", "t_02", "t_03"], "nothing merged while a "
+                         "build still runs")
+
+
 class ReasoningTokensTests(unittest.TestCase):
     """Paid run 37589136743: Gemini 3.1 Pro Preview took 186 s for 170 counted output tokens. Google's
     OpenAI-compatible route reports its hidden reasoning only in total_tokens and bills it as output; Cynqra counted

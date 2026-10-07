@@ -452,11 +452,11 @@ class ModelSource:
             first, used, uid = out, "low", None
             out = self.access.invoke(worker, {**request, "effort": used,
                                               "max_tokens": max(2 * max_tokens, 2 * model_adapter.HOSTED_MIN_REPLY)})
-            if not out.get("error"):
-                out["tokens_in"] += int(first.get("tokens_in") or 0)
-                out["tokens_out"] += int(first.get("tokens_out") or 0)
-                out["tokens_cached"] = int(out.get("tokens_cached") or 0) + int(first.get("tokens_cached") or 0)
-                out["usd_reported"] = _both_reported(out, first)
+            # the cut-off reply was billed: its tokens go with the answer, or with the failure if the retry fails
+            out = {**out, "tokens_in": int(out.get("tokens_in") or 0) + int(first.get("tokens_in") or 0),
+                   "tokens_out": int(out.get("tokens_out") or 0) + int(first.get("tokens_out") or 0),
+                   "tokens_cached": int(out.get("tokens_cached") or 0) + int(first.get("tokens_cached") or 0),
+                   "usd_reported": _both_reported(out, first)}
         model_id = out.get("model_id") or model_id
         if out.get("error"):
             raise IntelligenceError(out["error"], model_id=model_id, usage=out)

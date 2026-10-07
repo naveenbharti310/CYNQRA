@@ -429,6 +429,7 @@ def _openai(prompt: str, model: str, max_tokens: int = 1500) -> dict:
             "Authorization": f"Bearer {_ENV['OPENAI_API_KEY']}",
             "Content-Type": "application/json",
         },
+        _hosted_timeout(),
     )
     if data["choices"][0].get("finish_reason") == "length":
         raise RuntimeError(f"reply truncated at max_completion_tokens={max_tokens}")
@@ -442,29 +443,48 @@ def _openai(prompt: str, model: str, max_tokens: int = 1500) -> dict:
     }
 
 
-def _anthropic(prompt: str, model: str, max_tokens: int = 1500) -> dict:
+def _hosted_timeout() -> float:
+    """A hosted call's limit: the route's (the gateway sets one from the model's own answer times, or a probe's
+    shorter one), else TIMEOUT_S."""
+    try:
+        return float(_ENV.get("CYNQRA_TIMEOUT") or TIMEOUT_S)
+    except ValueError:
+        return float(TIMEOUT_S)
+
+
+def _anthropic(prompt: str, model: str, max_tokens: int = 1500, effort: str | None = None) -> dict:
     payload = {
         "model": model,
         "max_tokens": max(max_tokens, ANTHROPIC_MIN_MAX_TOKENS),
         "messages": [{"role": "user", "content": prompt}],
     }
-    effort = (_ENV.get("CYNQRA_EFFORT") or "").strip().lower()
-    if effort:
-        if effort not in EFFORTS:
-            raise ValueError(f"CYNQRA_EFFORT must be one of {sorted(EFFORTS)}, not {effort!r}")
-        payload["output_config"] = {"effort": effort}
-    data = _post(
-        _ENV.get("CYNQRA_ANTHROPIC_URL") or ANTHROPIC_URL,
-        payload,
-        {
-            "x-api-key": _ENV["ANTHROPIC_API_KEY"],
-            "anthropic-version": "2023-06-01",
-            "Content-Type": "application/json",
-            # a key not scoped to one workspace must name the workspace each request runs in
-            **({"anthropic-workspace-id": _ENV.get("ANTHROPIC_WORKSPACE_ID")}
-               if _ENV.get("ANTHROPIC_WORKSPACE_ID") else {}),
-        },
-    )
+    fixed = (_ENV.get("CYNQRA_EFFORT") or "").strip().lower()
+    if fixed and fixed not in EFFORTS:
+        raise ValueError(f"CYNQRA_EFFORT must be one of {sorted(EFFORTS)}, not {fixed!r}")
+    key = ("anthropic", model)
+    # the connection's own setting wins; else the call's (the work's risk, the escalation ladder, a review's
+    # round), unless this model refused it before
+    chosen = fixed or (effort if effort in CALL_EFFORTS and key not in _NO_EFFORT else "")
+    if chosen:
+        payload["output_config"] = {"effort": chosen}
+    headers = {
+        "x-api-key": _ENV["ANTHROPIC_API_KEY"],
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+        # a key not scoped to one workspace must name the workspace each request runs in
+        **({"anthropic-workspace-id": _ENV.get("ANTHROPIC_WORKSPACE_ID")}
+           if _ENV.get("ANTHROPIC_WORKSPACE_ID") else {}),
+    }
+    url = _ENV.get("CYNQRA_ANTHROPIC_URL") or ANTHROPIC_URL
+    try:
+        data = _post(url, payload, headers, _hosted_timeout())
+    except RuntimeError as exc:
+        if chosen and not fixed and "HTTP 400" in str(exc) and "effort" in str(exc).lower():
+            _NO_EFFORT.add(key)  # this model takes no effort setting: asked again without it, and from now on
+            payload.pop("output_config", None)
+            data = _post(url, payload, headers, _hosted_timeout())
+        else:
+            raise
     stop = data.get("stop_reason")
     if stop == "refusal":
         details = data.get("stop_details") or {}
@@ -664,7 +684,7 @@ def _hf(prompt: str, model: str, max_tokens: int, want_json: bool = False, schem
         payload["reasoning_effort"] = _ENV["CYNQRA_EFFORT"].lower()
     headers = {"Authorization": f"Bearer {_ENV['HF_TOKEN']}", "Content-Type": "application/json"}
     try:
-        data = _post(base + "/chat/completions", payload, headers)
+        data = _post(base + "/chat/completions", payload, headers, _hosted_timeout())
     except RuntimeError as exc:
         text = str(exc)
         if "HTTP 401" in text or "HTTP 403" in text:
@@ -982,7 +1002,7 @@ def _complete(prompt: str, max_tokens: int, want_json: bool, schema: dict | None
         elif model["kind"] == "claude_cli":
             out = _claude_cli(prompt, model["label"], max_tokens, partial, effort)
         else:
-            out = _anthropic(prompt, model["label"], max_tokens)
+            out = _anthropic(prompt, model["label"], max_tokens, effort)
         out["error"] = None
     except (
         urllib.error.URLError,

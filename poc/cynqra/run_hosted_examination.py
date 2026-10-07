@@ -51,7 +51,8 @@ def replay_keys(wanted: list[str] | None) -> list[str]:
     recording after the key was rotated or removed. A replay sends nothing to a provider (a call or listing the
     recording lacks fails, adapters._get_json), so the placeholder is never sent. Returns the providers given one."""
     filled = []
-    for p in wanted or []:
+    # provider=all: every provider but Claude Code, which is connected only when asked for by name
+    for p in wanted if wanted is not None else [p for p in PROVIDERS if p != "claude-code"]:
         env = PROVIDERS[p][0]
         if not os.environ.get(env):
             os.environ[env] = "1" if p == "claude-code" else REPLAY_KEY  # Claude Code's opt-in is a "1", not a key

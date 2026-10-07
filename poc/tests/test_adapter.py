@@ -148,7 +148,8 @@ class AnthropicWireTests(ProviderBase):
         self.assertNotIn("temperature", r["body"], "claude-sonnet-5 rejects sampling parameters with HTTP 400")
         self.assertGreaterEqual(r["body"]["max_tokens"], model_adapter.ANTHROPIC_MIN_MAX_TOKENS,
                                 "room for default thinking, so the answer is not truncated")
-        self.assertNotIn("output_config", r["body"])
+        self.assertEqual(r["body"]["output_config"], {"effort": "low"},
+                         "the call's own effort (structuring an objective thinks little), not the model's default")
         listing = self.p.listings[0]  # the model was discovered from the key's listing, not assumed
         self.assertTrue(listing["path"].startswith("/v1/models"))
         self.assertEqual(listing["headers"]["x-api-key"], "test-key-not-real")
