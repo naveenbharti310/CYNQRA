@@ -55,6 +55,26 @@ class HostedEnvironmentTests(unittest.TestCase):
         self.assertIn("GROQ_API_KEY", live_events.SECRET_ENV)
         self.assertIn("MISTRAL_API_KEY", live_events.SECRET_ENV)
 
+    def test_metas_llama_api_is_a_hosted_openai_compatible_connection(self):
+        from cynqra import live_events
+        from cynqra import run_hosted_examination as rhe
+        from cynqra.intelligence_layer import normalize
+        adapter = OpenAICompatibleAdapter()
+        with mock.patch.dict(os.environ, {"LLAMA_API_KEY": "set"}, clear=False):
+            specs = {s["name"]: s for s in adapter.environment_specs(None)}
+        meta = specs["Meta Llama (environment)"]
+        self.assertEqual((meta["endpoint"], meta["auth"], meta["models"]),
+                         ("https://api.llama.com/compat/v1", {"method": "env", "env_var": "LLAMA_API_KEY"}, []))
+        conn = dict(meta, origin="environment")
+        self.assertEqual(adapter.flavor(conn), "meta")
+        route = adapter.route(conn, "not-a-real-secret", {"ref": "Llama-4-Maverick-17B-128E-Instruct-FP8"})
+        self.assertEqual((route["kind"], route["CYNQRA_LOCAL_BASE_URL"]), ("local", meta["endpoint"]))
+        self.assertIn("CYNQRA_TIMEOUT", route, "a hosted call has the hosted time limit")
+        self.assertEqual(normalize.HOST_PUBLISHER["api.llama.com"], "meta-llama", "Meta publishes what it lists")
+        self.assertEqual(rhe.parse_providers("nvidia+groq+mistral+meta"), ["nvidia", "groq", "mistral", "meta"])
+        self.assertEqual(rhe.PROVIDERS["meta"], ("LLAMA_API_KEY", "Meta Llama (environment)"))
+        self.assertIn("LLAMA_API_KEY", live_events.SECRET_ENV)
+
     def test_every_request_says_who_is_calling(self):
         # run 37020380134: Groq's bot filter refused Python's default signature (HTTP 403, Cloudflare error 1010)
         from cynqra.intelligence_layer import adapters

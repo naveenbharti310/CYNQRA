@@ -27,7 +27,8 @@ _TRIM = re.compile(r"-(instruct|it|chat|preview|latest|exp|v\d+(\.\d+)*|\d{2}-\d
 # first-party APIs: the host is the publisher when the listing gives no prefix
 HOST_PUBLISHER = {"generativelanguage.googleapis.com": "google", "api.anthropic.com": "anthropic",
                   "api.openai.com": "openai", "api.mistral.ai": "mistralai", "api.z.ai": "z-ai",
-                  "api.deepseek.com": "deepseek", "api.moonshot.ai": "moonshotai"}
+                  "api.deepseek.com": "deepseek", "api.moonshot.ai": "moonshotai",
+                  "api.llama.com": "meta-llama"}
 FAST_WORDS = ("flash", "lite", "lightning", "nano", "mini", "turbo", "fast", "instant", "haiku", "small")
 CODE_WORDS = ("coder", "codestral", "devstral", "code")
 LONG_CONTEXT = 200_000

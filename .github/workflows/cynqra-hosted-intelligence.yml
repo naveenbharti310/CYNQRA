@@ -7,8 +7,8 @@ on:
         description: Hosted providers to examine
         required: true
         type: choice
-        options: [nvidia+groq+mistral, google+nvidia+groq+mistral, google+nvidia, all, nvidia, groq, mistral, groq+mistral, google, anthropic]
-        default: nvidia+groq+mistral
+        options: [nvidia+groq+mistral+meta, nvidia+groq+mistral, google+nvidia+groq+mistral+meta, google+nvidia, all, nvidia, groq, mistral, meta, groq+mistral, google, anthropic]
+        default: nvidia+groq+mistral+meta
       max_models:
         description: Maximum number of current candidates to probe
         required: true
@@ -64,6 +64,8 @@ jobs:
       NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY || secrets.GROQ_KEY || secrets.GROQ }}
       MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY || secrets.MISTRAL_KEY || secrets.MISTRAL }}
+      # Meta's Llama API key, under whichever of these names the repository uses
+      LLAMA_API_KEY: ${{ secrets.LLAMA_API_KEY || secrets.META_API_KEY || secrets.META_LLAMA_API_KEY || secrets.META_KEY || secrets.META || secrets.LLAMA }}
       # the Claude key: ANTHROPIC_API_KEY first, then the names this repository has also used (Claude_key; secret
       # names are not case-sensitive)
       # only when Claude is asked for: a key in the environment is connected and examined
@@ -82,11 +84,11 @@ jobs:
           key_for() {
             case "$1" in
               google) echo GEMINI_API_KEY ;; nvidia) echo NVIDIA_API_KEY ;; anthropic) echo ANTHROPIC_API_KEY ;;
-              groq) echo GROQ_API_KEY ;; mistral) echo MISTRAL_API_KEY ;; *) echo "" ;;
+              groq) echo GROQ_API_KEY ;; mistral) echo MISTRAL_API_KEY ;; meta) echo LLAMA_API_KEY ;; *) echo "" ;;
             esac
           }
           names="$SELECTED_PROVIDER"
-          if [ "$names" = "all" ]; then names="google+nvidia+anthropic+groq+mistral"; fi
+          if [ "$names" = "all" ]; then names="google+nvidia+anthropic+groq+mistral+meta"; fi
           found=""
           for p in $(echo "$names" | tr '+' ' '); do
             var="$(key_for "$p")"
@@ -126,7 +128,7 @@ jobs:
           root="$RUNNER_TEMP/cynqra-hosted-examination"
           if [ ! -d "$root" ]; then echo "no data root: nothing to audit"; exit 0; fi
           python3 -m cynqra.run_audit "$root" --json "$RUNNER_TEMP/run-audit.json" \
-            --secret-env GEMINI_API_KEY NVIDIA_API_KEY ANTHROPIC_API_KEY GROQ_API_KEY MISTRAL_API_KEY
+            --secret-env GEMINI_API_KEY NVIDIA_API_KEY ANTHROPIC_API_KEY GROQ_API_KEY MISTRAL_API_KEY LLAMA_API_KEY
       - name: Publish examination evidence
         if: always()
         uses: actions/upload-artifact@v4

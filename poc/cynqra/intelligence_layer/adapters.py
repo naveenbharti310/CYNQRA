@@ -236,9 +236,10 @@ class OpenAICompatibleAdapter(ProviderAdapter):
         "integrate.api.nvidia.com": "nvidia",
         "api.groq.com": "groq",
         "api.mistral.ai": "mistral",
+        "api.llama.com": "meta",
     }
     # hosted providers reached as OpenAI-compatible servers: the hosted timeout and the provider's retries apply
-    HOSTED_FLAVORS = ("gemini", "nvidia", "groq", "mistral")
+    HOSTED_FLAVORS = ("gemini", "nvidia", "groq", "mistral", "meta")
 
     @classmethod
     def flavor(cls, conn: dict) -> str:
@@ -382,6 +383,13 @@ class OpenAICompatibleAdapter(ProviderAdapter):
             out.append({"type": self.type, "name": "Mistral (environment)", "endpoint": "https://api.mistral.ai/v1",
                         "auth": {"method": "env", "env_var": "MISTRAL_API_KEY"}, "models": [],
                         "metadata": {"flavor": "mistral"}, "rate_limits": {"calls_per_minute": 50}, **(_env_price())})
+        # Meta's Llama API, OpenAI-compatible; its free tier's limit is not stated, so it is not paced: a refusal is
+        # retried, then waited for or covered, like NVIDIA's
+        if os.environ.get("LLAMA_API_KEY"):
+            out.append({"type": self.type, "name": "Meta Llama (environment)",
+                        "endpoint": "https://api.llama.com/compat/v1",
+                        "auth": {"method": "env", "env_var": "LLAMA_API_KEY"}, "models": [],
+                        "metadata": {"flavor": "meta"}, **(_env_price())})
         return out
 
 

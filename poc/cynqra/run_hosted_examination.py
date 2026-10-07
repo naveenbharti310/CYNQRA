@@ -36,7 +36,8 @@ PROVIDERS = {"google": ("GEMINI_API_KEY", "Google Gemini (environment)"),
              "nvidia": ("NVIDIA_API_KEY", "NVIDIA (environment)"),
              "anthropic": ("ANTHROPIC_API_KEY", "Anthropic (environment)"),
              "groq": ("GROQ_API_KEY", "Groq (environment)"),
-             "mistral": ("MISTRAL_API_KEY", "Mistral (environment)")}
+             "mistral": ("MISTRAL_API_KEY", "Mistral (environment)"),
+             "meta": ("LLAMA_API_KEY", "Meta Llama (environment)")}
 
 
 def parse_providers(value: str) -> list[str] | None:
