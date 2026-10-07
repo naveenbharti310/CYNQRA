@@ -15,8 +15,8 @@ from .adapters import _family as _release
 USEFUL = {"reasoning", "coding", "agentic", "tool use", "long context", "structured output"}
 
 
-# A release stage at the end of a name, with any date after it: gemini-3.1-pro-preview is a release of the Gemini Pro
-# family, as gemini-2.5-flash-preview-05-20 is of Flash; gemini-pro-latest names whichever Pro the provider moves it to
+# A release stage at the end of a name, with any date after it: vendor-3.1-pro-preview is a release of the vendor's Pro
+# family, as vendor-2.5-flash-preview-05-20 is of Flash; vendor-pro-latest names whichever Pro the provider moves it to
 _STAGE = re.compile(r"-(?:preview|latest|exp|experimental|beta|alpha)(?:-\d+)*$")
 
 
@@ -32,13 +32,13 @@ def _name(ref: str) -> str:
 def family_key(ref: str) -> str:
     """A model's family: its name without publisher, serving suffix, release stage or version numbers, so
     vendor/model-k2.6 and vendor/model-k3 are one family, as are vendor-model-4-6 and vendor-model-5 (a version written
-    with dashes, or with a release date after it) and gemini-2.5-pro and gemini-3.1-pro-preview, and only the newest
+    with dashes, or with a release date after it) and vendor-2.5-pro and vendor-3.1-pro-preview, and only the newest
     of them takes a place in a bounded set."""
     return re.sub(r"#(?:-#)+(?![a-z])", "#", re.sub(r"\d+(?:\.\d+)*", "#", _name(ref)))
 
 
 def _families(models: list[dict]) -> dict[str, str]:
-    """Each model's family. A name with no version of its own (gemini-pro-latest, an alias the provider moves to each
+    """Each model's family. A name with no version of its own (vendor-pro-latest, an alias the provider moves to each
     new release) belongs to the versioned family it names, when there is one: a moving alias is not a pinned version,
     so it never takes that family's place ahead of a pinned release."""
     fam = {m["id"]: family_key(m.get("ref") or m["id"]) for m in models}
