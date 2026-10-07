@@ -156,6 +156,53 @@ class ToDeliveryTests(unittest.TestCase):
         self.assertEqual(out["stage"], "roadmap")
         self.assertIn("plan needs exactly 1 deploy task", out["error"])
 
+    def test_work_waiting_for_a_provider_is_waited_for_up_to_the_time_limit(self):
+        # real run 37564551165: every task waited on one rate-limited provider; the examination stopped after ten
+        # waits of 30 seconds with 44 of its 70 minutes left
+        class Waiting:
+            meta = {"phase": "running"}
+
+            def __init__(self):
+                self.waits = 0
+
+            def run_until_idle(self, max_steps=10):
+                return []
+
+            def pending_decisions(self):
+                return []
+
+            def tasks(self):
+                self.waits += 1
+                if self.waits > 25:  # the provider answers again after 25 waits, and the work is delivered
+                    self.meta = {"phase": "accepted"}
+                return [{"status": "WAITING"}]
+
+            def step(self):
+                return {"did": "idle"}
+
+        e = Waiting()
+        out = rhe.journey(e, max_minutes=0.5, log=lambda *_: None, idle_wait=0.01)
+        self.assertEqual(out["ended"], "accepted")
+        self.assertGreater(e.waits, 10)
+        # and the time limit still bounds the wait
+        e = Waiting()
+        e.tasks = lambda: [{"status": "WAITING"}]
+        self.assertEqual(rhe.journey(e, max_minutes=0.01, log=lambda *_: None, idle_wait=0.05)["ended"], "time_limit")
+
+    def test_an_examination_limited_to_some_providers_reaches_no_other(self):
+        # real run 37564551165, limited to NVIDIA, Groq and Mistral: with nothing available the engine connected
+        # what the environment names, Gemini among them, and qualified Gemini 3 Flash on the spot
+        import os
+        from cynqra.intelligence_layer.adapters import OpenAICompatibleAdapter
+        env = {"GEMINI_API_KEY": "g", "NVIDIA_API_KEY": "n", "GROQ_API_KEY": "q", "MISTRAL_API_KEY": "m",
+               "META_API_KEY": "x"}
+        with mock.patch.dict(os.environ, env, clear=False):
+            gone = rhe.limit_environment(["nvidia", "groq", "mistral"])
+            self.assertEqual(sorted(gone), ["GEMINI_API_KEY", "META_API_KEY"])
+            names = {s["name"] for s in OpenAICompatibleAdapter().environment_specs(None)}
+            self.assertFalse({"Google Gemini (environment)", "Meta (environment)"} & names, names)
+            self.assertTrue({"NVIDIA (environment)", "Groq (environment)", "Mistral (environment)"} <= names)
+
     def test_the_live_view_prints_every_saved_event_once_in_order(self):
         import re
         from cynqra.db import Store

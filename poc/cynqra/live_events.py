@@ -33,7 +33,7 @@ KEYS = ("task_id", "worker_id", "from", "to", "intelligence_id", "selected", "mo
 KEY_SHAPES = re.compile(r"sk-ant-[A-Za-z0-9_\-]{20,}|AIza[0-9A-Za-z_\-]{30,}|nvapi-[A-Za-z0-9_\-]{20,}|"
                         r"hf_[A-Za-z0-9]{30,}|gsk_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{40,}")
 SECRET_ENV = ("GEMINI_API_KEY", "NVIDIA_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "HF_TOKEN", "CLAUDE_KEY",
-              "CLAUDE_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY", "LLAMA_API_KEY")
+              "CLAUDE_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY", "META_API_KEY", "LLAMA_API_KEY")
 
 
 def redact(text: str, secrets: tuple[str, ...] = ()) -> str:

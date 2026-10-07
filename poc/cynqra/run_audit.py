@@ -381,12 +381,15 @@ def _verification(out, c):
            f"{len(self_as_independent) + len(same)} self-verifications counted as independent")
     reviews = [e for e in c["events"] if e["event_type"] == "review.started"]
     calls = store.all("call")
+    refused = {x.get("task_id") for x in store.all("call_error")}  # a review its provider refused was attempted
     unbacked = [e["aggregate_id"] for e in reviews
                 if not any(x.get("purpose") == "review" and x.get("task_id") in (e["aggregate_id"],
                                                                                  e["payload"].get("task_id"))
-                           for x in calls)]
+                           for x in calls)
+                and not ({e["aggregate_id"], e["payload"].get("task_id")} & refused)]
     _check(out, "5", "no claimed review without a real review", FAIL if unbacked else (PASS if reviews else NOT_EXERCISED),
-           f"{len(reviews)} review.started event(s); {len(unbacked)} with no review call behind them",
+           f"{len(reviews)} review.started event(s); {len(unbacked)} with no review call behind them, made or refused "
+           "by its provider",
            unbacked=unbacked[:5])
 
 

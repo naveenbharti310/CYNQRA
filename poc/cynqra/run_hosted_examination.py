@@ -37,7 +37,7 @@ PROVIDERS = {"google": ("GEMINI_API_KEY", "Google Gemini (environment)"),
              "anthropic": ("ANTHROPIC_API_KEY", "Anthropic (environment)"),
              "groq": ("GROQ_API_KEY", "Groq (environment)"),
              "mistral": ("MISTRAL_API_KEY", "Mistral (environment)"),
-             "meta": ("LLAMA_API_KEY", "Meta Llama (environment)")}
+             "meta": ("META_API_KEY", "Meta (environment)")}
 
 
 def parse_providers(value: str) -> list[str] | None:
@@ -59,6 +59,18 @@ def select(entries: list[dict], limit: int) -> list[dict]:
 
 def selection_details(entries: list[dict], selected: list[dict], limit: int) -> dict:
     return details(entries, selected, limit)
+
+
+def limit_environment(wanted: list[str]) -> list[str]:
+    """An examination limited to some providers reaches only those: the other providers' keys leave this process,
+    so nothing in the run can connect to them, not even the engine's own fallback that connects what the environment
+    names when nothing is available (real run 37564551165, limited to NVIDIA, Groq and Mistral, connected Gemini that
+    way, qualified Gemini 3 Flash on the spot and used up its free daily quota). Returns the variables removed."""
+    gone = []
+    for p, (env, _) in PROVIDERS.items():
+        if p not in wanted and os.environ.pop(env, None) is not None:
+            gone.append(env)
+    return gone
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -88,6 +100,7 @@ def main(argv: list[str] | None = None) -> int:
         for p in missing:
             print(f"provider {p} skipped: {keys[p]} is not set")
         wanted = [p for p in wanted if p not in missing]
+        limit_environment(wanted)
     elif not any(os.environ.get(k) for k in keys.values()):
         raise SystemExit("provider=all requires at least one of " + ", ".join(keys.values()))
 
@@ -322,12 +335,13 @@ def objective_run(supply, folder: Path, statement: str, budget_usd: float, *, to
     return out
 
 
-def journey(e, max_minutes: float, log=print, idle_wait: float = 30.0, max_idle: int = 10) -> dict:
+def journey(e, max_minutes: float, log=print, idle_wait: float = 30.0) -> dict:
     """The work after the first bindings, to delivery: step until idle, answer the first pending decision as an
     examination founder would, repeat; stop when delivered and accepted, when the run stops, or at the time limit.
-    Work waiting for a provider to answer again is waited for, a bounded number of times."""
+    Work waiting for a provider to answer again is waited for, up to the time limit (real run 37564551165 stopped
+    after ten waits of 30 seconds, all its work waiting on a rate-limited provider, with 44 of its 70 minutes left)."""
     deadline = time.time() + max_minutes * 60
-    answers, idle = [], 0
+    answers = []
     ended = "time_limit"
     while time.time() < deadline:
         e.run_until_idle(max_steps=10)  # short bursts, so the time limit is checked between them
@@ -336,15 +350,13 @@ def journey(e, max_minutes: float, log=print, idle_wait: float = 30.0, max_idle:
             break
         pend = e.pending_decisions()
         if not pend:
-            if any(t["status"] == "WAITING" for t in e.tasks()) and idle < max_idle:
-                idle += 1
-                time.sleep(idle_wait)
+            if any(t["status"] == "WAITING" for t in e.tasks()):
+                time.sleep(max(0.0, min(idle_wait, deadline - time.time())))
                 continue
             if e.step()["did"] == "idle":
                 ended = "idle"
                 break
             continue
-        idle = 0
         d = pend[0]
         action = examination_answer(d)
         answers.append({"decision": d["id"], "kind": d["kind"], "task_id": d.get("task_id"), "answer": action})

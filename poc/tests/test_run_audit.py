@@ -160,6 +160,29 @@ class RunAuditTests(unittest.TestCase):
         c = [x for x in checks(rep, "no event reports what did not happen") if x["status"] == run_audit.FAIL]
         self.assertTrue(c and "intelligence.rerouted" in c[0]["detail"], c)
 
+    def test_a_review_its_provider_refused_was_attempted_one_never_made_is_caught(self):
+        # real run 37564551165: t_04's review started three times and each call was refused by the reviewer's
+        # provider (rate_limit); the audit counted only answered review calls
+        root = self.copy()
+        s = Store(str(root / "objective-run-2" / "cynqra.db"))
+        try:
+            meta = s.get("meta", "run")
+            s.append(company_id=meta["company_id"], event_type="review.started", aggregate_type="task",
+                     aggregate_id="t_99", actor_type="worker", actor_id="w_cto", payload={}, correlation_id="t_99")
+        finally:
+            s.close()
+        name = "no claimed review without a real review"
+        c = [x for x in checks(run_audit.audit(root), name) if x["status"] == run_audit.FAIL]
+        self.assertTrue(c and "t_99" in c[0]["data"]["unbacked"], "a review no call stands behind is caught")
+        s = Store(str(root / "objective-run-2" / "cynqra.db"))
+        try:
+            s.put("call_error", "ce_9999", {"id": "ce_9999", "worker_id": "w_cto", "model_id": "steady",
+                                            "task_id": "t_99", "cause": "rate_limit",
+                                            "error": "HTTP 429 from provider: rate limit"})
+        finally:
+            s.close()
+        self.assertNotIn(run_audit.FAIL, [x["status"] for x in checks(run_audit.audit(root), name)])
+
     def test_a_reroute_is_owed_by_a_committed_reselection(self):
         # real run 36972596704: controller.revalidate moved a planned task on new evidence, reporting the trigger
         # and the reroute; the reroute is backed by that committed reselection, not only by a replacement
