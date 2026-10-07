@@ -41,6 +41,22 @@ PROVIDERS = {"google": ("GEMINI_API_KEY", "Google Gemini (environment)"),
              "meta": ("META_API_KEY", "Meta (environment)")}
 
 
+REPLAY_KEY = "replay-without-a-key"  # never sent anywhere: a replay answers every listing and call from its recording
+
+
+def replay_keys(wanted: list[str] | None) -> list[str]:
+    """For a replay: a placeholder in place of each named provider's missing key, so its connection is built from the
+    recording after the key was rotated or removed. A replay sends nothing to a provider (a call or listing the
+    recording lacks fails, adapters._get_json), so the placeholder is never sent. Returns the providers given one."""
+    filled = []
+    for p in wanted or []:
+        env = PROVIDERS[p][0]
+        if not os.environ.get(env):
+            os.environ[env] = REPLAY_KEY
+            filled.append(p)
+    return filled
+
+
 def parse_providers(value: str) -> list[str] | None:
     """--provider: all, or one or more of the providers joined with + (google+nvidia). None means all."""
     if value == "all":
@@ -241,6 +257,9 @@ def main(argv: list[str] | None = None) -> int:
 
     keys = {p: env for p, (env, _) in PROVIDERS.items()}
     wanted = parse_providers(args.provider)
+    if args.replay:
+        for p in replay_keys(wanted):
+            print(f"provider {p}: no key needed to replay ({keys[p]} not set)")
     if wanted is not None:
         missing = [p for p in wanted if not os.environ.get(keys[p])]
         if len(missing) == len(wanted):

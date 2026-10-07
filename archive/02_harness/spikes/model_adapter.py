@@ -168,10 +168,12 @@ _EFFORT_REFUSED = re.compile(r"reasoning[_ ]effort|reasoning", re.I)
 CALL_EFFORTS = ("low", "medium", "high")
 
 
-def reply_limit(max_tokens: int, local: bool) -> int:
-    """The most a call may write, reasoning included: what was asked for, or, from a hosted provider, at least
-    HOSTED_MIN_REPLY (a thinking model spends part of it thinking). What a budget reservation must cover."""
-    return int(max_tokens) if local else max(int(max_tokens), HOSTED_MIN_REPLY)
+def reply_limit(max_tokens: int, local: bool, kind: str = "") -> int:
+    """The most a call may write, reasoning included: what the transport sends as the provider's output limit. A
+    hosted OpenAI-compatible, Hugging Face or Anthropic call is given at least HOSTED_MIN_REPLY (a thinking model
+    spends part of it thinking); OpenAI's own API (kind "openai", _openai) and a model on this computer are sent
+    what was asked for. What a budget reservation must cover, and no more."""
+    return int(max_tokens) if local or kind == "openai" else max(int(max_tokens), HOSTED_MIN_REPLY)
 
 
 class _Truncated(RuntimeError):
@@ -777,8 +779,13 @@ def _store(path: str) -> dict:
         if os.path.exists(path):
             with open(path, encoding="utf-8") as f:
                 for line in f:
-                    if line.strip():
+                    if not line.strip():
+                        continue
+                    try:
                         row = json.loads(line)
+                    except json.JSONDecodeError:  # a record cut off by a crash while it was written: not an answer
+                        continue
+                    if isinstance(row, dict) and row.get("key"):
                         calls.setdefault(row["key"], []).append(row)
         _STORES[path] = {"calls": calls, "used": {}, "hits": 0, "misses": 0}
     return _STORES[path]
@@ -802,8 +809,14 @@ def cassette_stats(path: str | None = None) -> dict:
 def cassette_record(key: str, kind: str, label: str, answer, path: str | None = None) -> None:
     from .db import scrub
     row = {"key": key, "kind": kind, "label": label, "answer": answer}
-    with _CASSETTE_LOCK, open(path or os.environ["CYNQRA_CASSETTE"], "a", encoding="utf-8") as f:
-        f.write(scrub(json.dumps(row, default=str)) + "\n")
+    line = (scrub(json.dumps(row, default=str)) + "\n").encode("utf-8")
+    with _CASSETTE_LOCK, open(path or os.environ["CYNQRA_CASSETTE"], "ab+") as f:
+        f.seek(0, os.SEEK_END)
+        if f.tell() > 0:
+            f.seek(-1, os.SEEK_END)
+            if f.read(1) != b"\n":  # the last record was cut off by a crash: this one starts on a line of its own
+                line = b"\n" + line
+        f.write(line)
 
 
 def cassette_replay(key: str, path: str | None = None, keep_last: bool = True):
@@ -838,13 +851,18 @@ def _replayed_or_recorded(call, prompt: str, max_tokens: int, want_json: bool, s
             speed = float(os.environ.get("CYNQRA_REPLAY_SPEED") or 0) if mode == "replay" else 0.0
             if speed > 0:
                 time.sleep(float(answer.get("latency_s") or 0) * speed)
-            return {**answer, "journaled": mode == "journal"}
+            if mode == "replay":  # a replayed run meters every answer as it was recorded
+                return {**{k: v for k, v in answer.items() if k != "call_uid"}, "journaled": False}
+            return {**answer, "journaled": True}  # its call_uid says whether this run already charged it
         if mode == "replay":
             return {"text": "", "tokens_in": 0, "tokens_out": 0, "estimated": True, "latency_s": 0.0, "model": label,
                     "kind": model.get("kind"), "error": "RuntimeError: replay: the recording holds no answer for "
                                                         "this call (the prompt changed since it was recorded)"}
     out = call()
     if mode == "record" or not out.get("error"):  # a journal keeps answers only: a failure is asked again
+        if not out.get("error"):
+            import uuid
+            out["call_uid"] = uuid.uuid4().hex  # one id per answer: metered and charged once (Engine.record_call)
         cassette_record(key, "model_call", label, out, path)
     return out
 

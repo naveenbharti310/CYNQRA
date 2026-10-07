@@ -104,6 +104,7 @@ jobs:
       - name: Check provider credentials
         env:
           SELECTED_PROVIDER: ${{ inputs.provider }}
+          REPLAY_RUN: ${{ inputs.replay_run }}
         # each provider named (joined with +) and the key it needs; at least one must be set (the run says which
         # were skipped). The key itself is never printed.
         run: |
@@ -121,7 +122,9 @@ jobs:
             if [ -z "$var" ]; then echo "Unknown provider: $p"; exit 1; fi
             if [ -n "${!var}" ]; then found="$found $p"; else echo "provider $p: $var is not set"; fi
           done
-          if [ -z "$found" ]; then
+          if [ -z "$found" ] && [ -n "$REPLAY_RUN" ]; then
+            echo "replaying run $REPLAY_RUN: no key is needed, nothing is sent to a provider"
+          elif [ -z "$found" ]; then
             echo "None of the keys for provider=$SELECTED_PROVIDER is set in the repository's Actions secrets."
             exit 1
           fi

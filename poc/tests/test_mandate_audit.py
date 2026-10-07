@@ -1412,6 +1412,23 @@ class CutOffReplyTests(unittest.TestCase):
         self.assertEqual(model_adapter.reply_limit(1500, local=False), model_adapter.HOSTED_MIN_REPLY)
         self.assertEqual(model_adapter.reply_limit(40000, local=False), 40000)
         self.assertEqual(model_adapter.reply_limit(1500, local=True), 1500, "a model on this computer: as asked")
+        self.assertEqual(model_adapter.reply_limit(1500, local=False, kind="openai"), 1500,
+                         "OpenAI's own API is sent what was asked (Codex review of PR #4): no more is reserved")
+
+    def test_the_gateway_tells_the_transport_a_reservation_must_cover(self):
+        from cynqra.intelligence_layer import IntelligenceSupply
+        saved = no_model_env()
+        self.addCleanup(restore_env, saved)
+        tmp = TempDir()
+        self.addCleanup(tmp.cleanup)
+        sup = IntelligenceSupply(tmp.path / "control")
+        self.addCleanup(sup.close)
+        for name, ep in (("OpenAI", "https://api.openai.com/v1"),
+                         ("Gemini", "https://generativelanguage.googleapis.com/v1beta/openai")):
+            sup.connect({"type": "openai_compatible", "name": name, "endpoint": ep, "auth": {"method": "none"},
+                         "models": [f"{name.lower()}-model"], "price_per_m": [1, 4]})
+        kinds = {m["ref"]: sup.gateway.route_kind(m["id"]) for m in sup.registry.models()}
+        self.assertEqual(kinds, {"openai-model": "openai", "gemini-model": "local"})
 
 
 class CalibrationPriceTests(unittest.TestCase):
@@ -1531,7 +1548,7 @@ class RecordReplayTests(unittest.TestCase):
         self.assertIsNone(model_adapter.complete("plan the work", max_tokens=100, route=hosted_route(url))
                           .get("journaled"), "no journal outside the run's calls")
 
-    def test_a_live_run_journals_its_calls_and_a_journaled_answer_costs_nothing_again(self):
+    def test_a_live_run_journals_its_calls_and_an_answer_is_measured_once(self):
         from test_objective_intelligence import ModelsServer as Server, live_engine, supply_with
         saved = no_model_env()
         self.addCleanup(restore_env, saved)
@@ -1543,14 +1560,87 @@ class RecordReplayTests(unittest.TestCase):
         self.addCleanup(e.close)
         rows = (self.tmp.path / "run" / "journal.jsonl").read_text(encoding="utf-8").splitlines()
         self.assertEqual(len(rows), len(srv.requests), "every answered call journaled")
+        self.assertTrue(all(json.loads(r)["answer"].get("call_uid") for r in rows), "each answer has its id")
         mid = sup.registry.models()[0]["id"]
         paid = sup.registry.record_call(mid, role="w", purpose="work", task_kind="code", run_id="r",
-                                        usage={"tokens_in": 1000, "tokens_out": 1000, "latency_s": 1})
+                                        usage={"tokens_in": 1000, "tokens_out": 1000, "latency_s": 1, "call_uid": "x"})
         again = sup.registry.record_call(mid, role="w", purpose="work", task_kind="code", run_id="r",
                                          usage={"tokens_in": 1000, "tokens_out": 1000, "latency_s": 1,
-                                                "journaled": True})
-        self.assertGreater(paid["usd"], 0)
-        self.assertEqual((again["usd"], again["journaled"]), (0.0, True))
+                                                "journaled": True, "call_uid": "x"})
+        self.assertEqual(again["id"], paid["id"], "the same answer measured once")
+
+    def test_a_journal_line_cut_off_by_a_crash_is_skipped_and_the_next_record_starts_a_line_of_its_own(self):
+        """Codex review of PR #4: a crash while a journal line was written left half a line, and loading the journal
+        then failed on it, so the restart that should reuse earlier answers could make no call at all."""
+        srv, url, seen = fake_provider(lambda body, n: (200, reply('{"a": 1}'), None))
+        self.addCleanup(stop, srv)
+        path = self.tmp.path / "journal.jsonl"
+        with model_adapter.journal(path):
+            model_adapter.complete("plan the work", max_tokens=100, route=hosted_route(url))
+        with open(path, "a", encoding="utf-8") as f:
+            f.write('{"key": "half a rec')  # the process died here
+        model_adapter.forget()
+        with model_adapter.journal(path):
+            again = model_adapter.complete("plan the work", max_tokens=100, route=hosted_route(url))
+            model_adapter.complete("write the spec", max_tokens=100, route=hosted_route(url))
+        self.assertEqual((again["text"], again["journaled"]), ('{"a": 1}', True))
+        self.assertEqual(len(seen), 2, "the journaled answer reused; only the new call asked")
+        rows = path.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(json.loads(rows[2])["label"], "model-x", "the new record is whole, on a line of its own")
+
+    def test_an_answer_reused_after_a_crash_is_charged_exactly_once_wherever_the_crash_came(self):
+        """Codex review of PR #4: a journaled answer was recorded at $0, so a call billed by the provider whose charge
+        never committed before a crash was missing from the ledger. Each answer now carries an id; the run charges
+        it once, the mark written in the same transaction as the charge."""
+        from cynqra import budget
+        from test_objective_intelligence import ModelsServer as Server, live_engine
+        saved = no_model_env()
+        self.addCleanup(restore_env, saved)
+        srv = Server()
+        self.addCleanup(srv.close)
+        sup = IntelligenceSupply_with(self.tmp.path, [("Steady", (1.0, 4.0))], srv)
+        self.addCleanup(sup.close)
+        e = live_engine(self.tmp.path / "run", sup)
+        self.addCleanup(e.close)
+        mid = sup.registry.models()[0]["id"]
+        spent = lambda: budget.ledger(e.store)["spent_total"]  # noqa: E731
+
+        def usage(uid, journaled=False):
+            return {"model_id": mid, "tokens_in": 100_000, "tokens_out": 100_000, "latency_s": 1, "call_uid": uid,
+                    "journaled": journaled}
+
+        one = 0.1 * 1.0 + 0.1 * 4.0
+        start = spent()
+        first = e.record_call("objective", "system", "objective", usage("u1"))
+        again = e.record_call("objective", "system", "objective", usage("u1", journaled=True))
+        self.assertEqual(again["id"], first["id"], "charged when it was made: the reuse adds nothing")
+        self.assertAlmostEqual(spent() - start, one, places=6)
+        e.record_call("objective", "system", "objective", usage("u2", journaled=True))
+        self.assertAlmostEqual(spent() - start, 2 * one, places=6, msg="the crash came before it was recorded")
+        with mock.patch.object(e, "spend", side_effect=RuntimeError("the process died here")):
+            with self.assertRaises(RuntimeError):
+                e.record_call("objective", "system", "objective", usage("u3"))
+        e.record_call("objective", "system", "objective", usage("u3", journaled=True))
+        self.assertAlmostEqual(spent() - start, 3 * one, places=6, msg="recorded, not charged: charged now, once")
+        self.assertEqual(sum(1 for c in e.store.all("call") if c.get("call_uid") == "u3"), 1)
+
+    def test_a_replay_needs_no_key_and_sends_none(self):
+        """Codex review of PR #4: a replay after a key was rotated or removed stopped at the key check, though it
+        sends nothing to a provider."""
+        from cynqra.run_hosted_examination import REPLAY_KEY, replay_keys
+        saved = no_model_env()
+        self.addCleanup(restore_env, saved)
+        with mock.patch.dict(os.environ, {"GROQ_API_KEY": "gsk_real"}, clear=False):
+            os.environ.pop("GEMINI_API_KEY", None)
+            self.assertEqual(replay_keys(["google", "groq"]), ["google"])
+            self.assertEqual((os.environ["GEMINI_API_KEY"], os.environ["GROQ_API_KEY"]), (REPLAY_KEY, "gsk_real"))
+        self._mode("replay")
+        with mock.patch("cynqra.intelligence_layer.adapters._fetch_json") as fetch:
+            from cynqra.intelligence_layer import adapters
+            with self.assertRaises(Exception):
+                adapters._get_json("https://p.example/v1/models", {"Authorization": "Bearer " + REPLAY_KEY})
+            fetch.assert_not_called()
 
     def test_a_whole_objective_replays_without_its_models(self):
         from test_objective_intelligence import ModelsServer as Server, live_engine, supply_with

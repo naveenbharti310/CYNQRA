@@ -317,7 +317,8 @@ class Engine:
         # the most the call may write is what the provider is allowed to send, not only what the caller asked for: a
         # hosted model gets at least HOSTED_MIN_REPLY, reasoning included, and is billed for all of it
         allowed = {**request, "max_tokens": model_adapter.reply_limit(int(request.get("max_tokens") or 4000),
-                                                                      bool(entry.get("local")))}
+                                                                      bool(entry.get("local")),
+                                                                      self.supply.gateway.route_kind(mid))}
         usd = budget.call_upper_bound(entry, allowed, self.registry.stats(mid).get("write_tps"))
         res = budget.reserve(self.store, worker_id=worker_id, task_id=tid, model_id=mid, usd=usd,
                              purpose="model_call")
@@ -555,27 +556,42 @@ class Engine:
         if purpose in ("assign", "review", "answer_blocker"):  # coordination on a task is not the task's own kind
             kind = {"answer_blocker": "answer"}.get(purpose, purpose)
         role = (self.worker(worker) or {}).get("role", worker)
+        # An answer this run already recorded (reused from its journal after a crash or a restart) is metered and
+        # charged once: by its call_uid, whatever point the crash came at (model_adapter.journal, budget.charge)
+        uid = usage.get("call_uid")
+        prior = self.store.get("call_uid", uid) if uid else None
+        if prior and budget.charged(self.store, uid):
+            self._end_reservations()
+            return self.store.get("call", prior["id"])
         c = self.registry.record_call(model_id, role=role, purpose=purpose, task_kind=kind, usage=usage,
                                       run_id=self.cid)
         with self.store.atomic():  # numbered and metered as one: concurrent workers never share a record
-            n = self.store.next_id("call")
-            rec = {"id": f"call_{n:04d}", "task_id": task_id, "worker": worker, "purpose": purpose, **usage,
-                   "usd": c["usd"], "model_version": c.get("model_version"), "at": now(),
-                   **controller.stamp(self, self.store.get("task", task_id) if task_id.startswith("t_") else None)}
-            self.store.put("call", rec["id"], rec)
-            if task_id.startswith("t_") and purpose == "work":
-                m = self.store.get("meter", task_id) or {"usd": 0.0, "seconds": 0.0, "tokens": 0}
-                self.store.put("meter", task_id, {"usd": m["usd"] + c["usd"], "seconds": m["seconds"] + c["seconds"],
-                                                  "tokens": m["tokens"] + c["tokens_in"] + c["tokens_out"]})
-        self.spend(worker, task_id, c["usd"], "inference")
+            rec = self.store.get("call", prior["id"]) if prior else None
+            if rec is None:
+                n = self.store.next_id("call")
+                rec = {"id": f"call_{n:04d}", "task_id": task_id, "worker": worker, "purpose": purpose, **usage,
+                       "usd": c["usd"], "model_version": c.get("model_version"), "at": now(),
+                       **controller.stamp(self, self.store.get("task", task_id) if task_id.startswith("t_") else None)}
+                self.store.put("call", rec["id"], rec)
+                if uid:
+                    self.store.put("call_uid", uid, {"id": rec["id"]})
+                if task_id.startswith("t_") and purpose == "work":
+                    m = self.store.get("meter", task_id) or {"usd": 0.0, "seconds": 0.0, "tokens": 0}
+                    self.store.put("meter", task_id, {"usd": m["usd"] + c["usd"],
+                                                      "seconds": m["seconds"] + c["seconds"],
+                                                      "tokens": m["tokens"] + c["tokens_in"] + c["tokens_out"]})
+        self.spend(worker, task_id, c["usd"], "inference", key=uid)
+        self._end_reservations()
+        return rec
+
+    def _end_reservations(self) -> None:
         held = getattr(self._tls, "reservations", None)
         if held:  # what the call really cost is charged: its reservation ends
             budget.release(self.store, held)
             self._tls.reservations = []
-        return rec
 
-    def spend(self, worker_id: str, task_id: str, usd: float, layer: str) -> None:
-        crossed = budget.charge(self.store, worker_id, task_id, usd, layer)
+    def spend(self, worker_id: str, task_id: str, usd: float, layer: str, key: str | None = None) -> None:
+        crossed = budget.charge(self.store, worker_id, task_id, usd, layer, key=key)
         L = budget.ledger(self.store)
         cap = project_settings.get(self.store)["budget_usd"]
         corr = task_id if task_id.startswith("t_") else self.cid

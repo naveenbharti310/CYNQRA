@@ -90,6 +90,18 @@ class IntelligenceGateway:
         out["connection_id"] = conn["id"]
         return out
 
+    def route_kind(self, model_id: str) -> str:
+        """Which transport a call to this intelligence goes through (model_adapter's kind), read without its key; ""
+        when that cannot be told, which the budget then treats as the most a hosted call may write."""
+        entry = self.registry.get(model_id)
+        conn = self.connections.find_id(entry.get("connection_id"))
+        if conn is None or conn.get("type") not in self.adapters:
+            return ""
+        try:
+            return str(self.adapters[conn["type"]].route(conn, None, entry).get("kind") or "")
+        except Exception:  # noqa: BLE001 - a route that needs its key to be built: the safe upper bound applies
+            return ""
+
     def deadline(self, model_id: str) -> int:
         """Seconds a call to this model may take: from its own answers on record (see DEADLINE_FACTOR), so a hung
         call fails in minutes on a model that answers in one, and a slow model keeps the time it needs."""

@@ -437,12 +437,12 @@ class ModelSource:
                    "partial": files, "temperature": round(min(0.3 * repeats, 0.9), 1) if repeats else None,
                    "effort": effort}
         out = self.access.invoke(worker, request)
-        used = effort
+        used, uid = effort, out.get("call_uid")  # the answer's id, while this usage is that one answer alone
         if out.get("error") and not files and "reply truncated" in str(out["error"]):
             # A structured answer cut off at its limit (paid run 37589136743: the SaaS workforce, so the objective
             # failed) is asked once more with less thinking and twice the room, through the same budget reservation;
             # what the cut-off reply cost is kept
-            first, used = out, "low"
+            first, used, uid = out, "low", None
             out = self.access.invoke(worker, {**request, "effort": used,
                                               "max_tokens": max(2 * max_tokens, 2 * model_adapter.HOSTED_MIN_REPLY)})
             if not out.get("error"):
@@ -467,6 +467,7 @@ class ModelSource:
         if not isinstance(data, dict) or no_files:
             again = ("\n\nYour reply had no files in the required layout. " + files_layout(needs_from)) if files else \
                 "\n\nReply with only one JSON object."
+            uid = None  # two answers' tokens in one usage: charged as they come
             out2 = self.access.invoke(worker, {"prompt": prompt + again, "max_tokens": max_tokens,
                                                "want_json": not files, "schema": schema, "temperature": 0.4,
                                                "effort": used})  # without it a thinking model thinks its most
@@ -485,7 +486,7 @@ class ModelSource:
                  "tokens_cached": int(out.get("tokens_cached") or 0), "cache_reported": bool(out.get("cache_reported")),
                  "estimated": out["estimated"],
                  "label": out.get("model") or model_id, "latency_s": out.get("latency_s", 0), "model_id": model_id,
-                 "journaled": bool(out.get("journaled")), "effort": used}
+                 "journaled": bool(out.get("journaled")), "effort": used, "call_uid": uid}
         if out.get("speed"):
             usage.update(out["speed"])
         return data, usage

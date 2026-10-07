@@ -235,14 +235,20 @@ class IntelligenceRegistry:
             secs = float(usage.get("latency_s") or 0)
             tin, tout = int(usage.get("tokens_in") or 0), int(usage.get("tokens_out") or 0)
             cached = max(0, min(int(usage.get("tokens_cached") or 0), tin))
-            journaled = bool(usage.get("journaled"))  # an answer the run's journal held: paid for when it was made
+            journaled = bool(usage.get("journaled"))  # reused from the run's journal (model_adapter.journal)
+            uid = usage.get("call_uid")
+            seen = self.store.get("call_uid", uid) if uid else None
+            if seen:  # the same answer measured once: its first record stands
+                return self.store.get("call", seen["id"])
             c = {"id": f"c_{self.store.next_id('call'):06d}", "model_id": model_id, "role": role, "purpose": purpose,
                  "task_kind": task_kind, "run_id": run_id, "tokens_in": tin, "tokens_out": tout, "tokens_cached": cached,
-                 "seconds": round(secs, 1), "usd": 0.0 if journaled else self.cost(m, tin, tout, secs, cached),
+                 "seconds": round(secs, 1), "usd": self.cost(m, tin, tout, secs, cached),
                  "journaled": journaled, "effort": usage.get("effort"), "write_tps": usage.get("write_tps"),
                  "error": error[:300], "served_by": m.get("served_by") or "", "model_version": served_version(m),
                  "tenant_id": usage.get("tenant_id") or "local", "at": now()}
             self.store.put("call", c["id"], c)
+            if uid:
+                self.store.put("call_uid", uid, {"id": c["id"]})
             h = m.get("health") or {"errors": 0, "down_until": 0}
             h["errors"] = h.get("errors", 0) + 1 if error else 0
             if h["errors"] >= DOWN_AFTER_ERRORS and h.get("down_until", 0) <= time.time():

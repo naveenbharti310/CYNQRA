@@ -53,16 +53,27 @@ def machine_usd(store, seconds: float) -> float:
     return round(float(seconds) * float(project_settings.get(store)["compute_usd_per_hour"]) / 3600, 6)
 
 
-def charge(store, worker_id: str, task_id: str, usd: float, layer: str) -> dict:
+def charge(store, worker_id: str, task_id: str, usd: float, layer: str, key: str | None = None) -> dict:
     """Charge money to a worker, a task and a layer. Returns what crossed: warnings (percent marks) and whether the
-    breaker must open now. One transaction: concurrent workers' charges never overwrite one another."""
+    breaker must open now. One transaction: concurrent workers' charges never overwrite one another. With key (a
+    model answer's call_uid), the charge is made at most once, its mark written in the same transaction: an answer a
+    run reuses from its journal after a crash is charged then only if its first charge never committed."""
     if layer not in LAYERS:
         raise ValueError(f"unknown budget layer {layer}")
     out = {"warned": [], "breaker": False}
     if usd <= 0:
         return out
     with store.atomic():
+        if key and store.get("charge", key):
+            return out
+        if key:
+            store.put("charge", key, {"usd": round(usd, 6), "task_id": task_id, "worker_id": worker_id})
         return _charge(store, worker_id, task_id, usd, layer, out)
+
+
+def charged(store, key: str | None) -> bool:
+    """Whether the answer with this call_uid has been charged in this run (charge, key)."""
+    return bool(key) and store.get("charge", key) is not None
 
 
 def _charge(store, worker_id: str, task_id: str, usd: float, layer: str, out: dict) -> dict:
