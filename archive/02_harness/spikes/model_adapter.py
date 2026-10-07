@@ -324,10 +324,9 @@ def pace_stats() -> dict:
 
 def _post_once(url: str, body: bytes, headers: dict, timeout: float = TIMEOUT_S) -> dict:
     req = urllib.request.Request(url, data=body, headers={"User-Agent": USER_AGENT, **headers}, method="POST")
-    _await_pace(url, headers)
     try:
         with _OPENER.open(req, timeout=timeout) as resp:
-            _note_limits(url, headers, resp.headers)
+            _note_limits(url, headers, getattr(resp, "headers", None))
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = ""
@@ -343,7 +342,7 @@ def _post_once(url: str, body: bytes, headers: dict, timeout: float = TIMEOUT_S)
             except (TypeError, ValueError):
                 delay = _RETRY_DELAY.search(detail)  # Google says it in the body: "retryDelay": "37s"
                 wait = min(60.0, _seconds_until(delay.group(1)) or 0.0) if delay else None
-            _note_limits(url, headers, exc.headers, wait)  # every call on this key holds, not only this one
+            _note_limits(url, headers, getattr(exc, "headers", None), wait)  # every call on this key holds
             raise _Retryable(msg, wait, overload=exc.code in OVERLOAD_STATUS or bool(_OVERLOAD.search(detail))) \
                 from exc
         raise RuntimeError(msg) from exc
@@ -390,8 +389,10 @@ def _post(url: str, payload: dict, headers: dict, timeout: float = TIMEOUT_S, re
     """One call, retried on the provider's side. A hosted model that is overloaded is retried on the short, spread
     schedule (OVERLOAD_WAITS_S); a limit or a dropped connection on the given waits; the provider's Retry-After wins."""
     body = json.dumps(payload).encode("utf-8")
-    attempt = 0
+    attempt, waited = 0, False
     while True:
+        if not waited:  # the provider's headers may hold this key; a call that just slept its Retry-After goes
+            _await_pace(url, headers)
         try:
             return _post_once(url, body, headers, timeout)
         except _Retryable as exc:
@@ -400,6 +401,7 @@ def _post(url: str, payload: dict, headers: dict, timeout: float = TIMEOUT_S, re
                 raise RuntimeError(str(exc)) from exc
             spread = random.uniform(0.75, 1.25) if schedule is OVERLOAD_WAITS_S else 1.0
             time.sleep(exc.wait if exc.wait is not None else schedule[attempt] * spread)
+            waited = exc.wait is not None
             attempt += 1
 
 
