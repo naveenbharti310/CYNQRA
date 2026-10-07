@@ -425,6 +425,7 @@ class ModelSource:
             if not out.get("error"):
                 out["tokens_in"] += int(first.get("tokens_in") or 0)
                 out["tokens_out"] += int(first.get("tokens_out") or 0)
+                out["tokens_cached"] = int(out.get("tokens_cached") or 0) + int(first.get("tokens_cached") or 0)
         model_id = out.get("model_id") or model_id
         if out.get("error"):
             raise IntelligenceError(out["error"], model_id=model_id, usage=out)
@@ -452,11 +453,13 @@ class ModelSource:
             data = parse(out2["text"])
             out["tokens_in"] += out2["tokens_in"]
             out["tokens_out"] += out2["tokens_out"]
+            out["tokens_cached"] = int(out.get("tokens_cached") or 0) + int(out2.get("tokens_cached") or 0)
         if not isinstance(data, dict):
             # the provider answered and the intelligence's reply could not be read: named, so the Replacement Engine
             # asks again and then replaces it (real run 36990295187 stopped three objectives here, unnamed)
             raise IntelligenceError("model did not return a JSON object", model_id=model_id, usage=out)
-        usage = {"tokens_in": out["tokens_in"], "tokens_out": out["tokens_out"], "estimated": out["estimated"],
+        usage = {"tokens_in": out["tokens_in"], "tokens_out": out["tokens_out"],
+                 "tokens_cached": int(out.get("tokens_cached") or 0), "estimated": out["estimated"],
                  "label": out.get("model") or model_id, "latency_s": out.get("latency_s", 0), "model_id": model_id,
                  "journaled": bool(out.get("journaled")), "effort": used}
         if out.get("speed"):

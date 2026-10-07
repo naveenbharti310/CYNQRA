@@ -667,6 +667,78 @@ def reply(text: str = '{"ok": true}', finish: str = "stop", usage: dict | None =
             "usage": usage or {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}}
 
 
+class PromptCacheTests(unittest.TestCase):
+    """Every prompt starts with what stays the same through a run (the contract, the objective, the rules), so the
+    providers' prompt caches can serve it again. Cynqra did not read what they served from cache and billed it all at
+    the full input price. The cached input is now read from each provider's usage, priced at the published cached
+    rate where one is known (never a discount nobody published), and the run reports its cache hit rate."""
+
+    def setUp(self):
+        from cynqra.intelligence_layer import IntelligenceSupply
+        self.saved = no_model_env()
+        self.tmp = TempDir()
+        self.srv = ModelsServer()
+        self.sup = IntelligenceSupply(self.tmp.path / "control")
+
+    def tearDown(self):
+        self.sup.close()
+        self.srv.close()
+        self.tmp.cleanup()
+        restore_env(self.saved)
+
+    def test_each_providers_cached_input_is_read(self):
+        from cynqra.model_adapter import _tokens_cached
+        self.assertEqual(_tokens_cached({"prompt_tokens": 1000, "prompt_tokens_details": {"cached_tokens": 768}}), 768)
+        self.assertEqual(_tokens_cached({"prompt_tokens": 1000, "prompt_cache_hit_tokens": 512}), 512)
+        self.assertEqual(_tokens_cached({"input_tokens": 50, "cache_read_input_tokens": 900,
+                                         "cache_creation_input_tokens": 50}), 900)
+        self.assertEqual(_tokens_cached({"prompt_tokens": 100, "prompt_tokens_details": {"cached_tokens": 900}}), 100,
+                         "never more than the prompt")
+        self.assertEqual(_tokens_cached({"prompt_tokens": 100}), 0)
+
+    def test_a_hosted_reply_carries_its_cached_input(self):
+        srv, url, _ = fake_provider(lambda body, n: (200, reply(usage={
+            "prompt_tokens": 2000, "completion_tokens": 10, "total_tokens": 2010,
+            "prompt_tokens_details": {"cached_tokens": 1536}}), None))
+        self.addCleanup(stop, srv)
+        out = model_adapter.complete("hi", max_tokens=100, route=hosted_route(url))
+        self.assertEqual((out["tokens_in"], out["tokens_cached"]), (2000, 1536))
+
+    def test_cached_input_is_billed_at_the_published_cached_rate_and_never_at_a_guessed_one(self):
+        catalogue = {"model-x": {"id": "vendor/model-x", "pricing": {"prompt": "0.000002", "completion": "0.000012",
+                                                                     "input_cache_read": "0.0000002"}}}
+        with mock.patch("cynqra.intelligence_layer.normalize.catalogue", return_value=catalogue):
+            self.sup.connect({"type": "openai_compatible", "name": "Catalogued", "endpoint": self.srv.url,
+                              "auth": {"method": "none"}, "models": ["model-x"]})
+            self.sup.connect({"type": "openai_compatible", "name": "Set by the founder", "endpoint": self.srv.url,
+                              "auth": {"method": "none"}, "models": ["model-x"], "price_per_m": [2.0, 12.0]})
+        listed, founder = sorted(self.sup.registry.models(), key=lambda m: m["price_source"])
+        self.assertEqual((listed["price_source"], founder["price_source"]), ("catalogue", "connection"))
+        usage = {"tokens_in": 1_000_000, "tokens_out": 0, "tokens_cached": 750_000, "latency_s": 1}
+        c = self.sup.registry.record_call(listed["id"], role="w", purpose="work", task_kind="code", run_id="r",
+                                          usage=usage)
+        self.assertEqual(c["tokens_cached"], 750_000)
+        self.assertAlmostEqual(c["usd"], 0.25 * 2.0 + 0.75 * 0.2, places=6)
+        c2 = self.sup.registry.record_call(founder["id"], role="w", purpose="work", task_kind="code", run_id="r",
+                                           usage=usage)
+        self.assertAlmostEqual(c2["usd"], 2.0, places=6, msg="no cached price known: the full input price")
+
+    def test_the_run_reports_its_cache_hit_rate(self):
+        from cynqra.run_hosted_examination import calls_summary
+
+        class Run:
+            class store:
+                @staticmethod
+                def all(kind):
+                    return [{"tokens_in": 1000, "tokens_out": 10, "tokens_cached": 600, "effort": "low"},
+                            {"tokens_in": 1000, "tokens_out": 10, "tokens_cached": 200, "effort": "high",
+                             "journaled": True}]
+
+        got = calls_summary(Run())
+        self.assertEqual((got["cache_hit_rate"], got["journaled"], got["by_effort"]),
+                         (0.4, 1, {"low": 1, "high": 1}))
+
+
 class ReasoningTokensTests(unittest.TestCase):
     """Paid run 37589136743: Gemini 3.1 Pro Preview took 186 s for 170 counted output tokens. Google's
     OpenAI-compatible route reports its hidden reasoning only in total_tokens and bills it as output; Cynqra counted

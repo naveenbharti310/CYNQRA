@@ -402,7 +402,21 @@ def objective_summary(run: dict) -> dict:
             "decisions": len(decisions), "selection_modes": modes,
             "all_replayed": all(d.get("replayed") for d in decisions) if decisions else None,
             "selected": sorted({str(d.get("selected")) for d in decisions if d.get("selected")}),
-            "spent_usd": run.get("spent_usd")}
+            "calls": run.get("calls"), "spent_usd": run.get("spent_usd")}
+
+
+def calls_summary(e) -> dict:
+    """The run's calls in figures: how many, the tokens, the share of input read from the providers' prompt caches,
+    the answers its journal held (paid for once), and how long the models were let think."""
+    calls = e.store.all("call")
+    tin = sum(int(c.get("tokens_in") or 0) for c in calls)
+    cached = sum(int(c.get("tokens_cached") or 0) for c in calls)
+    efforts: dict[str, int] = {}
+    for c in calls:
+        efforts[str(c.get("effort") or "default")] = efforts.get(str(c.get("effort") or "default"), 0) + 1
+    return {"calls": len(calls), "tokens_in": tin, "tokens_out": sum(int(c.get("tokens_out") or 0) for c in calls),
+            "tokens_cached": cached, "cache_hit_rate": round(cached / tin, 3) if tin else None,
+            "journaled": sum(1 for c in calls if c.get("journaled")), "by_effort": efforts}
 
 
 # What an examination founder answers: the recommendation, except a decision that would spend more than the cap
@@ -472,6 +486,7 @@ def objective_run(supply, folder: Path, statement: str, budget_usd: float, *, to
                                  "replayed": controller.replay(e, x["decision_id"])["reproduced"]}
                               for x in e.decisions()],
                    selection_report=selection_report(e, p),
+                   calls=calls_summary(e),
                    spent_usd=e.snapshot()["budget"]["ledger"]["spent_total"], phase=e.meta.get("phase"),
                    notice=e.meta.get("notice"))
     except Exception as exc:  # noqa: BLE001 - a real provider can fail at any stage: recorded as it happened

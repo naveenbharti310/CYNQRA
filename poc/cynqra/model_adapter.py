@@ -283,6 +283,18 @@ def _tokens_out(usage: dict) -> int:
     return max(out, total - int(usage.get("prompt_tokens") or 0)) if total else out
 
 
+def _tokens_cached(usage: dict) -> int:
+    """Input tokens the provider read from its prompt cache, billed at its cached rate: OpenAI's and Google's
+    OpenAI-compatible prompt_tokens_details.cached_tokens, DeepSeek's prompt_cache_hit_tokens, Anthropic's
+    cache_read_input_tokens. Never more than the prompt."""
+    details = usage.get("prompt_tokens_details") or {}
+    n = int((details.get("cached_tokens") if isinstance(details, dict) else 0) or usage.get("prompt_cache_hit_tokens")
+            or usage.get("cache_read_input_tokens") or 0)
+    total = int(usage.get("prompt_tokens") or 0) or (int(usage.get("input_tokens") or 0) + n
+                                                     + int(usage.get("cache_creation_input_tokens") or 0))
+    return max(0, min(n, total))
+
+
 def _post(url: str, payload: dict, headers: dict, timeout: float = TIMEOUT_S, retry: bool = True,
           waits: tuple = RETRY_WAITS_S) -> dict:
     """One call, retried on the provider's side. A hosted model that is overloaded is retried on the short, spread
@@ -322,6 +334,7 @@ def _openai(prompt: str, model: str, max_tokens: int = 1500) -> dict:
         "text": (data["choices"][0]["message"]["content"] or ""),
         "tokens_in": int(usage.get("prompt_tokens") or 0),
         "tokens_out": _tokens_out(usage),
+        "tokens_cached": _tokens_cached(usage),
         "estimated": False,
     }
 
@@ -363,6 +376,7 @@ def _anthropic(prompt: str, model: str, max_tokens: int = 1500) -> dict:
         + int(usage.get("cache_read_input_tokens") or 0)
         + int(usage.get("cache_creation_input_tokens") or 0),
         "tokens_out": int(usage.get("output_tokens") or 0),
+        "tokens_cached": _tokens_cached(usage),
         "estimated": False,
     }
 
@@ -497,9 +511,11 @@ def _local_openai(prompt: str, model: str, max_tokens: int, want_json: bool = Fa
     usage = data.get("usage") or {}
     if cut and not partial:
         raise _Truncated("reply truncated at max_tokens", {"tokens_in": int(usage.get("prompt_tokens") or 0),
-                                                            "tokens_out": _tokens_out(usage)})
+                                                            "tokens_out": _tokens_out(usage),
+                                                            "tokens_cached": _tokens_cached(usage)})
     out = {"text": choice["message"].get("content") or "", "tokens_in": int(usage.get("prompt_tokens") or 0),
-           "tokens_out": _tokens_out(usage), "estimated": False, "truncated": cut}
+           "tokens_out": _tokens_out(usage), "tokens_cached": _tokens_cached(usage), "estimated": False,
+           "truncated": cut}
     t = data.get("timings") or {}  # llama-server's own measurement of this call
     if t.get("predicted_per_second"):
         out["speed"] = {"read_tps": round(float(t.get("prompt_per_second") or 0), 1),
@@ -562,7 +578,8 @@ def _hf(prompt: str, model: str, max_tokens: int, want_json: bool = False, schem
     if not text.strip() and not cut:
         raise RuntimeError("the model returned no answer")
     return {"text": text, "tokens_in": int(usage.get("prompt_tokens") or 0),
-            "tokens_out": _tokens_out(usage), "estimated": False, "truncated": cut}
+            "tokens_out": _tokens_out(usage), "tokens_cached": _tokens_cached(usage), "estimated": False,
+            "truncated": cut}
 
 
 def _cmd(prompt: str) -> dict:
@@ -792,6 +809,7 @@ def _complete(prompt: str, max_tokens: int, want_json: bool, schema: dict | None
             "text": "",
             "tokens_in": int(billed.get("tokens_in") or 0),
             "tokens_out": int(billed.get("tokens_out") or 0),
+            "tokens_cached": int(billed.get("tokens_cached") or 0),
             "estimated": not billed,
             "error": f"{'RuntimeError' if isinstance(exc, _Truncated) else type(exc).__name__}: {exc}",
         }

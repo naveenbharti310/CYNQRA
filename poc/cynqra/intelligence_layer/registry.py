@@ -43,7 +43,19 @@ FACTS = ("name", "provider", "ref", "runtime", "version", "context", "tools", "j
          # normalized at discovery (normalize.py): who made it, who serves it, what it can do
          "display_name", "publisher", "publisher_name", "capabilities", "input_modalities", "type", "speed", "description",
          "max_output", "list_price_in", "list_price_out", "access_provider", "access_type", "rate_limit_per_min",
-         "catalogued", "price_source")
+         "catalogued", "price_source", "list_price_cached", "price_cached_in")
+
+
+def cached_price(m: dict) -> float:
+    """What one million input tokens read from the provider's prompt cache cost: the model's own figure, else the
+    public catalogue's cache-read price for a model priced from Cynqra's list or the catalogue, else (a price the
+    connection set, or no cached price known) the full input price: no discount is assumed that nobody published."""
+    own, listed = m.get("price_cached_in"), m.get("list_price_cached")
+    if own is not None and 0 <= float(own) <= float(m.get("price_in") or 0):
+        return float(own)
+    if m.get("price_source") in ("list", "catalogue") and listed and 0 < float(listed) <= float(m.get("price_in") or 0):
+        return float(listed)  # a catalogue price of 0 is a free variant's, as for the input price
+    return float(m.get("price_in") or 0)
 
 
 def served_version(m: dict) -> str:
@@ -204,10 +216,13 @@ class IntelligenceRegistry:
     def available(self) -> list[dict]:
         return [m for m in self.models() if self.availability(m)[0]]
 
-    def cost(self, m: dict, tokens_in: int, tokens_out: int, seconds: float) -> float:
+    def cost(self, m: dict, tokens_in: int, tokens_out: int, seconds: float, cached: int = 0) -> float:
+        """A hosted call at its prices: the input the provider read from its prompt cache at the cached rate."""
         if m["local"]:
             return round(seconds * float(m.get("compute_usd_per_hour") or 0) / 3600, 6)
-        return round(tokens_in * m["price_in"] / 1e6 + tokens_out * m["price_out"] / 1e6, 6)
+        cached = max(0, min(int(cached or 0), tokens_in))
+        return round((tokens_in - cached) * m["price_in"] / 1e6 + cached * cached_price(m) / 1e6
+                     + tokens_out * m["price_out"] / 1e6, 6)
 
     # --- measurement -----------------------------------------------------------------------------------------
     def record_call(self, model_id: str, *, role: str, purpose: str, task_kind: str, usage: dict, run_id: str,
@@ -219,10 +234,11 @@ class IntelligenceRegistry:
                 raise RegistryError(f"no intelligence {model_id!r} in the registry")
             secs = float(usage.get("latency_s") or 0)
             tin, tout = int(usage.get("tokens_in") or 0), int(usage.get("tokens_out") or 0)
+            cached = max(0, min(int(usage.get("tokens_cached") or 0), tin))
             journaled = bool(usage.get("journaled"))  # an answer the run's journal held: paid for when it was made
             c = {"id": f"c_{self.store.next_id('call'):06d}", "model_id": model_id, "role": role, "purpose": purpose,
-                 "task_kind": task_kind, "run_id": run_id, "tokens_in": tin, "tokens_out": tout,
-                 "seconds": round(secs, 1), "usd": 0.0 if journaled else self.cost(m, tin, tout, secs),
+                 "task_kind": task_kind, "run_id": run_id, "tokens_in": tin, "tokens_out": tout, "tokens_cached": cached,
+                 "seconds": round(secs, 1), "usd": 0.0 if journaled else self.cost(m, tin, tout, secs, cached),
                  "journaled": journaled, "effort": usage.get("effort"), "write_tps": usage.get("write_tps"),
                  "error": error[:300], "served_by": m.get("served_by") or "", "model_version": served_version(m),
                  "tenant_id": usage.get("tenant_id") or "local", "at": now()}

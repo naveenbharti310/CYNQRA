@@ -50,6 +50,8 @@ def scorecard(store, worker_id: str, model_id: str | None, reg=None) -> dict:
     escapes = [x for x in store.all("escape") if mine(x)]
     false_rej = [v for v in ver if v.get("false_rejection")]
     tokens = sum(int(c.get("tokens_in") or 0) + int(c.get("tokens_out") or 0) for c in calls)
+    tin = sum(int(c.get("tokens_in") or 0) for c in calls)
+    cached = sum(int(c.get("tokens_cached") or 0) for c in calls)
     usd = sum(float(c.get("usd") or 0) for c in calls)
     verified_tasks = {v["task_id"] for v in passed}
     decisions = store.all("decision")
@@ -66,7 +68,8 @@ def scorecard(store, worker_id: str, model_id: str | None, reg=None) -> dict:
                         "protocol_violations": len(violations), "tool_errors": len(denied)},
         "efficiency": {"latency_s": round(sum(float(c.get("latency_s") or 0) for c in calls) / len(calls), 1) if calls else None,
                        "retries": len(ver) - len(passed),
-                       "tokens_per_verified": round(tokens / len(verified_tasks)) if verified_tasks else None},
+                       "tokens_per_verified": round(tokens / len(verified_tasks)) if verified_tasks else None,
+                       "cache_hit_rate": round(cached / tin, 3) if tin else None},
         "economics": {"usd": round(usd, 4),
                       "usd_per_verified": round(usd / len(verified_tasks), 4) if verified_tasks else None},
         "human_friction": {"escalations": len(esc), "rejections": len(rej)},
