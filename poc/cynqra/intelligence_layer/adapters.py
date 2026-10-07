@@ -132,7 +132,7 @@ def _get_json(url: str, headers: dict, timeout: float = 30.0):
     """A provider's listing (or the public catalogue), recorded or replayed with the calls (model_adapter's
     CYNQRA_CASSETTE), so a replayed run discovers what the recorded run discovered, offline."""
     from .. import model_adapter as ma
-    mode = ma._cassette_mode()
+    mode = ma._cassette_mode()  # listings are free: recorded and replayed, never journaled
     if mode not in ("record", "replay"):
         return _fetch_json(url, headers, timeout)
     key = ma.cassette_key("listing", {"url": url})  # the key depends on the address only, never on a credential

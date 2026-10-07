@@ -583,15 +583,18 @@ def _cmd(prompt: str) -> dict:
     }
 
 
-# --- record and replay ------------------------------------------------------------------------------------------
+# --- record, replay and journal --------------------------------------------------------------------------------
 # CYNQRA_CASSETTE names a file; CYNQRA_CASSETTE_MODE is "record" (every call's request and answer are kept there:
 # the model, the prompt, the reply, its tokens and seconds; never a key, which travels only in headers, and anything
 # shaped like one is scrubbed) or "replay" (calls are answered from the file, so a whole run can be tested again at
-# no cost; a call the file does not hold fails, and is counted). Ids and times that differ between runs are
-# normalized, so the same work finds the same answer. CYNQRA_REPLAY_SPEED replays at that fraction of the recorded
-# time (0, the default: at once).
+# no cost; a call the file does not hold fails, and is counted). Ids, times and people's names that differ between
+# runs are normalized, so the same work finds the same answer. CYNQRA_REPLAY_SPEED replays at that fraction of the
+# recorded time (0, the default: at once).
+# A run's own journal (journal(), set by the engine for each call it makes) is the durable form: an answer the
+# journal holds is used again, so a run reopened after a crash or a restart never pays twice for a call it already
+# made; anything else is asked live and journaled. A failure is never journaled, so it is always asked again.
 _CASSETTE_LOCK = threading.Lock()
-_CASSETTE: dict = {"path": None, "calls": {}, "used": {}, "hits": 0, "misses": 0}
+_STORES: dict[str, dict] = {}
 _VOLATILE = (
     (re.compile(r"\b(co|obj|org|plan|dec|sd|rep|ce|wp|v|cal)_[0-9a-f]{6,}\b"), r"\1_*"),
     (re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?([+-]\d{2}:?\d{2}|Z)?"), "<time>"),
@@ -600,6 +603,31 @@ _VOLATILE = (
 
 def _cassette_mode() -> str:
     return (os.environ.get("CYNQRA_CASSETTE_MODE") or "").strip().lower() if os.environ.get("CYNQRA_CASSETTE") else ""
+
+
+def _route_of_calls() -> tuple[str, str | None]:
+    """(mode, file) for this call: the process's record or replay, else the run's own journal, else nothing."""
+    mode = _cassette_mode()
+    if mode in ("record", "replay"):
+        return mode, os.environ["CYNQRA_CASSETTE"]
+    path = getattr(_LOCAL, "journal", None)
+    return ("journal", path) if path else ("", None)
+
+
+class journal:
+    """with journal(path): the calls made on this thread are journaled in path (see above)."""
+
+    def __init__(self, path):
+        self.path, self.before = str(path) if path else None, None
+
+    def __enter__(self):
+        self.before = getattr(_LOCAL, "journal", None)
+        _LOCAL.journal = self.path
+        return self
+
+    def __exit__(self, *exc):
+        _LOCAL.journal = self.before
+        return False
 
 
 _PEOPLE: list = []
@@ -619,14 +647,13 @@ def _normalized(text: str) -> str:
 
 def cassette_key(kind: str, request: dict) -> str:
     import hashlib
-    body = json.dumps({"kind": kind, **request}, sort_keys=True, default=str)
+    body = json.dumps({"kind": kind, **request}, sort_keys=True, default=str, ensure_ascii=False)  # "Tomás", not "Tom\u00e1s"
     return hashlib.sha256(_normalized(body).encode("utf-8")).hexdigest()
 
 
-def _cassette() -> dict:
-    """The recorded calls, by key, loaded once per file."""
-    path = os.environ["CYNQRA_CASSETTE"]
-    if _CASSETTE["path"] != path:
+def _store(path: str) -> dict:
+    """The recorded calls in a file, by key, loaded once."""
+    if path not in _STORES:
         calls: dict[str, list] = {}
         if os.path.exists(path):
             with open(path, encoding="utf-8") as f:
@@ -634,31 +661,43 @@ def _cassette() -> dict:
                     if line.strip():
                         row = json.loads(line)
                         calls.setdefault(row["key"], []).append(row)
-        _CASSETTE.update(path=path, calls=calls, used={}, hits=0, misses=0)
-    return _CASSETTE
+        _STORES[path] = {"calls": calls, "used": {}, "hits": 0, "misses": 0}
+    return _STORES[path]
 
 
-def cassette_stats() -> dict:
-    return {"hits": _CASSETTE["hits"], "misses": _CASSETTE["misses"], "path": _CASSETTE["path"]}
+def forget(path: str | None = None) -> None:
+    """Drop what was loaded (all files, or one), as a new process would."""
+    with _CASSETTE_LOCK:
+        if path is None:
+            _STORES.clear()
+        else:
+            _STORES.pop(str(path), None)
 
 
-def cassette_record(key: str, kind: str, label: str, answer) -> None:
+def cassette_stats(path: str | None = None) -> dict:
+    path = str(path or os.environ.get("CYNQRA_CASSETTE") or "")
+    s = _STORES.get(path) or {}
+    return {"hits": s.get("hits", 0), "misses": s.get("misses", 0), "path": path or None}
+
+
+def cassette_record(key: str, kind: str, label: str, answer, path: str | None = None) -> None:
     from .db import scrub
     row = {"key": key, "kind": kind, "label": label, "answer": answer}
-    with _CASSETTE_LOCK, open(os.environ["CYNQRA_CASSETTE"], "a", encoding="utf-8") as f:
+    with _CASSETTE_LOCK, open(path or os.environ["CYNQRA_CASSETTE"], "a", encoding="utf-8") as f:
         f.write(scrub(json.dumps(row, default=str)) + "\n")
 
 
-def cassette_replay(key: str):
-    """The recorded answer for a call, in the order they were recorded (a call asked twice gets the second answer
-    the second time, then keeps the last); None when the file holds none."""
+def cassette_replay(key: str, path: str | None = None, keep_last: bool = True):
+    """The recorded answer for a call, in the order they were recorded: a call asked twice gets the second answer
+    the second time, then keeps the last (keep_last) or, for a journal, nothing (asked live). None when the file
+    holds none."""
     with _CASSETTE_LOCK:
-        c = _cassette()
+        c = _store(str(path or os.environ["CYNQRA_CASSETTE"]))
         rows = c["calls"].get(key) or []
-        if not rows:
+        i = c["used"].get(key, 0)
+        if not rows or (i >= len(rows) and not keep_last):
             c["misses"] += 1
             return None
-        i = c["used"].get(key, 0)
         c["used"][key] = i + 1
         c["hits"] += 1
         return rows[min(i, len(rows) - 1)]["answer"]
@@ -666,26 +705,28 @@ def cassette_replay(key: str):
 
 def _replayed_or_recorded(call, prompt: str, max_tokens: int, want_json: bool, schema: dict | None,
                           temperature: float | None, partial: bool, effort: str | None) -> dict:
-    mode = _cassette_mode()
-    if mode not in ("record", "replay"):
+    mode, path = _route_of_calls()
+    if not mode:
         return call()
     model = resolve() or {}
     label = str(model.get("label") or "")
     key = cassette_key("model_call", {"model": label, "prompt": prompt, "max_tokens": max_tokens,
                                       "want_json": want_json, "schema": schema, "temperature": temperature,
                                       "partial": partial, "effort": effort})
-    if mode == "replay":
-        answer = cassette_replay(key)
-        if answer is None:
+    if mode in ("replay", "journal"):
+        answer = cassette_replay(key, path, keep_last=mode == "replay")
+        if answer is not None:
+            speed = float(os.environ.get("CYNQRA_REPLAY_SPEED") or 0) if mode == "replay" else 0.0
+            if speed > 0:
+                time.sleep(float(answer.get("latency_s") or 0) * speed)
+            return {**answer, "journaled": mode == "journal"}
+        if mode == "replay":
             return {"text": "", "tokens_in": 0, "tokens_out": 0, "estimated": True, "latency_s": 0.0, "model": label,
                     "kind": model.get("kind"), "error": "RuntimeError: replay: the recording holds no answer for "
                                                         "this call (the prompt changed since it was recorded)"}
-        speed = float(os.environ.get("CYNQRA_REPLAY_SPEED") or 0)
-        if speed > 0:
-            time.sleep(float(answer.get("latency_s") or 0) * speed)
-        return dict(answer)
     out = call()
-    cassette_record(key, "model_call", label, out)
+    if mode == "record" or not out.get("error"):  # a journal keeps answers only: a failure is asked again
+        cassette_record(key, "model_call", label, out, path)
     return out
 
 

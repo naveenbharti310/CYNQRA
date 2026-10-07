@@ -944,13 +944,13 @@ class RecordReplayTests(unittest.TestCase):
         self.tmp = TempDir()
         self.addCleanup(self.tmp.cleanup)
         self.cassette = self.tmp.path / "cassette.jsonl"
-        model_adapter._CASSETTE.update(path=None)
+        model_adapter.forget()
 
     def _mode(self, mode: str):
         patcher = mock.patch.dict(os.environ, {"CYNQRA_CASSETTE": str(self.cassette), "CYNQRA_CASSETTE_MODE": mode})
         patcher.start()
         self.addCleanup(patcher.stop)
-        model_adapter._CASSETTE.update(path=None)
+        model_adapter.forget()
 
     def test_a_recorded_call_is_answered_again_without_the_provider(self):
         srv, url, seen = fake_provider(lambda body, n: (200, reply('{"answer": 42}', usage={
@@ -984,6 +984,47 @@ class RecordReplayTests(unittest.TestCase):
         with mock.patch.object(adapters, "_fetch_json", side_effect=AssertionError("no network in replay")):
             self.assertEqual(adapters._get_json("https://p.example/v1/models", {"Authorization": "Bearer y"}),
                              {"data": [{"id": "m-1"}]})
+
+    def test_a_runs_journal_answers_again_after_a_restart_and_never_keeps_a_failure(self):
+        srv, url, seen = fake_provider(lambda body, n: (400, {"error": {"message": "bad request"}}, None)
+                                       if "fail" in body["messages"][-1]["content"] else (200, reply('{"a": 1}'), None))
+        self.addCleanup(stop, srv)
+        path = self.tmp.path / "journal.jsonl"
+        with model_adapter.journal(path):
+            self.assertIsNone(model_adapter.complete("plan the work", max_tokens=100, route=hosted_route(url))["error"])
+            self.assertTrue(model_adapter.complete("fail please", max_tokens=100, route=hosted_route(url))["error"])
+        self.assertEqual(len(path.read_text(encoding="utf-8").splitlines()), 1, "the failure is not journaled")
+        model_adapter.forget()  # a new process, as after a crash
+        with model_adapter.journal(path):
+            again = model_adapter.complete("plan the work", max_tokens=100, route=hosted_route(url))
+            self.assertEqual((again["text"], again["journaled"]), ('{"a": 1}', True))
+            self.assertTrue(model_adapter.complete("fail please", max_tokens=100, route=hosted_route(url))["error"])
+            third = model_adapter.complete("plan the work", max_tokens=100, route=hosted_route(url))
+        self.assertFalse(third.get("journaled"), "asked a second time in the run: asked live")
+        self.assertEqual(len(seen), 4, "the journaled answer was not asked again; the failure was")
+        self.assertIsNone(model_adapter.complete("plan the work", max_tokens=100, route=hosted_route(url))
+                          .get("journaled"), "no journal outside the run's calls")
+
+    def test_a_live_run_journals_its_calls_and_a_journaled_answer_costs_nothing_again(self):
+        from test_objective_intelligence import ModelsServer as Server, live_engine, supply_with
+        saved = no_model_env()
+        self.addCleanup(restore_env, saved)
+        srv = Server()
+        self.addCleanup(srv.close)
+        sup = supply_with(self.tmp.path, [("Steady", 0.2)], srv)
+        self.addCleanup(sup.close)
+        e = live_engine(self.tmp.path / "run", sup)
+        self.addCleanup(e.close)
+        rows = (self.tmp.path / "run" / "journal.jsonl").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(rows), len(srv.requests), "every answered call journaled")
+        mid = sup.registry.models()[0]["id"]
+        paid = sup.registry.record_call(mid, role="w", purpose="work", task_kind="code", run_id="r",
+                                        usage={"tokens_in": 1000, "tokens_out": 1000, "latency_s": 1})
+        again = sup.registry.record_call(mid, role="w", purpose="work", task_kind="code", run_id="r",
+                                         usage={"tokens_in": 1000, "tokens_out": 1000, "latency_s": 1,
+                                                "journaled": True})
+        self.assertGreater(paid["usd"], 0)
+        self.assertEqual((again["usd"], again["journaled"]), (0.0, True))
 
     def test_a_whole_objective_replays_without_its_models(self):
         from test_objective_intelligence import ModelsServer as Server, live_engine, supply_with

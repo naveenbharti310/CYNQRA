@@ -451,7 +451,8 @@ class ModelSource:
             # asks again and then replaces it (real run 36990295187 stopped three objectives here, unnamed)
             raise IntelligenceError("model did not return a JSON object", model_id=model_id, usage=out)
         usage = {"tokens_in": out["tokens_in"], "tokens_out": out["tokens_out"], "estimated": out["estimated"],
-                 "label": out.get("model") or model_id, "latency_s": out.get("latency_s", 0), "model_id": model_id}
+                 "label": out.get("model") or model_id, "latency_s": out.get("latency_s", 0), "model_id": model_id,
+                 "journaled": bool(out.get("journaled"))}
         if out.get("speed"):
             usage.update(out["speed"])
         return data, usage

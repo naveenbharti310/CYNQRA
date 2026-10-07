@@ -121,6 +121,7 @@ class Engine:
         # what Cynqra learns across projects (lessons.py): the app keeps it beside every run; a lone run keeps its own
         self.memory = Path(memory) if memory else self.dir / "lessons.json"
         self.dir.mkdir(parents=True, exist_ok=True)
+        model_adapter.forget(self.dir / "journal.jsonl")  # reopened in this process: read the journal as it is now
         self.store = Store(str(self.dir / "cynqra.db"))
         self.paths = {k: self.dir / k for k in ("workspaces", "integration", "main", "releases", "live", "exports",
                                                  "verify")}
@@ -360,11 +361,15 @@ class Engine:
         local = bool(self.registry.get(mid).get("local"))
         owned = self.lock._is_owned()
         state = self.lock._release_save() if owned else None
+        # a live run journals its calls in its own folder: reopened after a crash or a restart, it never pays
+        # twice for an answer it already has (model_adapter.journal)
+        path = self.dir / "journal.jsonl" if self.meta.get("mode") == "live" else None
         try:
-            if local:
-                with _LOCAL_CALLS:
-                    return self.supply.gateway.invoke(mid, request, pinned_version=pin)
-            return self.supply.gateway.invoke(mid, request, pinned_version=pin)
+            with model_adapter.journal(path):
+                if local:
+                    with _LOCAL_CALLS:
+                        return self.supply.gateway.invoke(mid, request, pinned_version=pin)
+                return self.supply.gateway.invoke(mid, request, pinned_version=pin)
         finally:
             if owned:
                 self.lock._acquire_restore(state)

@@ -219,9 +219,11 @@ class IntelligenceRegistry:
                 raise RegistryError(f"no intelligence {model_id!r} in the registry")
             secs = float(usage.get("latency_s") or 0)
             tin, tout = int(usage.get("tokens_in") or 0), int(usage.get("tokens_out") or 0)
+            journaled = bool(usage.get("journaled"))  # an answer the run's journal held: paid for when it was made
             c = {"id": f"c_{self.store.next_id('call'):06d}", "model_id": model_id, "role": role, "purpose": purpose,
                  "task_kind": task_kind, "run_id": run_id, "tokens_in": tin, "tokens_out": tout,
-                 "seconds": round(secs, 1), "usd": self.cost(m, tin, tout, secs), "write_tps": usage.get("write_tps"),
+                 "seconds": round(secs, 1), "usd": 0.0 if journaled else self.cost(m, tin, tout, secs),
+                 "journaled": journaled, "write_tps": usage.get("write_tps"),
                  "error": error[:300], "served_by": m.get("served_by") or "", "model_version": served_version(m),
                  "tenant_id": usage.get("tenant_id") or "local", "at": now()}
             self.store.put("call", c["id"], c)
