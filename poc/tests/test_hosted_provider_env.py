@@ -334,5 +334,58 @@ class HostedEnvironmentTests(unittest.TestCase):
                 adapter.discover({"endpoint": "", "origin": "environment", "models": []}, "not-a-real-secret")
         self.assertIn("set ANTHROPIC_WORKSPACE_ID", str(ctx.exception))
 
+class KeyCheckTests(unittest.TestCase):
+    """A saved key under a name that says nothing (CLEAN_API_KEY): which provider it is for is told from its public
+    prefix, so it is sent to no other service; then only that provider's free model listing is asked for. Nothing is
+    generated and the key is never printed."""
+
+    def test_a_key_is_told_by_its_public_prefix(self):
+        from cynqra.run_hosted_examination import identify
+        self.assertEqual(identify("sk-ant-api03-x"), ("ANTHROPIC_API_KEY", "Anthropic"))
+        self.assertEqual(identify("AIzaSyX"), ("GEMINI_API_KEY", "Google Gemini"))
+        self.assertEqual(identify("gsk_x"), ("GROQ_API_KEY", "Groq"))
+        self.assertEqual(identify("nvapi-x"), ("NVIDIA_API_KEY", "NVIDIA"))
+        self.assertEqual(identify("sk-proj-x"), ("OPENAI_API_KEY", "OpenAI"))
+        self.assertEqual(identify("sk-or-v1-x"), ("", "OpenRouter"))
+        self.assertIsNone(identify("sk-0123"), "a bare sk- is used by several providers")
+        self.assertIsNone(identify("abcd1234"), "Mistral's and Meta's keys have no prefix")
+
+    def test_a_key_with_no_known_connection_is_sent_nowhere_and_never_printed(self):
+        from cynqra import run_hosted_examination as rhe
+        for secret, said in (("sk-or-v1-" + "Zq9" * 10, "OpenRouter"), ("Zq9" * 11, "say which service")):
+            out = []
+            with mock.patch.dict(os.environ, {"CLEAN_API_KEY": secret}), \
+                    mock.patch("cynqra.intelligence_layer.adapters._get_json", side_effect=AssertionError("a call")):
+                self.assertEqual(rhe.key_check("CLEAN_API_KEY", log=out.append), 1)
+            self.assertIn(said, " ".join(out))
+            self.assertNotIn(secret, " ".join(out))
+        out = []
+        with mock.patch.dict(os.environ, {}):
+            os.environ.pop("CLEAN_API_KEY", None)
+            self.assertEqual(rhe.key_check("CLEAN_API_KEY", log=out.append), 1)
+        self.assertIn("is not set", out[0])
+
+    def test_an_accepted_key_lists_its_models_through_its_own_provider_only(self):
+        from cynqra import run_hosted_examination as rhe
+        secret = "gsk_" + "Zq9" * 12
+        seen, out = [], []
+
+        def listing(url, headers, timeout=30.0):
+            seen.append((url, json.dumps(headers)))
+            return {"data": [{"id": "chat-model-a", "object": "model"}, {"id": "chat-model-b", "object": "model"}]}
+
+        with mock.patch.dict(os.environ, {"CLEAN_API_KEY": secret, "GEMINI_API_KEY": "another-key",
+                                          "NVIDIA_API_KEY": "another-key"}), \
+                mock.patch("cynqra.intelligence_layer.adapters._get_json", side_effect=listing):
+            self.assertEqual(rhe.key_check("CLEAN_API_KEY", log=out.append), 0)
+            self.assertNotIn("GEMINI_API_KEY", os.environ, "only this key is used")
+        text = " ".join(out)
+        self.assertIn("a Groq key; the provider accepted it and lists 2 model(s): chat-model-a, chat-model-b", text)
+        with_key = [u for u, h in seen if secret in h]
+        self.assertTrue(with_key and all(u.startswith("https://api.groq.com/") for u in with_key),
+                        "the key goes to its own provider only (a public catalogue is read without it)")
+        self.assertNotIn(secret, text)
+
+
 if __name__ == "__main__":
     unittest.main()

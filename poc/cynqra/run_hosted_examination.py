@@ -80,6 +80,58 @@ def limit_environment(wanted: list[str]) -> list[str]:
     return gone
 
 
+# The public prefixes of providers' keys, most specific first: enough to tell which service a saved key is for
+# without sending it to any other. An empty variable name: recognised, but Cynqra has no connection for it yet.
+KEY_PREFIXES = (("sk-ant-", "ANTHROPIC_API_KEY", "Anthropic"), ("sk-proj-", "OPENAI_API_KEY", "OpenAI"),
+                ("sk-svcacct-", "OPENAI_API_KEY", "OpenAI"), ("sk-or-", "", "OpenRouter"),
+                ("AIza", "GEMINI_API_KEY", "Google Gemini"), ("gsk_", "GROQ_API_KEY", "Groq"),
+                ("nvapi-", "NVIDIA_API_KEY", "NVIDIA"), ("hf_", "", "Hugging Face"), ("xai-", "", "xAI"),
+                ("csk-", "", "Cerebras"))
+
+
+def identify(secret: str) -> tuple[str, str] | None:
+    """(environment variable, provider) for a key, from its public prefix; None when the prefix says nothing
+    (a bare "sk-" is used by several providers; Mistral's and Meta's keys have no prefix)."""
+    return next(((env, label) for prefix, env, label in KEY_PREFIXES if secret.startswith(prefix)), None)
+
+
+def key_check(name: str, log=print) -> int:
+    """Which provider a saved key is for, and whether that provider accepts it: told from the key's public prefix
+    (it is sent to no other service), then the provider's own model listing, which costs nothing. Nothing is
+    generated, and the key is never printed."""
+    import tempfile
+    secret = (os.environ.get(name) or "").strip()
+    if not secret:
+        log(f"{name} is not set for this job")
+        return 1
+    found = identify(secret)
+    if found is None:
+        log(f"{name}: no provider's prefix ({len(secret)} characters, "
+            f"{'letters and digits only' if secret.isalnum() else 'with symbols'}); say which service it is for")
+        return 1
+    env, label = found
+    if not env:
+        log(f"{name}: a {label} key; Cynqra has no {label} connection yet, so it was not sent anywhere")
+        return 1
+    limit_environment([])  # only this key: every other provider's key leaves the process
+    for other in ("OPENAI_API_KEY", "HF_TOKEN", "CYNQRA_OPENAI_URL", "CYNQRA_ANTHROPIC_URL"):
+        os.environ.pop(other, None)
+    os.environ[env] = secret
+    with tempfile.TemporaryDirectory() as d:
+        supply = IntelligenceSupply(Path(d))
+        try:
+            entries = supply.connect_environment()
+            for c in connection_report(supply):
+                log(f"  {c['name']}: {c['status']} ({c['note']})")
+            refs = sorted(str(m.get("ref") or m["id"]) for m in entries)
+            log(f"{name}: a {label} key; the provider "
+                + (f"accepted it and lists {len(refs)} model(s): {', '.join(refs)}" if refs else
+                   "listed no model for it (refused, or nothing chat-capable): see the connection above"))
+            return 0 if refs else 1
+        finally:
+            supply.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--max-models", type=int, default=4)
@@ -96,7 +148,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-minutes", type=float, default=300.0, help="time limit for the work after first bindings")
     ap.add_argument("--live-events", action="store_true", help="print each objective run's events to the log as "
                     "they are saved: the founder's view, live")
+    ap.add_argument("--key-check", default="", help="only say which provider the key in this environment variable "
+                    "is for and whether it accepts it (its free model listing; nothing generated)")
     args = ap.parse_args(argv)
+    if args.key_check:
+        return key_check(args.key_check)
 
     keys = {p: env for p, (env, _) in PROVIDERS.items()}
     wanted = parse_providers(args.provider)
