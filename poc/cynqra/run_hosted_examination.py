@@ -38,6 +38,8 @@ PROVIDERS = {"google": ("GEMINI_API_KEY", "Google Gemini (environment)"),
              "anthropic": ("ANTHROPIC_API_KEY", "Anthropic (environment)"),
              "groq": ("GROQ_API_KEY", "Groq (environment)"),
              "mistral": ("MISTRAL_API_KEY", "Mistral (environment)"),
+             # Claude through Claude Code on this computer: no key, its "key" is the opt-in (ClaudeCodeAdapter)
+             "claude-code": ("CYNQRA_CLAUDE_CODE", "Claude Code (this computer)"),
              "meta": ("META_API_KEY", "Meta (environment)")}
 
 
@@ -52,7 +54,7 @@ def replay_keys(wanted: list[str] | None) -> list[str]:
     for p in wanted or []:
         env = PROVIDERS[p][0]
         if not os.environ.get(env):
-            os.environ[env] = REPLAY_KEY
+            os.environ[env] = "1" if p == "claude-code" else REPLAY_KEY  # Claude Code's opt-in is a "1", not a key
             filled.append(p)
     return filled
 

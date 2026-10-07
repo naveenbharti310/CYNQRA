@@ -111,7 +111,8 @@ class SupplyTests(SupplyBase):
 
     def test_bedrock_is_designed_for_not_implemented(self):
         types = {t["type"]: t for t in self.supply.snapshot()["provider_types"]}
-        self.assertEqual({t for t, d in types.items() if d["implemented"]}, {"openai_compatible", "anthropic", "local"})
+        self.assertEqual({t for t, d in types.items() if d["implemented"]},
+                         {"openai_compatible", "anthropic", "local", "claude_code"})
         self.assertFalse(types["bedrock"]["implemented"])
         with self.assertRaises(SupplyError):
             self.supply.connect({"type": "bedrock", "region": "us-east-1"})

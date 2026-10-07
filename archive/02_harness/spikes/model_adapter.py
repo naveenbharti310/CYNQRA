@@ -686,6 +686,74 @@ def _hf(prompt: str, model: str, max_tokens: int, want_json: bool = False, schem
             "cache_reported": _cache_reported(usage), "estimated": False, "truncated": cut}
 
 
+# Claude through Claude Code on this computer (kind "claude_cli"): `claude -p`, Claude Code's print mode, the documented
+# way to call Claude from a script, signed in as this computer's Claude Code is. Each call is the model alone: no tools,
+# no MCP servers, no session kept, Cynqra's own short system prompt instead of Claude Code's, from an empty folder so no
+# project file is read, and without the variables that would relay its output into the Claude Code session it runs
+# beside. Tokens and cost are the CLI's own report (list prices), so nothing is estimated.
+CLAUDE_CLI_SYSTEM = ("You are one member of a company's AI team, working through Cynqra. Answer the request exactly as "
+                     "it asks, in the format it asks for. You have no tools: write everything in your reply.")
+CLAUDE_CLI_RELAY_ENV = ("CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
+                        "CLAUDE_CODE_POST_FOR_SESSION_INGRESS_V2", "CLAUDE_CODE_TEE_SDK_STDOUT",
+                        "CLAUDE_CODE_REMOTE_SEND_KEEPALIVES", "CLAUDE_CODE_REMOTE_TOOLS_FORWARD",
+                        "CLAUDE_CODE_SYNC_SESSION_REFS", "CLAUDE_CODE_SYNC_SKILLS", "CLAUDE_CODE_DIAGNOSTICS_FILE")
+_CLAUDE_CLI_DIR: list = []
+
+
+def claude_cli() -> str | None:
+    """The claude command on this computer (CYNQRA_CLAUDE_CLI names another), or None when there is none."""
+    import shutil
+    named = (_ENV.get("CYNQRA_CLAUDE_CLI") or "").strip()
+    if named:
+        return named if os.path.isfile(named) or shutil.which(named) else None
+    return shutil.which("claude")
+
+
+def _claude_cli(prompt: str, model: str, max_tokens: int, partial: bool = False, effort: str | None = None) -> dict:
+    import tempfile
+    exe = claude_cli()
+    if not exe:
+        raise RuntimeError("Claude Code is not installed on this computer (no claude command)")
+    if not _CLAUDE_CLI_DIR:
+        _CLAUDE_CLI_DIR.append(tempfile.mkdtemp(prefix="cynqra_claude_"))  # empty: no project file is read
+    key = ("claude_cli", model)
+    cmd = [exe, "-p", "--no-session-persistence", "--tools", "", "--strict-mcp-config",
+           "--system-prompt", CLAUDE_CLI_SYSTEM, "--model", model, "--output-format", "json"]
+    if effort in CALL_EFFORTS and key not in _NO_EFFORT:
+        cmd += ["--effort", effort]
+    env = {k: v for k, v in os.environ.items() if k not in CLAUDE_CLI_RELAY_ENV}
+    env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] = str(max(int(max_tokens), HOSTED_MIN_REPLY))
+    timeout = float(_ENV.get("CYNQRA_TIMEOUT") or TIMEOUT_S)
+    try:
+        proc = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=timeout, env=env,
+                              cwd=_CLAUDE_CLI_DIR[0], check=False)
+    except subprocess.TimeoutExpired as exc:
+        raise _timed_out(timeout) from exc
+    try:
+        data = json.loads(proc.stdout or "")
+    except ValueError:
+        raise RuntimeError(f"Claude Code answered no result (exit {proc.returncode}): "
+                           f"{(proc.stderr or proc.stdout or '').strip()[:300]}") from None
+    if data.get("is_error"):
+        why = str(data.get("result") or data.get("subtype") or "error")
+        if "--effort" in cmd and "effort" in why.lower():
+            _NO_EFFORT.add(key)  # this model takes no effort setting: asked again without it
+            return _claude_cli(prompt, model, max_tokens, partial, None)
+        raise RuntimeError(f"Claude Code: {why[:300]}")
+    u = data.get("usage") or {}
+    cached = int(u.get("cache_read_input_tokens") or 0)
+    tin = int(u.get("input_tokens") or 0) + int(u.get("cache_creation_input_tokens") or 0) + cached
+    tout = int(u.get("output_tokens") or 0)
+    cut = data.get("stop_reason") == "max_tokens"
+    if cut and not partial:
+        raise _Truncated(f"reply truncated at max_tokens={max(int(max_tokens), HOSTED_MIN_REPLY)}",
+                         {"tokens_in": tin, "tokens_out": tout, "tokens_cached": cached, "cache_reported": True})
+    served = next(iter(data.get("modelUsage") or {}), "") or model
+    return {"text": str(data.get("result") or ""), "tokens_in": tin, "tokens_out": tout, "tokens_cached": cached,
+            "cache_reported": True, "estimated": False, "truncated": cut,
+            "usd_reported": round(float(data.get("total_cost_usd") or 0.0), 6), "served_model": served}
+
+
 def _cmd(prompt: str) -> dict:
     cmd = _ENV["CYNQRA_S1_MODEL_CMD"]
     proc = subprocess.run(
@@ -911,6 +979,8 @@ def _complete(prompt: str, max_tokens: int, want_json: bool, schema: dict | None
             out = _hf(prompt, model["label"], max_tokens, want_json, schema, temperature, partial)
         elif model["kind"] == "openai":
             out = _openai(prompt, model["label"], max_tokens)
+        elif model["kind"] == "claude_cli":
+            out = _claude_cli(prompt, model["label"], max_tokens, partial, effort)
         else:
             out = _anthropic(prompt, model["label"], max_tokens)
         out["error"] = None

@@ -379,6 +379,13 @@ class ScriptedSource:
 EFFORTS = ("low", "medium", "high")
 
 
+def _both_reported(a: dict, b: dict) -> float | None:
+    """Two answers' cost as their provider reported it, or None (priced from tokens) unless both carry one."""
+    if a.get("usd_reported") is None or b.get("usd_reported") is None:
+        return None
+    return round(float(a["usd_reported"]) + float(b["usd_reported"]), 6)
+
+
 def work_effort(task: dict) -> str:
     """How long a thinking model may think on a task: medium for building (code, forecasts) and for high-risk work,
     low for the rest. A model's own default is its most, which made paid run 37589136743's calls take three to five
@@ -449,6 +456,7 @@ class ModelSource:
                 out["tokens_in"] += int(first.get("tokens_in") or 0)
                 out["tokens_out"] += int(first.get("tokens_out") or 0)
                 out["tokens_cached"] = int(out.get("tokens_cached") or 0) + int(first.get("tokens_cached") or 0)
+                out["usd_reported"] = _both_reported(out, first)
         model_id = out.get("model_id") or model_id
         if out.get("error"):
             raise IntelligenceError(out["error"], model_id=model_id, usage=out)
@@ -478,6 +486,7 @@ class ModelSource:
             out["tokens_in"] += out2["tokens_in"]
             out["tokens_out"] += out2["tokens_out"]
             out["tokens_cached"] = int(out.get("tokens_cached") or 0) + int(out2.get("tokens_cached") or 0)
+            out["usd_reported"] = _both_reported(out, out2)
         if not isinstance(data, dict):
             # the provider answered and the intelligence's reply could not be read: named, so the Replacement Engine
             # asks again and then replaces it (real run 36990295187 stopped three objectives here, unnamed)
@@ -486,7 +495,8 @@ class ModelSource:
                  "tokens_cached": int(out.get("tokens_cached") or 0), "cache_reported": bool(out.get("cache_reported")),
                  "estimated": out["estimated"],
                  "label": out.get("model") or model_id, "latency_s": out.get("latency_s", 0), "model_id": model_id,
-                 "journaled": bool(out.get("journaled")), "effort": used, "call_uid": uid}
+                 "journaled": bool(out.get("journaled")), "effort": used, "call_uid": uid,
+                 "usd_reported": out.get("usd_reported")}
         if out.get("speed"):
             usage.update(out["speed"])
         return data, usage

@@ -40,6 +40,7 @@ LIST_PRICES = {
     "claude-haiku-4-5": (1.00, 5.00),
     "claude-opus-5": (5.00, 25.00),
     "claude-opus-5-5": (4.00, 20.00),
+    "claude-sonnet-5-5": (2.00, 10.00),
     "claude-opus-4-8": (5.00, 25.00),
     "claude-fable-5-1": (10.00, 50.00),
     "gpt-4o-mini": (0.15, 0.60),
@@ -657,6 +658,41 @@ class LocalInferenceAdapter(ProviderAdapter):
         return out
 
 
+class ClaudeCodeAdapter(ProviderAdapter):
+    """Claude, reached through Claude Code on this computer (`claude -p`, model_adapter._claude_cli), signed in as this
+    computer's Claude Code is: no key passes through Cynqra. Its usage counts against that account. The models are the
+    current Claude line Claude Code serves; each is qualified like any other before it takes part, and what one costs
+    is the CLI's own report at list prices. It is connected only when asked for (CYNQRA_CLAUDE_CODE=1)."""
+    type = "claude_code"
+    title = "Claude Code (this computer)"
+    auth_methods = ("none",)
+    MODELS = ("claude-haiku-4-5", "claude-sonnet-5-5", "claude-opus-5-5")
+
+    def discover(self, conn: dict, secret: str | None) -> list[dict]:
+        out = []
+        for ref in _allow(conn) or list(self.MODELS):
+            pin, pout = _price(conn, ref)
+            out.append({"ref": ref, "name": ref, "provider": "Anthropic", "runtime": "claude_code", "local": False,
+                        "price_in": pin, "price_out": pout, "price_source": price_source(conn, ref),
+                        "modalities": ["text"], "json_schema": False, "tools": False})
+        return out
+
+    def reachable(self, conn: dict, entry: dict) -> tuple[bool, str]:
+        from ..model_adapter import claude_cli
+        return (True, "available") if claude_cli() else (False, "Claude Code is not installed on this computer")
+
+    def route(self, conn: dict, secret: str | None, entry: dict) -> dict:
+        return _hosted({"kind": "claude_cli", "label": entry["ref"], "local": False,
+                        **({"CYNQRA_CLAUDE_CLI": conn["endpoint"]} if conn.get("endpoint") else {})}, conn)
+
+    def environment_specs(self, primary: dict | None) -> list[dict]:
+        from ..model_adapter import claude_cli
+        if os.environ.get("CYNQRA_CLAUDE_CODE") != "1" or not claude_cli():
+            return []
+        return [{"type": self.type, "name": "Claude Code (this computer)", "endpoint": "",
+                 "auth": {"method": "none"}, "models": [], **(_env_price())}]
+
+
 class DemoScriptAdapter(ProviderAdapter):
     """A demo scenario's prepared script. It stands in a demo run's own registry so the demo is staffed, bound and
     metered like any run, but it is not a provider: nobody connects it, and the Gateway never calls it (the
@@ -700,7 +736,7 @@ class Adapters(dict):
 
 def make_adapters(runtime=None) -> Adapters:
     return Adapters({a.type: a for a in (OpenAICompatibleAdapter(), AnthropicAdapter(), LocalInferenceAdapter(runtime),
-                                         DemoScriptAdapter())})
+                                         ClaudeCodeAdapter(), DemoScriptAdapter())})
 
 
 def adapter_types() -> list[dict]:

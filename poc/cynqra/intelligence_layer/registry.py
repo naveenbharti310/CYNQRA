@@ -242,7 +242,11 @@ class IntelligenceRegistry:
                 return self.store.get("call", seen["id"])
             c = {"id": f"c_{self.store.next_id('call'):06d}", "model_id": model_id, "role": role, "purpose": purpose,
                  "task_kind": task_kind, "run_id": run_id, "tokens_in": tin, "tokens_out": tout, "tokens_cached": cached,
-                 "seconds": round(secs, 1), "usd": self.cost(m, tin, tout, secs, cached),
+                 "seconds": round(secs, 1),
+                 # what the call cost: the provider's own report where it gives one (Claude Code's list-price cost),
+                 # else the model's prices applied to the tokens
+                 "usd": (round(float(usage["usd_reported"]), 6) if usage.get("usd_reported") is not None
+                         else self.cost(m, tin, tout, secs, cached)),
                  "journaled": journaled, "effort": usage.get("effort"), "write_tps": usage.get("write_tps"),
                  "error": error[:300], "served_by": m.get("served_by") or "", "model_version": served_version(m),
                  "tenant_id": usage.get("tenant_id") or "local", "at": now()}
