@@ -229,9 +229,15 @@ def main(argv: list[str] | None = None) -> int:
                     "is for and whether it accepts it (its free model listing; nothing generated)")
     ap.add_argument("--key-site", default="", help="with --key-check: the service a key with no known prefix "
                     "comes from (its web address)")
+    ap.add_argument("--record", default="", help="keep every call's request and answer in this file (no keys)")
+    ap.add_argument("--replay", default="", help="answer every call from this recording instead of the providers: "
+                    "the whole run again, at no cost")
     args = ap.parse_args(argv)
     if args.key_check:
         return key_check(args.key_check, site=args.key_site)
+    if args.record or args.replay:
+        os.environ["CYNQRA_CASSETTE"] = os.path.abspath(args.replay or args.record)
+        os.environ["CYNQRA_CASSETTE_MODE"] = "replay" if args.replay else "record"
 
     keys = {p: env for p, (env, _) in PROVIDERS.items()}
     wanted = parse_providers(args.provider)
@@ -299,6 +305,10 @@ def main(argv: list[str] | None = None) -> int:
         if len(runs) > 1:
             manifest["comparison"] = comparison(runs)
             print("\nAcross objectives:\n" + json.dumps(manifest["comparison"], indent=2, default=str))
+        if os.environ.get("CYNQRA_CASSETTE_MODE") == "replay":
+            from .model_adapter import cassette_stats
+            manifest["replay"] = cassette_stats()
+            print("\nReplay: " + json.dumps(manifest["replay"]))
         (root / "manifest.json").write_text(json.dumps(manifest, indent=2, default=str), encoding="utf-8")
         passed = sum(bool(r.get("passed")) for r in manifest["results"])
         print(json.dumps({"models_examined": len(selected), "passed": passed,

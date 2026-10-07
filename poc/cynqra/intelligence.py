@@ -21,7 +21,7 @@ import os
 import re
 from pathlib import Path
 
-from . import roles
+from . import model_adapter, roles
 
 HERE = Path(__file__).resolve().parent
 SCENARIOS = HERE.parent / "scenarios"
@@ -361,6 +361,16 @@ class ScriptedSource:
         return json.loads(json.dumps(preset)), self._usage(worker)
 
 
+def work_effort(task: dict) -> str:
+    """How long a thinking model may think on a task: high for high-risk work, medium for building (code, forecasts)
+    and medium-risk work, low for the rest. Its default is its most, which made paid run 37589136743's calls take
+    three to five minutes and cut replies off."""
+    tier = str(task.get("tier") or "").upper()
+    if tier == "HIGH":
+        return "high"
+    return "medium" if task.get("kind") in roles.BUILD_TYPES or tier == "MEDIUM" else "low"
+
+
 class ModelSource:
     """Real intelligence: each call goes through the Intelligence Gateway to what the worker is bound to now."""
     kind = "model"
@@ -376,8 +386,10 @@ class ModelSource:
         self.access = access
 
     def _call(self, prompt: str, max_tokens: int = 4000, files: bool = False, schema: dict | None = None,
-              worker: str = "system", needs_from: str = "") -> tuple[dict, dict]:
-        """One model call. files=True: a JSON header followed by file blocks, so no constrained JSON mode."""
+              worker: str = "system", needs_from: str = "", effort: str = "medium") -> tuple[dict, dict]:
+        """One model call. files=True: a JSON header followed by file blocks, so no constrained JSON mode. effort:
+        how long a thinking model may think (low, medium, high), from the work's risk; a provider that does not
+        take it is asked without it."""
 
         def parse(text: str):
             data = _parse_json(text)
@@ -394,9 +406,20 @@ class ModelSource:
         model_id = self.access.intelligence_for(worker)
         key = hashlib.sha256(f"{model_id}|{prompt}".encode("utf-8")).hexdigest()
         repeats = self.answered.get(key, 0)
-        out = self.access.invoke(worker, {"prompt": prompt, "max_tokens": max_tokens, "want_json": not files,
-                                          "schema": schema, "partial": files,
-                                          "temperature": round(min(0.3 * repeats, 0.9), 1) if repeats else None})
+        request = {"prompt": prompt, "max_tokens": max_tokens, "want_json": not files, "schema": schema,
+                   "partial": files, "temperature": round(min(0.3 * repeats, 0.9), 1) if repeats else None,
+                   "effort": effort}
+        out = self.access.invoke(worker, request)
+        if out.get("error") and not files and "reply truncated" in str(out["error"]):
+            # A structured answer cut off at its limit (paid run 37589136743: the SaaS workforce, so the objective
+            # failed) is asked once more with less thinking and twice the room, through the same budget reservation;
+            # what the cut-off reply cost is kept
+            first = out
+            out = self.access.invoke(worker, {**request, "effort": "low",
+                                              "max_tokens": max(2 * max_tokens, 2 * model_adapter.HOSTED_MIN_REPLY)})
+            if not out.get("error"):
+                out["tokens_in"] += int(first.get("tokens_in") or 0)
+                out["tokens_out"] += int(first.get("tokens_out") or 0)
         model_id = out.get("model_id") or model_id
         if out.get("error"):
             raise IntelligenceError(out["error"], model_id=model_id, usage=out)
@@ -455,7 +478,8 @@ class ModelSource:
 
     def structure_objective(self, messy: str) -> tuple[dict, dict]:
         """Stage 0: the founder's words as the seven objective fields."""
-        data, usage = self._call(self.objective_prompt + messy + "\n", max_tokens=1500, schema=SCHEMAS["objective"])
+        data, usage = self._call(self.objective_prompt + messy + "\n", max_tokens=1500, schema=SCHEMAS["objective"],
+                                 effort="low")
         empty = [k for k in OBJECTIVE_KEYS if not str(data.get(k) or "").strip()]
         if not empty:
             return data, usage
@@ -640,7 +664,7 @@ class ModelSource:
                   "List only the artifacts the worker needs. Put every closed list or rule they must not invent "
                   "into acceptance_check.\n"
                   'Return JSON: {"artifacts": [ids], "context_ref": "...", "acceptance_check": "..."}')
-        return self._call(prompt, max_tokens=1500, schema=SCHEMAS["handoff"], worker=worker)
+        return self._call(prompt, max_tokens=1500, schema=SCHEMAS["handoff"], worker=worker, effort="low")
 
     def work(self, task: dict, worker: str, objective: dict, rules: list[str], handoff: dict,
              inbox: dict[str, str], feedback: str = "", answers: list[dict] | None = None,
@@ -683,7 +707,7 @@ class ModelSource:
                      + files_layout(who[0] if who else "") if delivers_files else f"Return one JSON object: {shape}"))
         return self._call(prompt, max_tokens=8000 if kind in roles.BUILD_TYPES else 3000, files=delivers_files,
                           schema=None if delivers_files else SCHEMAS["proposal"], worker=worker,
-                          needs_from=who[0] if who else "")
+                          needs_from=who[0] if who else "", effort=work_effort(task))
 
     def review(self, task: dict, worker: str, objective: dict, rules: list[str], owner: str, work: dict,
                persona: str = "", **_) -> tuple[dict, dict]:

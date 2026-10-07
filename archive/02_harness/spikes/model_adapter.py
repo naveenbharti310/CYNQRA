@@ -118,6 +118,7 @@ from __future__ import annotations
 import http.client
 import json
 import os
+import random
 import re
 import subprocess
 import threading
@@ -152,9 +153,33 @@ RETRY_STATUS = {408, 409, 425, 429, 500, 502, 503, 504, 529}  # the provider's s
 RETRY_WAITS_S = (2.0, 6.0)
 # a hosted free tier limits calls per minute: waits that outlast a one-minute window
 HOSTED_RETRY_WAITS_S = (5.0, 15.0, 30.0, 60.0)
+# An overloaded model (HTTP 503 or 529, "high demand") is not out of quota but out of capacity for a moment: paid run
+# 37589136743 met Google's "This model is currently experiencing high demand" again and again. It is asked again
+# soon, each wait doubling, spread at random so the team's workers do not all come back at the same instant
+OVERLOAD_STATUS = {503, 529}
+OVERLOAD_WAITS_S = (2.0, 4.0, 8.0, 16.0, 32.0)
+_OVERLOAD = re.compile(r"high demand|overloaded|try again later|\bUNAVAILABLE\b", re.I)
 HOSTED_MIN_REPLY = 16000
 # what each hosted provider accepted as response_format, by (endpoint, model): "json_schema", "json_object" or "none"
 _JSON_MODE: dict[tuple[str, str], str] = {}
+# (endpoint, model) pairs whose provider refused reasoning_effort: asked without it from then on
+_NO_EFFORT: set[tuple[str, str]] = set()
+_EFFORT_REFUSED = re.compile(r"reasoning[_ ]effort|reasoning", re.I)
+CALL_EFFORTS = ("low", "medium", "high")
+
+
+def reply_limit(max_tokens: int, local: bool) -> int:
+    """The most a call may write, reasoning included: what was asked for, or, from a hosted provider, at least
+    HOSTED_MIN_REPLY (a thinking model spends part of it thinking). What a budget reservation must cover."""
+    return int(max_tokens) if local else max(int(max_tokens), HOSTED_MIN_REPLY)
+
+
+class _Truncated(RuntimeError):
+    """A reply cut off at its output limit: the provider bills the tokens all the same, so they are kept."""
+
+    def __init__(self, msg: str, usage: dict):
+        super().__init__(msg)
+        self.usage = usage
 _JSON_MODES = ("json_schema", "json_object", "none")
 EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 
@@ -190,9 +215,10 @@ def resolve() -> dict | None:
 
 
 class _Retryable(RuntimeError):
-    def __init__(self, msg: str, wait: float | None = None):
+    def __init__(self, msg: str, wait: float | None = None, overload: bool = False):
         super().__init__(msg)
         self.wait = wait
+        self.overload = overload
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -228,7 +254,8 @@ def _post_once(url: str, body: bytes, headers: dict, timeout: float = TIMEOUT_S)
                 wait = min(60.0, float(exc.headers.get("retry-after")))
             except (TypeError, ValueError):
                 pass
-            raise _Retryable(msg, wait) from exc
+            raise _Retryable(msg, wait, overload=exc.code in OVERLOAD_STATUS or bool(_OVERLOAD.search(detail))) \
+                from exc
         raise RuntimeError(msg) from exc
     except TimeoutError as exc:
         raise _timed_out(timeout) from exc
@@ -246,17 +273,32 @@ def _timed_out(timeout: float) -> RuntimeError:
     return RuntimeError(f"network error: the provider timed out after {timeout:.0f} s")
 
 
+def _tokens_out(usage: dict) -> int:
+    """Output tokens as the provider bills them: the reply, plus hidden reasoning a provider reports only in its total
+    (Google's OpenAI-compatible route counts thoughts in total_tokens, not in completion_tokens, and bills them as
+    output: paid run 37589136743 measured 170 tokens in 186 s). A provider whose completion_tokens already includes
+    its reasoning (OpenAI) leaves nothing over."""
+    out = int(usage.get("completion_tokens") or 0)
+    total = int(usage.get("total_tokens") or 0)
+    return max(out, total - int(usage.get("prompt_tokens") or 0)) if total else out
+
+
 def _post(url: str, payload: dict, headers: dict, timeout: float = TIMEOUT_S, retry: bool = True,
           waits: tuple = RETRY_WAITS_S) -> dict:
+    """One call, retried on the provider's side. A hosted model that is overloaded is retried on the short, spread
+    schedule (OVERLOAD_WAITS_S); a limit or a dropped connection on the given waits; the provider's Retry-After wins."""
     body = json.dumps(payload).encode("utf-8")
-    for wait in (tuple(waits) if retry else ()) + (None,):
+    attempt = 0
+    while True:
         try:
             return _post_once(url, body, headers, timeout)
         except _Retryable as exc:
-            if wait is None:
+            schedule = OVERLOAD_WAITS_S if exc.overload and waits is HOSTED_RETRY_WAITS_S else tuple(waits)
+            if not retry or attempt >= len(schedule):
                 raise RuntimeError(str(exc)) from exc
-            time.sleep(exc.wait if exc.wait is not None else wait)
-    raise RuntimeError("unreachable")
+            spread = random.uniform(0.75, 1.25) if schedule is OVERLOAD_WAITS_S else 1.0
+            time.sleep(exc.wait if exc.wait is not None else schedule[attempt] * spread)
+            attempt += 1
 
 
 def _openai(prompt: str, model: str, max_tokens: int = 1500) -> dict:
@@ -279,7 +321,7 @@ def _openai(prompt: str, model: str, max_tokens: int = 1500) -> dict:
     return {
         "text": (data["choices"][0]["message"]["content"] or ""),
         "tokens_in": int(usage.get("prompt_tokens") or 0),
-        "tokens_out": int(usage.get("completion_tokens") or 0),
+        "tokens_out": _tokens_out(usage),
         "estimated": False,
     }
 
@@ -389,7 +431,7 @@ def _ollama(prompt: str, model: str, max_tokens: int, want_json: bool, schema: d
 
 
 def _local_openai(prompt: str, model: str, max_tokens: int, want_json: bool = False, schema: dict | None = None,
-                  temperature: float | None = None, partial: bool = False) -> dict:
+                  temperature: float | None = None, partial: bool = False, effort: str | None = None) -> dict:
     """LM Studio or llama-server. Their context size is set when the server loads the model (-c 32768)."""
     base = _ENV["CYNQRA_LOCAL_BASE_URL"].rstrip("/")
     hosted = _ENV.get("local") is False  # a hosted provider reached as an OpenAI-compatible server, not a laptop's
@@ -412,6 +454,10 @@ def _local_openai(prompt: str, model: str, max_tokens: int, want_json: bool = Fa
     if hosted and (_ENV.get("CYNQRA_EFFORT") or "").lower() in ("low", "medium", "high"):
         # how long a thinking model thinks before answering (Kimi K3 defaults to its maximum, which is slow)
         payload["reasoning_effort"] = _ENV["CYNQRA_EFFORT"].lower()
+    elif hosted and effort in CALL_EFFORTS and (base, model) not in _NO_EFFORT:
+        # how long to think, from the work's risk (ModelSource): a thinking model's default is its most, which is
+        # slow and spends the reply's room on reasoning (paid run 37589136743: cut-off replies, 3-5 minute calls)
+        payload["reasoning_effort"] = effort
     if temperature is not None or _ENV.get("CYNQRA_TEMPERATURE"):
         payload["temperature"] = temperature if temperature is not None else float(_ENV["CYNQRA_TEMPERATURE"])
     if _ENV.get("CYNQRA_SEED"):
@@ -425,6 +471,11 @@ def _local_openai(prompt: str, model: str, max_tokens: int, want_json: bool = Fa
                              waits=HOSTED_RETRY_WAITS_S)
                 break
             except RuntimeError as exc:
+                if "reasoning_effort" in payload and re.search(r"HTTP (400|422)\b", str(exc)) \
+                        and _EFFORT_REFUSED.search(str(exc)):
+                    _NO_EFFORT.add(key)  # this provider does not take it: asked without it, now and from now on
+                    payload.pop("reasoning_effort")
+                    continue
                 if mode == "none" or not _format_refused(str(exc)):
                     raise
                 mode = _JSON_MODES[_JSON_MODES.index(mode) + 1]  # the provider refused this format: a plainer one
@@ -443,11 +494,12 @@ def _local_openai(prompt: str, model: str, max_tokens: int, want_json: bool = Fa
         raise
     choice = data["choices"][0]
     cut = choice.get("finish_reason") == "length"
-    if cut and not partial:
-        raise RuntimeError("reply truncated at max_tokens")
     usage = data.get("usage") or {}
+    if cut and not partial:
+        raise _Truncated("reply truncated at max_tokens", {"tokens_in": int(usage.get("prompt_tokens") or 0),
+                                                            "tokens_out": _tokens_out(usage)})
     out = {"text": choice["message"].get("content") or "", "tokens_in": int(usage.get("prompt_tokens") or 0),
-           "tokens_out": int(usage.get("completion_tokens") or 0), "estimated": False, "truncated": cut}
+           "tokens_out": _tokens_out(usage), "estimated": False, "truncated": cut}
     t = data.get("timings") or {}  # llama-server's own measurement of this call
     if t.get("predicted_per_second"):
         out["speed"] = {"read_tps": round(float(t.get("prompt_per_second") or 0), 1),
@@ -510,7 +562,7 @@ def _hf(prompt: str, model: str, max_tokens: int, want_json: bool = False, schem
     if not text.strip() and not cut:
         raise RuntimeError("the model returned no answer")
     return {"text": text, "tokens_in": int(usage.get("prompt_tokens") or 0),
-            "tokens_out": int(usage.get("completion_tokens") or 0), "estimated": False, "truncated": cut}
+            "tokens_out": _tokens_out(usage), "estimated": False, "truncated": cut}
 
 
 def _cmd(prompt: str) -> dict:
@@ -531,10 +583,118 @@ def _cmd(prompt: str) -> dict:
     }
 
 
+# --- record and replay ------------------------------------------------------------------------------------------
+# CYNQRA_CASSETTE names a file; CYNQRA_CASSETTE_MODE is "record" (every call's request and answer are kept there:
+# the model, the prompt, the reply, its tokens and seconds; never a key, which travels only in headers, and anything
+# shaped like one is scrubbed) or "replay" (calls are answered from the file, so a whole run can be tested again at
+# no cost; a call the file does not hold fails, and is counted). Ids and times that differ between runs are
+# normalized, so the same work finds the same answer. CYNQRA_REPLAY_SPEED replays at that fraction of the recorded
+# time (0, the default: at once).
+_CASSETTE_LOCK = threading.Lock()
+_CASSETTE: dict = {"path": None, "calls": {}, "used": {}, "hits": 0, "misses": 0}
+_VOLATILE = (
+    (re.compile(r"\b(co|obj|org|plan|dec|sd|rep|ce|wp|v|cal)_[0-9a-f]{6,}\b"), r"\1_*"),
+    (re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?([+-]\d{2}:?\d{2}|Z)?"), "<time>"),
+)
+
+
+def _cassette_mode() -> str:
+    return (os.environ.get("CYNQRA_CASSETTE_MODE") or "").strip().lower() if os.environ.get("CYNQRA_CASSETTE") else ""
+
+
+_PEOPLE: list = []
+
+
+def _normalized(text: str) -> str:
+    """The call as it would be in any run: the ids, times and people's names a run draws for itself (people.py
+    draws a team's names per project) made the same, for matching only; the prompt sent is never changed."""
+    if not _PEOPLE:
+        from .people import FIRST, LAST
+        _PEOPLE.append(re.compile(r"\b(?:" + "|".join(map(re.escape, FIRST)) + r")(?:\s+(?:"
+                                  + "|".join(map(re.escape, LAST)) + r"))?\b"))
+    for pattern, repl in _VOLATILE:
+        text = pattern.sub(repl, text)
+    return _PEOPLE[0].sub("<person>", text)
+
+
+def cassette_key(kind: str, request: dict) -> str:
+    import hashlib
+    body = json.dumps({"kind": kind, **request}, sort_keys=True, default=str)
+    return hashlib.sha256(_normalized(body).encode("utf-8")).hexdigest()
+
+
+def _cassette() -> dict:
+    """The recorded calls, by key, loaded once per file."""
+    path = os.environ["CYNQRA_CASSETTE"]
+    if _CASSETTE["path"] != path:
+        calls: dict[str, list] = {}
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        row = json.loads(line)
+                        calls.setdefault(row["key"], []).append(row)
+        _CASSETTE.update(path=path, calls=calls, used={}, hits=0, misses=0)
+    return _CASSETTE
+
+
+def cassette_stats() -> dict:
+    return {"hits": _CASSETTE["hits"], "misses": _CASSETTE["misses"], "path": _CASSETTE["path"]}
+
+
+def cassette_record(key: str, kind: str, label: str, answer) -> None:
+    from .db import scrub
+    row = {"key": key, "kind": kind, "label": label, "answer": answer}
+    with _CASSETTE_LOCK, open(os.environ["CYNQRA_CASSETTE"], "a", encoding="utf-8") as f:
+        f.write(scrub(json.dumps(row, default=str)) + "\n")
+
+
+def cassette_replay(key: str):
+    """The recorded answer for a call, in the order they were recorded (a call asked twice gets the second answer
+    the second time, then keeps the last); None when the file holds none."""
+    with _CASSETTE_LOCK:
+        c = _cassette()
+        rows = c["calls"].get(key) or []
+        if not rows:
+            c["misses"] += 1
+            return None
+        i = c["used"].get(key, 0)
+        c["used"][key] = i + 1
+        c["hits"] += 1
+        return rows[min(i, len(rows) - 1)]["answer"]
+
+
+def _replayed_or_recorded(call, prompt: str, max_tokens: int, want_json: bool, schema: dict | None,
+                          temperature: float | None, partial: bool, effort: str | None) -> dict:
+    mode = _cassette_mode()
+    if mode not in ("record", "replay"):
+        return call()
+    model = resolve() or {}
+    label = str(model.get("label") or "")
+    key = cassette_key("model_call", {"model": label, "prompt": prompt, "max_tokens": max_tokens,
+                                      "want_json": want_json, "schema": schema, "temperature": temperature,
+                                      "partial": partial, "effort": effort})
+    if mode == "replay":
+        answer = cassette_replay(key)
+        if answer is None:
+            return {"text": "", "tokens_in": 0, "tokens_out": 0, "estimated": True, "latency_s": 0.0, "model": label,
+                    "kind": model.get("kind"), "error": "RuntimeError: replay: the recording holds no answer for "
+                                                        "this call (the prompt changed since it was recorded)"}
+        speed = float(os.environ.get("CYNQRA_REPLAY_SPEED") or 0)
+        if speed > 0:
+            time.sleep(float(answer.get("latency_s") or 0) * speed)
+        return dict(answer)
+    out = call()
+    cassette_record(key, "model_call", label, out)
+    return out
+
+
 def complete(prompt: str, max_tokens: int = 1500, want_json: bool = False, schema: dict | None = None,
-             temperature: float | None = None, partial: bool = False, route: dict | None = None) -> dict:
+             temperature: float | None = None, partial: bool = False, route: dict | None = None,
+             effort: str | None = None) -> dict:
+    args = (prompt, max_tokens, want_json, schema, temperature, partial, effort)
     if route is None:
-        return _complete(prompt, max_tokens, want_json, schema, temperature, partial)
+        return _replayed_or_recorded(lambda: _complete(*args), *args)
     before = getattr(_LOCAL, "route", None)
     _LOCAL.route = route
     try:
@@ -542,13 +702,13 @@ def complete(prompt: str, max_tokens: int = 1500, want_json: bool = False, schem
             return {"text": "", "tokens_in": 0, "tokens_out": 0, "estimated": False, "latency_s": 0.0,
                     "model": route.get("label"), "kind": route.get("kind"),
                     "error": f"RuntimeError: {route.get('label')} is offline (a fault set on it in the model registry)"}
-        return _complete(prompt, max_tokens, want_json, schema, temperature, partial)
+        return _replayed_or_recorded(lambda: _complete(*args), *args)
     finally:
         _LOCAL.route = before
 
 
 def _complete(prompt: str, max_tokens: int, want_json: bool, schema: dict | None, temperature: float | None,
-              partial: bool) -> dict:
+              partial: bool, effort: str | None = None) -> dict:
     """Returns text, tokens_in, tokens_out, estimated, latency_s, error.
 
     max_tokens defaults to 1500, the S1 setting. S2 passes a larger value
@@ -568,7 +728,7 @@ def _complete(prompt: str, max_tokens: int, want_json: bool, schema: dict | None
         elif model["kind"] == "ollama":
             out = _ollama(prompt, model["label"], max_tokens, want_json, schema, temperature, partial)
         elif model["kind"] == "local":
-            out = _local_openai(prompt, model["label"], max_tokens, want_json, schema, temperature, partial)
+            out = _local_openai(prompt, model["label"], max_tokens, want_json, schema, temperature, partial, effort)
         elif model["kind"] == "hf":
             out = _hf(prompt, model["label"], max_tokens, want_json, schema, temperature, partial)
         elif model["kind"] == "openai":
@@ -586,12 +746,13 @@ def _complete(prompt: str, max_tokens: int, want_json: bool, schema: dict | None
         TypeError,
         RuntimeError,
     ) as exc:
+        billed = getattr(exc, "usage", None) or {}  # a cut-off reply's tokens are billed: kept, not zeroed
         out = {
             "text": "",
-            "tokens_in": 0,
-            "tokens_out": 0,
-            "estimated": True,
-            "error": f"{type(exc).__name__}: {exc}",
+            "tokens_in": int(billed.get("tokens_in") or 0),
+            "tokens_out": int(billed.get("tokens_out") or 0),
+            "estimated": not billed,
+            "error": f"{'RuntimeError' if isinstance(exc, _Truncated) else type(exc).__name__}: {exc}",
         }
     out["latency_s"] = round(time.time() - start, 3)
     out["model"] = model["label"]

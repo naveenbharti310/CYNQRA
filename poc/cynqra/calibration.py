@@ -197,7 +197,11 @@ def plan(run) -> dict:
             last["candidates"].remove(drop)
             last["upper_bound_usd"].pop(drop)
         else:
-            last["skipped"] = "budget: its trials do not fit the calibration budget"
+            # said with its figures, so a skip that comes from a price (paid run 37589136743: hosted models at the
+            # worst-case price skipped calibration in both objectives) can be seen for what it is
+            need = sum(last["upper_bound_usd"].values())
+            last["skipped"] = (f"budget: its trials do not fit the calibration budget (${need:.2f} at most for "
+                               f"{len(last['candidates'])} candidates, ${limit:.2f} for all calibration)")
         planned = sum(sum(i.get("upper_bound_usd", {}).values()) for i in items if not i.get("skipped"))
     base.update(items=items, planned_upper_bound_usd=round(planned, 6), author_intelligence=author,
                 coverage=coverage(run, pol, items))

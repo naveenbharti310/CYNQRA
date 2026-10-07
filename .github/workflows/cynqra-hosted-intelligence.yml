@@ -50,9 +50,14 @@ on:
         type: choice
         options: [ANTHROPIC_API_KEY, Claude_key]
         default: ANTHROPIC_API_KEY
+      replay_run:
+        description: "Replay an earlier run of this workflow from its recording (its run id), with the same inputs: no provider is called and nothing is spent"
+        required: false
+        default: ""
 
 permissions:
   contents: read
+  actions: read  # to fetch an earlier run's recording for a replay
 
 jobs:
   # objective "key-check" (or "key-check <the service's web address>" for a key with no known prefix): only say which
@@ -121,6 +126,14 @@ jobs:
             exit 1
           fi
           echo "providers with a key:$found"
+      - name: Fetch the recording to replay
+        if: ${{ inputs.replay_run != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: cynqra-hosted-intelligence
+          run-id: ${{ inputs.replay_run }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: ${{ runner.temp }}/replay
       - name: Discover and examine candidates
         # below the job's 360, so the audit and the evidence are kept even when real providers make the run long
         # (run 37044180144 ended 9 minutes before the job limit)
@@ -128,9 +141,16 @@ jobs:
         env:
           OBJECTIVE: ${{ inputs.objective }}
           CYNQRA_PRICE_PER_M: ${{ inputs.price_per_m }}
+          REPLAY_RUN: ${{ inputs.replay_run }}
         run: |
           extra=""
           if [ "${{ inputs.to_delivery }}" = "true" ]; then extra="--to-delivery"; fi
+          # every run keeps its calls (never a key) so it can be replayed at no cost; a replay answers from one
+          if [ -n "$REPLAY_RUN" ]; then
+            extra="$extra --replay $RUNNER_TEMP/replay/cynqra-hosted-examination/cassette.jsonl"
+          else
+            extra="$extra --record $RUNNER_TEMP/cynqra-hosted-examination/cassette.jsonl"
+          fi
           python3 poc/run_hosted_examination.py \
             --provider "${{ inputs.provider }}" \
             --max-models "${{ inputs.max_models }}" \

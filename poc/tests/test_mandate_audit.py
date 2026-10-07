@@ -8,6 +8,7 @@ from __future__ import annotations
 import http.client
 import json
 import io
+import os
 import unittest
 import urllib.error
 from unittest import mock
@@ -564,7 +565,7 @@ class HostedTimeoutTests(unittest.TestCase):
         srv = ThreadingHTTPServer(("127.0.0.1", 0), Slow)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         self.addCleanup(srv.server_close)
-        self.addCleanup(srv.shutdown)
+        self.addCleanup(stop, srv)
         started = time.time()
         with self.assertRaises(RuntimeError) as ctx:
             model_adapter._post(f"http://127.0.0.1:{srv.server_address[1]}/v1/chat/completions", {}, {},
@@ -573,6 +574,445 @@ class HostedTimeoutTests(unittest.TestCase):
         self.assertLess(time.time() - started, 4.0, "no retry waits")
         self.assertEqual(diagnose(str(ctx.exception)), "timeout")
         self.assertIn(call_failure(str(ctx.exception))["kind"], ("provider", "network"))
+
+
+class PaidRunPricingTests(unittest.TestCase):
+    """Paid run 37589136743: Gemini was priced at the worst case ($10 in, $50 out per million tokens) against Google's
+    $0.50/$3 and $2/$12, so an objective stopped at its cap and calibration had no budget. A model Cynqra's list does
+    not price takes the public catalogue's list price; only a model neither knows stays at the worst case, labelled."""
+
+    def setUp(self):
+        from cynqra.intelligence_layer import IntelligenceSupply
+        self.saved = no_model_env()
+        self.tmp = TempDir()
+        self.srv = ModelsServer()
+        self.sup = IntelligenceSupply(self.tmp.path / "control")
+
+    def tearDown(self):
+        self.sup.close()
+        self.srv.close()
+        self.tmp.cleanup()
+        restore_env(self.saved)
+
+    def test_an_unlisted_model_takes_the_catalogues_list_price_and_an_unknown_one_says_so(self):
+        from cynqra.intelligence_layer.adapters import WORST_PRICE
+        catalogue = {"model-x": {"id": "vendor/model-x", "pricing": {"prompt": "0.0000004", "completion": "0.0000016"}},
+                     "model-y": {"id": "vendor/model-y", "pricing": {"prompt": "0", "completion": "0"}}}
+        with mock.patch("cynqra.intelligence_layer.normalize.catalogue", return_value=catalogue):
+            self.sup.connect({"type": "openai_compatible", "name": "Provider", "endpoint": self.srv.url,
+                              "auth": {"method": "none"}, "models": ["model-x", "model-y", "model-z"]})
+        by_ref = {m["ref"]: m for m in self.sup.registry.models()}
+        self.assertEqual((by_ref["model-x"]["price_in"], by_ref["model-x"]["price_out"]), (0.4, 1.6))
+        self.assertEqual(by_ref["model-x"]["price_source"], "catalogue")
+        self.assertEqual((by_ref["model-y"]["price_in"], by_ref["model-y"]["price_out"]), WORST_PRICE,
+                         "a free variant's price of 0 is not this model's")
+        self.assertEqual(by_ref["model-z"]["price_source"], "unknown")
+        self.assertEqual((by_ref["model-z"]["price_in"], by_ref["model-z"]["price_out"]), WORST_PRICE)
+
+    def test_google_and_the_founder_set_the_price_before_the_catalogue(self):
+        from cynqra.intelligence_layer.adapters import _price, price_source
+        self.assertEqual(_price({}, "gemini-3-flash-preview"), (0.5, 3.0))
+        self.assertEqual(_price({}, "gemini-3.1-pro-preview"), (2.0, 12.0))
+        self.assertEqual(price_source({}, "gemini-3-flash-preview"), "list")
+        self.assertEqual(price_source({"price_per_m": [0, 0]}, "gemini-3-flash-preview"), "connection")
+        catalogue = {"model-x": {"id": "vendor/model-x", "pricing": {"prompt": "0.0000004", "completion": "0.0000016"}}}
+        with mock.patch("cynqra.intelligence_layer.normalize.catalogue", return_value=catalogue):
+            self.sup.connect({"type": "openai_compatible", "name": "Free tier", "endpoint": self.srv.url,
+                              "auth": {"method": "none"}, "models": ["model-x"], "price_per_m": [0, 0]})
+        m = self.sup.registry.models()[0]
+        self.assertEqual((m["price_in"], m["price_out"], m["price_source"]), (0.0, 0.0, "connection"),
+                         "a price the connection states is kept")
+
+
+def fake_provider(handler):
+    """A hosted OpenAI-compatible endpoint answering every call with handler(body) -> (status, json, headers)."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    seen = []
+
+    class H(BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            seen.append(body)
+            status, data, headers = handler(body, len(seen))
+            raw = json.dumps(data).encode()
+            self.send_response(status)
+            for k, v in (headers or {}).items():
+                self.send_header(k, v)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def log_message(self, *_):
+            pass
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, f"http://127.0.0.1:{srv.server_address[1]}/v1", seen
+
+
+def stop(srv) -> None:
+    srv.shutdown()
+    srv.server_close()
+
+
+def hosted_route(url: str, **extra) -> dict:
+    return {"kind": "local", "label": "model-x", "local": False, "CYNQRA_LOCAL_BASE_URL": url, "CYNQRA_TIMEOUT": "20",
+            **extra}
+
+
+def reply(text: str = '{"ok": true}', finish: str = "stop", usage: dict | None = None) -> dict:
+    return {"choices": [{"message": {"role": "assistant", "content": text}, "finish_reason": finish}],
+            "usage": usage or {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}}
+
+
+class ReasoningTokensTests(unittest.TestCase):
+    """Paid run 37589136743: Gemini 3.1 Pro Preview took 186 s for 170 counted output tokens. Google's
+    OpenAI-compatible route reports its hidden reasoning only in total_tokens and bills it as output; Cynqra counted
+    completion_tokens alone, so cost and speed were understated. Output now counts what the provider bills."""
+
+    def test_reasoning_reported_only_in_the_total_is_counted_as_output(self):
+        from cynqra.model_adapter import _tokens_out
+        self.assertEqual(_tokens_out({"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 1150}), 1050)
+        self.assertEqual(_tokens_out({"prompt_tokens": 100, "completion_tokens": 1050, "total_tokens": 1150,
+                                      "completion_tokens_details": {"reasoning_tokens": 1000}}), 1050,
+                         "a provider that counts reasoning in completion_tokens is not counted twice")
+        self.assertEqual(_tokens_out({"prompt_tokens": 100, "completion_tokens": 50}), 50, "no total: the reply")
+
+    def test_a_hosted_call_meters_the_hidden_reasoning(self):
+        srv, url, _ = fake_provider(lambda body, n: (200, reply(usage={"prompt_tokens": 100, "completion_tokens": 50,
+                                                                       "total_tokens": 1150}), None))
+        self.addCleanup(stop, srv)
+        out = model_adapter.complete("hello", max_tokens=100, route=hosted_route(url))
+        self.assertIsNone(out["error"])
+        self.assertEqual((out["tokens_in"], out["tokens_out"]), (100, 1050))
+
+
+class OverloadTests(unittest.TestCase):
+    """Paid run 37589136743: Google answered "This model is currently experiencing high demand" (HTTP 503) on its
+    preview models again and again, and each time the model was left untried 10, 20, 40 minutes as if it had gone
+    down; one objective waited 64 minutes. An overload is retried within seconds on a spread schedule (the
+    provider's Retry-After first), and the model is left untried a minute, doubling to five; a real outage keeps the
+    long wait."""
+
+    HIGH_DEMAND = {"error": {"code": 503, "message": "This model is currently experiencing high demand. Spikes in "
+                             "demand are usually temporary. Please try again later.", "status": "UNAVAILABLE"}}
+
+    def _sleeps(self):
+        waits = []
+        patcher = mock.patch("cynqra.model_adapter.time.sleep", side_effect=waits.append)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return waits
+
+    def test_high_demand_is_retried_within_seconds_and_the_call_succeeds(self):
+        waits = self._sleeps()
+        srv, url, seen = fake_provider(lambda body, n: (503, self.HIGH_DEMAND, None) if n <= 2 else (200, reply(), None))
+        self.addCleanup(stop, srv)
+        out = model_adapter.complete("hello", max_tokens=100, route=hosted_route(url))
+        self.assertIsNone(out["error"])
+        self.assertEqual(len(seen), 3)
+        self.assertEqual(len(waits), 2)
+        self.assertTrue(1.5 <= waits[0] <= 2.5 and 3.0 <= waits[1] <= 5.0, waits)
+
+    def test_the_providers_retry_after_wins_and_a_quota_limit_keeps_its_minute_long_waits(self):
+        waits = self._sleeps()
+        srv, url, _ = fake_provider(lambda body, n: (503, self.HIGH_DEMAND, {"Retry-After": "7"}) if n == 1
+                                    else (200, reply(), None))
+        self.addCleanup(stop, srv)
+        self.assertIsNone(model_adapter.complete("hello", max_tokens=100, route=hosted_route(url))["error"])
+        self.assertEqual(waits, [7.0])
+        waits.clear()
+        srv2, url2, _ = fake_provider(lambda body, n: (429, {"error": {"message": "Rate limit reached for requests"}},
+                                                        None) if n == 1 else (200, reply(), None))
+        self.addCleanup(stop, srv2)
+        self.assertIsNone(model_adapter.complete("hello", max_tokens=100, route=hosted_route(url2))["error"])
+        self.assertEqual(waits, [model_adapter.HOSTED_RETRY_WAITS_S[0]])
+
+    def test_an_overloaded_model_is_left_untried_a_minute_and_a_model_that_went_down_ten(self):
+        import time
+        from cynqra.intelligence_layer import IntelligenceSupply
+        from cynqra.intelligence_layer import registry as reg_mod
+        tmp = TempDir()
+        self.addCleanup(tmp.cleanup)
+        sup = IntelligenceSupply(tmp.path / "control")
+        self.addCleanup(sup.close)
+        srv = ModelsServer()
+        self.addCleanup(srv.close)
+        sup.connect({"type": "openai_compatible", "name": "P", "endpoint": srv.url, "auth": {"method": "none"},
+                     "models": ["busy", "gone"], "price_per_m": [1, 4]})
+        busy, gone = (next(m["id"] for m in sup.registry.models() if m["ref"] == r) for r in ("busy", "gone"))
+        for mid, error in ((busy, "RuntimeError: HTTP 503 from provider: " + json.dumps(self.HIGH_DEMAND)),
+                           (gone, "RuntimeError: HTTP 502 from provider: Bad Gateway")):
+            for _ in range(reg_mod.DOWN_AFTER_ERRORS):
+                sup.registry.record_call(mid, role="", purpose="error", task_kind="code", usage={}, run_id="r",
+                                         error=error)
+        left = {mid: sup.registry.get(mid)["health"]["down_until"] - time.time() for mid in (busy, gone)}
+        self.assertTrue(50 <= left[busy] <= reg_mod.OVERLOAD_DOWN_S, left)
+        self.assertTrue(reg_mod.DOWN_FOR_S - 10 <= left[gone] <= reg_mod.DOWN_FOR_S, left)
+
+
+class DeadlineTests(unittest.TestCase):
+    """Paid run 37589136743: two calls to a model that answers in three to five minutes hung until the 20-minute
+    limit. With no limit set, a hosted call now gets four times the model's own 95th-percentile answer time (at least
+    four minutes, at most the ceiling), or 15 minutes until five answers are on record; a limit the founder or the
+    environment set is kept."""
+
+    def setUp(self):
+        from cynqra.intelligence_layer import IntelligenceSupply
+        self.saved = no_model_env()
+        self.tmp = TempDir()
+        self.srv = ModelsServer()
+        self.sup = IntelligenceSupply(self.tmp.path / "control")
+        self.sup.connect({"type": "openai_compatible", "name": "Groq (environment)", "endpoint": "https://api.groq.com/openai/v1",
+                          "auth": {"method": "none"}, "models": ["model-x"], "price_per_m": [1, 4]}, origin="environment")
+        self.mid = self.sup.registry.models()[0]["id"]
+
+    def tearDown(self):
+        self.sup.close()
+        self.srv.close()
+        self.tmp.cleanup()
+        restore_env(self.saved)
+
+    def _answers(self, *seconds, error=""):
+        for sec in seconds:
+            self.sup.registry.record_call(self.mid, role="w", purpose="work", task_kind="code",
+                                          usage={"latency_s": sec, "tokens_in": 10, "tokens_out": 10}, run_id="r",
+                                          error=error)
+
+    def _timeout_sent(self) -> float:
+        seen = {}
+
+        def fake(prompt, route=None, **_):
+            seen.update(route or {})
+            return {"text": "{}", "tokens_in": 1, "tokens_out": 1, "estimated": False, "latency_s": 0.1, "error": None}
+
+        with mock.patch("cynqra.intelligence_layer.gateway.model_adapter.complete", side_effect=fake):
+            self.sup.gateway.invoke(self.mid, {"prompt": "hi"})
+        self.assertNotIn("_deadline_from_record", seen)
+        return float(seen["CYNQRA_TIMEOUT"])
+
+    def test_the_deadline_follows_the_models_own_answers(self):
+        from cynqra.intelligence_layer import gateway
+        os.environ.pop("CYNQRA_TIMEOUT", None)
+        self.assertEqual(self._timeout_sent(), gateway.DEADLINE_DEFAULT_S, "too few answers on record")
+        self._answers(20, 25, 30, 35, 40)
+        self.assertEqual(self._timeout_sent(), gateway.DEADLINE_FLOOR_S, "a fast model: at least four minutes")
+        self._answers(180, 200, 240, 280, 290, error="")
+        self.assertEqual(self._timeout_sent(), 4 * 290, "four times its 95th-percentile answer")
+        self._answers(1100, 1100)
+        self.assertEqual(self._timeout_sent(), 1200, "never past the ceiling")
+
+    def test_failed_calls_never_shorten_it_and_a_limit_someone_set_is_kept(self):
+        os.environ.pop("CYNQRA_TIMEOUT", None)
+        self._answers(20, 25, 30, 35, 40)
+        self._answers(1, 1, 1, 1, 1, 1, 1, error="RuntimeError: HTTP 503 from provider")
+        from cynqra.intelligence_layer import gateway
+        self.assertEqual(self._timeout_sent(), gateway.DEADLINE_FLOOR_S)
+        with mock.patch.dict(os.environ, {"CYNQRA_TIMEOUT": "77"}):
+            self.assertEqual(self._timeout_sent(), 77)
+
+
+class CutOffReplyTests(unittest.TestCase):
+    """Paid run 37589136743: a thinking model's hidden reasoning used up the reply's room, so a code task was cut off
+    four times and the SaaS workforce proposal was cut off and its objective failed. A call now says how long to
+    think from the work's risk, a structured reply cut off is asked once more with less thinking and twice the room,
+    what the cut-off reply cost is kept, and a reservation covers all a hosted call may write."""
+
+    def setUp(self):
+        model_adapter._NO_EFFORT.clear()
+
+    def test_the_works_risk_sets_how_long_to_think(self):
+        from cynqra.intelligence import work_effort
+        self.assertEqual(work_effort({"kind": "document", "tier": "LOW"}), "low")
+        self.assertEqual(work_effort({"kind": "document", "tier": "MEDIUM"}), "medium")
+        self.assertEqual(work_effort({"kind": "code", "tier": "LOW"}), "medium")
+        self.assertEqual(work_effort({"kind": "deploy", "tier": "HIGH"}), "high")
+
+    def test_the_effort_reaches_the_provider_and_one_that_refuses_it_is_asked_without_it(self):
+        srv, url, seen = fake_provider(lambda body, n: (200, reply(), None))
+        self.addCleanup(stop, srv)
+        self.assertIsNone(model_adapter.complete("hi", max_tokens=100, route=hosted_route(url), effort="low")["error"])
+        self.assertEqual(seen[-1]["reasoning_effort"], "low")
+        self.assertIsNone(model_adapter.complete("hi", max_tokens=100, route=hosted_route(url, CYNQRA_EFFORT="high"),
+                                                 effort="low")["error"])
+        self.assertEqual(seen[-1]["reasoning_effort"], "high", "the connection's own setting wins")
+        refusing = lambda body, n: ((400, {"error": {"message": "Unrecognized request argument supplied: "
+                                                                "reasoning_effort"}}, None)
+                                    if "reasoning_effort" in body else (200, reply(), None))  # noqa: E731
+        srv2, url2, seen2 = fake_provider(refusing)
+        self.addCleanup(stop, srv2)
+        self.assertIsNone(model_adapter.complete("hi", max_tokens=100, route=hosted_route(url2), effort="low")["error"])
+        self.assertEqual(["reasoning_effort" in b for b in seen2], [True, False])
+        model_adapter.complete("again", max_tokens=100, route=hosted_route(url2), effort="medium")
+        self.assertNotIn("reasoning_effort", seen2[-1], "remembered: not sent again")
+
+    def test_a_cut_off_reply_keeps_what_it_cost(self):
+        srv, url, _ = fake_provider(lambda body, n: (200, reply(finish="length", usage={
+            "prompt_tokens": 300, "completion_tokens": 20, "total_tokens": 16300}), None))
+        self.addCleanup(stop, srv)
+        out = model_adapter.complete("hi", max_tokens=100, route=hosted_route(url), want_json=True)
+        self.assertEqual(out["error"], "RuntimeError: reply truncated at max_tokens")
+        self.assertEqual((out["tokens_in"], out["tokens_out"]), (300, 16000))
+        from cynqra import attribution
+        self.assertEqual(attribution.diagnose(out["error"]), "reply", "still the intelligence's own failure")
+
+    def test_a_cut_off_structured_reply_is_asked_once_more_with_less_thinking_and_more_room(self):
+        from cynqra.intelligence import ModelSource
+        calls = []
+
+        class Access:
+            def intelligence_for(self, worker):
+                return "m"
+
+            def invoke(self, worker, request):
+                calls.append(request)
+                if len(calls) == 1:
+                    return {"error": "RuntimeError: reply truncated at max_tokens", "tokens_in": 300,
+                            "tokens_out": 16000, "model_id": "m"}
+                return {"text": '{"ok": true}', "tokens_in": 300, "tokens_out": 900, "estimated": False,
+                        "latency_s": 1.0, "model_id": "m"}
+
+        src = ModelSource()
+        src.bind(Access())
+        data, usage = src._call("prompt", max_tokens=1500, schema=None)
+        self.assertEqual(data, {"ok": True})
+        self.assertEqual([c["effort"] for c in calls], ["medium", "low"])
+        self.assertGreaterEqual(calls[1]["max_tokens"], 2 * model_adapter.HOSTED_MIN_REPLY)
+        self.assertEqual((usage["tokens_in"], usage["tokens_out"]), (600, 16900), "both calls are paid for")
+
+    def test_a_reservation_covers_all_a_hosted_call_may_write(self):
+        self.assertEqual(model_adapter.reply_limit(1500, local=False), model_adapter.HOSTED_MIN_REPLY)
+        self.assertEqual(model_adapter.reply_limit(40000, local=False), 40000)
+        self.assertEqual(model_adapter.reply_limit(1500, local=True), 1500, "a model on this computer: as asked")
+
+
+class CalibrationPriceTests(unittest.TestCase):
+    """Paid run 37589136743: calibration was skipped in both objectives ("its trials do not fit the calibration
+    budget") because Gemini was priced at the worst case. At the worst case it is still skipped, now with its
+    figures; at Google's prices the same objective is calibrated."""
+
+    def _plan(self, prices):
+        from cynqra import calibration
+        saved = no_model_env()
+        tmp = TempDir()
+        srv = ModelsServer()
+        try:
+            sup = IntelligenceSupply_with(tmp.path, prices, srv)
+            try:
+                e = live_engine(tmp.path / "run", sup, budget_usd=4.5)
+                try:
+                    return e.store.get(calibration.KIND, calibration.plan_id(e))
+                finally:
+                    e.close()
+            finally:
+                sup.close()
+        finally:
+            srv.close()
+            tmp.cleanup()
+            restore_env(saved)
+
+    def test_worst_case_prices_skip_calibration_with_their_figures_and_real_prices_calibrate(self):
+        worst = self._plan([("Flash", (10.0, 50.0)), ("Pro", (10.0, 50.0))])
+        skipped = [i["skipped"] for i in worst["items"] if i.get("skipped", "").startswith("budget")]
+        self.assertTrue(skipped, worst)
+        self.assertRegex(skipped[0], r"\$\d+\.\d\d at most for \d candidates, \$0\.45 for all calibration")
+        real = self._plan([("Flash", (0.5, 3.0)), ("Pro", (2.0, 12.0))])
+        self.assertTrue(real["trials"], real.get("reason") or real["items"])
+
+
+def IntelligenceSupply_with(tmp, prices, srv):
+    """supply_with, at a given (input, output) price per million tokens for each test double."""
+    from cynqra.intelligence_layer import IntelligenceSupply
+    sup = IntelligenceSupply(tmp / "control")
+    for i, (name, price) in enumerate(prices):
+        sup.connect({"type": "openai_compatible", "name": f"Provider {i}", "endpoint": srv.url, "auth": {"method": "none"},
+                     "models": [name], "price_per_m": list(price)})
+    for m in sup.registry.models():
+        sup.registry.set_regression(m["id"], True, "test fixture: qualified test double",
+                                    by_kind={"objective": "passed", "code": "passed"})
+    return sup
+
+
+class RecordReplayTests(unittest.TestCase):
+    """Testing on paid keys cost money every time. A run can now record every call (request, answer, tokens, seconds;
+    never a key) and be replayed from the recording at no cost: the same work finds the same answers, ids and times
+    that differ between runs are normalized, and a call the recording does not hold fails and is counted."""
+
+    def setUp(self):
+        self.tmp = TempDir()
+        self.addCleanup(self.tmp.cleanup)
+        self.cassette = self.tmp.path / "cassette.jsonl"
+        model_adapter._CASSETTE.update(path=None)
+
+    def _mode(self, mode: str):
+        patcher = mock.patch.dict(os.environ, {"CYNQRA_CASSETTE": str(self.cassette), "CYNQRA_CASSETTE_MODE": mode})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        model_adapter._CASSETTE.update(path=None)
+
+    def test_a_recorded_call_is_answered_again_without_the_provider(self):
+        srv, url, seen = fake_provider(lambda body, n: (200, reply('{"answer": 42}', usage={
+            "prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}), None))
+        self._mode("record")
+        first = model_adapter.complete("Company co_1a2b3c4d at 2026-10-07T07:44:01Z asks", max_tokens=100,
+                                       route=hosted_route(url, CYNQRA_LOCAL_API_KEY="AIza" + "Q" * 35))
+        stop(srv)
+        self.assertEqual(first["text"], '{"answer": 42}')
+        recorded = self.cassette.read_text(encoding="utf-8")
+        self.assertNotIn("AIza", recorded, "no key in the recording")
+        self._mode("replay")
+        again = model_adapter.complete("Company co_9f8e7d6c at 2026-10-08T01:02:03Z asks", max_tokens=100,
+                                       route=hosted_route(url))
+        self.assertIsNone(again["error"])
+        self.assertEqual((again["text"], again["tokens_in"], again["tokens_out"]), ('{"answer": 42}', 7, 3))
+        missed = model_adapter.complete("A question nobody recorded", max_tokens=100, route=hosted_route(url))
+        self.assertIn("replay: the recording holds no answer", missed["error"])
+        self.assertEqual(model_adapter.cassette_stats()["hits"], 1)
+        self.assertEqual(model_adapter.cassette_stats()["misses"], 1)
+        self.assertEqual(len(seen), 1, "replay never reached the provider")
+
+    def test_a_listing_is_recorded_and_replayed_offline(self):
+        from cynqra.intelligence_layer import adapters
+        self._mode("record")
+        with mock.patch.object(adapters, "_fetch_json", return_value={"data": [{"id": "m-1"}]}) as live:
+            self.assertEqual(adapters._get_json("https://p.example/v1/models", {"Authorization": "Bearer x"}),
+                             {"data": [{"id": "m-1"}]})
+        self.assertEqual(live.call_count, 1)
+        self._mode("replay")
+        with mock.patch.object(adapters, "_fetch_json", side_effect=AssertionError("no network in replay")):
+            self.assertEqual(adapters._get_json("https://p.example/v1/models", {"Authorization": "Bearer y"}),
+                             {"data": [{"id": "m-1"}]})
+
+    def test_a_whole_objective_replays_without_its_models(self):
+        from test_objective_intelligence import ModelsServer as Server, live_engine, supply_with
+        saved = no_model_env()
+        self.addCleanup(restore_env, saved)
+
+        def run(folder, srv):
+            sup = supply_with(self.tmp.path / folder, [("Steady", 0.2), ("Careful", 0.6)], srv)
+            try:
+                e = live_engine(self.tmp.path / folder / "run", sup)
+                try:
+                    return e.meta["phase"], len(e.store.all("decision"))
+                finally:
+                    e.close()
+            finally:
+                sup.close()
+
+        self._mode("record")
+        srv = Server()
+        recorded = run("first", srv)
+        calls = len(srv.requests)
+        srv.close()
+        self.assertGreater(calls, 3)
+        self._mode("replay")
+        dead = Server()
+        dead.close()  # nothing answers at its address: every answer comes from the recording
+        replayed = run("second", dead)
+        self.assertEqual(replayed, recorded)
+        self.assertEqual(model_adapter.cassette_stats()["misses"], 0, model_adapter.cassette_stats())
 
 
 class NoQualifiedIntelligenceTests(unittest.TestCase):

@@ -43,6 +43,12 @@ LIST_PRICES = {
     "claude-opus-4-8": (5.00, 25.00),
     "claude-fable-5-1": (10.00, 50.00),
     "gpt-4o-mini": (0.15, 0.60),
+    # Google's published prices for the Gemini models real runs have used, prompts up to 200k tokens (7 Oct 2026).
+    # Hidden reasoning is billed as output. Any other model is priced from the public catalogue at discovery
+    # (IntelligenceSupply._normalize), and only a model neither knows is priced at WORST_PRICE, and labelled so
+    "gemini-3-flash-preview": (0.50, 3.00),
+    "gemini-3.1-pro-preview": (2.00, 12.00),
+    "gemini-3.5-flash": (1.50, 9.00),
 }
 WORST_PRICE = (10.00, 50.00)
 # Provider types designed for but not built in V1. Listed so the product can say so; they cannot be connected.
@@ -123,6 +129,24 @@ _OPENER = urllib.request.build_opener(_NoRedirect)
 MAX_RESPONSE_BYTES = 8_000_000
 
 def _get_json(url: str, headers: dict, timeout: float = 30.0):
+    """A provider's listing (or the public catalogue), recorded or replayed with the calls (model_adapter's
+    CYNQRA_CASSETTE), so a replayed run discovers what the recorded run discovered, offline."""
+    from .. import model_adapter as ma
+    mode = ma._cassette_mode()
+    if mode not in ("record", "replay"):
+        return _fetch_json(url, headers, timeout)
+    key = ma.cassette_key("listing", {"url": url})  # the key depends on the address only, never on a credential
+    if mode == "replay":
+        answer = ma.cassette_replay(key)
+        if answer is None:
+            raise SupplyError(f"replay: the recording holds no listing from {url}")
+        return answer
+    data = _fetch_json(url, headers, timeout)
+    ma.cassette_record(key, "listing", url, data)
+    return data
+
+
+def _fetch_json(url: str, headers: dict, timeout: float = 30.0):
     from ..model_adapter import USER_AGENT  # the same signature as the calls: a bot filter refuses Python's own
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, **headers})
     try:
@@ -165,6 +189,14 @@ def _price(conn: dict, ref: str) -> tuple[float, float]:
     return LIST_PRICES.get(ref) or LIST_PRICES.get(re.sub(r"-\d{8}$", "", ref), WORST_PRICE)
 
 
+def price_source(conn: dict, ref: str) -> str:
+    """Where _price's figure comes from: the connection (the founder's or the environment's), Cynqra's list, or
+    nowhere (unknown: the worst case, until the public catalogue names the model's list price)."""
+    if conn.get("price_per_m"):
+        return "connection"
+    return "list" if (LIST_PRICES.get(ref) or LIST_PRICES.get(re.sub(r"-\d{8}$", "", ref))) else "unknown"
+
+
 HOSTED_TIMEOUT_S = 1200  # a free hosted endpoint can write at 10 tokens/s (Kimi K3 on NVIDIA); after 20 min it is stuck
 
 
@@ -173,7 +205,10 @@ def _hosted(route: dict, conn: dict) -> dict:
     from the environment, the environment) sets CYNQRA_TIMEOUT; the call then fails like any provider error, and
     the retry and the Replacement Engine take over."""
     env = os.environ.get("CYNQRA_TIMEOUT") if conn.get("origin") == "environment" else None
-    route["CYNQRA_TIMEOUT"] = route.get("CYNQRA_TIMEOUT") or env or str(HOSTED_TIMEOUT_S)
+    given = route.get("CYNQRA_TIMEOUT") or env
+    route["CYNQRA_TIMEOUT"] = given or str(HOSTED_TIMEOUT_S)
+    if not given:  # nobody set a limit: the gateway sets one from the model's own measured speed (gateway.deadline)
+        route["_deadline_from_record"] = True
     return route
 
 
@@ -297,8 +332,10 @@ class OpenAICompatibleAdapter(ProviderAdapter):
                     continue
             elif hf:
                 facts["price_in"], facts["price_out"] = _price(conn, ref)
+                facts["price_source"] = price_source(conn, ref)
             else:
                 facts["price_in"], facts["price_out"] = _price(conn, ref)
+                facts["price_source"] = price_source(conn, ref)
             out.append(facts)
         if unavailable:
             note = f"{len(unavailable)} not offered now ({'; '.join(unavailable[:3])}{'; ...' if len(unavailable) > 3 else ''})"
@@ -465,6 +502,7 @@ class AnthropicAdapter(ProviderAdapter):
             pin, pout = _price(conn, ref)
             facts = {"ref": ref, "name": row.get("display_name") or ref, "provider": "Anthropic",
                      "runtime": "anthropic_api", "local": False, "price_in": pin, "price_out": pout,
+                     "price_source": price_source(conn, ref),
                      "modalities": ["text", "image"], "json_schema": True, "tools": True, "mcp": True,
                      "released": self._released(row)}
             if isinstance(row.get("max_input_tokens"), int):

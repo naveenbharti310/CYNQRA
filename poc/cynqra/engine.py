@@ -37,7 +37,7 @@ from pathlib import Path
 
 from . import binding, budget, calibration, controller, delivery, deploy, execution, gateway, numbers, objective
 from . import objective_evidence, people, performance, planner, policies, policy, replacement, roles, seats, synthesis
-from . import attribution
+from . import attribution, model_adapter
 from . import settings as project_settings
 from .db import IST, Store, digest, now, scrub
 from .intelligence import SCENARIOS, IntelligenceError, ModelSource, ScriptedSource
@@ -313,7 +313,11 @@ class Engine:
         if not tid or self.meta["phase"] not in policies.body("budget")["reserve_in_phases"]:
             return
         entry = self.registry.get(mid)
-        usd = budget.call_upper_bound(entry, request, self.registry.stats(mid).get("write_tps"))
+        # the most the call may write is what the provider is allowed to send, not only what the caller asked for: a
+        # hosted model gets at least HOSTED_MIN_REPLY, reasoning included, and is billed for all of it
+        allowed = {**request, "max_tokens": model_adapter.reply_limit(int(request.get("max_tokens") or 4000),
+                                                                      bool(entry.get("local")))}
+        usd = budget.call_upper_bound(entry, allowed, self.registry.stats(mid).get("write_tps"))
         res = budget.reserve(self.store, worker_id=worker_id, task_id=tid, model_id=mid, usd=usd,
                              purpose="model_call")
         if res["status"] == "held":

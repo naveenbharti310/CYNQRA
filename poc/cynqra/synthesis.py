@@ -95,6 +95,36 @@ def complete(merged: dict, reqs: dict, risks: dict | None = None, founder_leads:
                         "requirement_ids": rids, "supports": [], "risk_ids": []}
 
 
+def fit_seats(merged: dict, reqs: dict, risks: dict | None = None) -> list[str]:
+    """Keep the organization within roles.MAX_WORKERS, the platform's own way, before refusing it: paid run
+    37589136743 failed its SaaS objective at "18 workers proposed; at most 16", counted after the platform had closed
+    gaps itself. First a second or third seat of one role gives way, the largest first (the role stays, so what it
+    covers stays covered); then a team seat whose areas other seats cover too (nothing is left open without it). A
+    cofounder, a seat the platform added and a Specialist are never cut. Each change is said for the founder, who
+    sees the organization at the workforce gate. Returns the changes."""
+    total = lambda: sum(m["quantity"] for m in merged.values())  # noqa: E731
+    changes = []
+    while total() > roles.MAX_WORKERS:
+        many = [k for k, m in merged.items() if m["quantity"] > 1 and not roles.is_cofounder(m["role"])]
+        if not many:
+            break
+        k = max(many, key=lambda k: (merged[k]["quantity"], k))
+        merged[k]["quantity"] -= 1
+        changes.append(f"{_title(merged[k])}: {merged[k]['quantity'] + 1} seats to {merged[k]['quantity']}")
+    order = list(roles.ROLES)
+    spare = sorted((k for k, m in merged.items() if not roles.is_cofounder(m["role"]) and m["role"] != "Specialist"
+                    and m.get("added_by") != "platform"),
+                   key=lambda k: (len(merged[k].get("requirement_ids") or []) + len(merged[k].get("risk_ids") or []),
+                                  -order.index(merged[k]["role"]), k))
+    for k in spare:
+        if total() <= roles.MAX_WORKERS:
+            break
+        if _gaps({x: m for x, m in merged.items() if x != k}, reqs, risks):
+            continue  # something would be left open without it
+        changes.append(f"{_title(merged.pop(k))}: left out, every area it covers is covered by another seat")
+    return changes
+
+
 def _entry(merged: dict, r, where: str) -> dict:
     """One proposed role, read into merged: a known role, its quantity, its reason and requirement ids. A Specialist
     is one worker per field."""
@@ -279,6 +309,7 @@ def validate_workforce(prop: dict, pkg: dict, close_gaps: bool = True, founder: 
         raise IntelligenceError(f"no role in the workforce {what}; add one of: "
                                 f"{', '.join(n for n in roles.ROLES if n in fits and n not in leads)}")
     complete(merged, reqs, risks, leads)
+    fitted = fit_seats(merged, reqs, risks) if close_gaps else []  # a founder's own edit is refused, not trimmed
     total = sum(m["quantity"] for m in merged.values())
     if total > roles.MAX_WORKERS:
         raise IntelligenceError(f"{total} workers proposed; at most {roles.MAX_WORKERS}")
@@ -318,7 +349,7 @@ def validate_workforce(prop: dict, pkg: dict, close_gaps: bool = True, founder: 
     return {"summary": str(prop.get("summary") or "").strip(), "roles": rows, "cofounders": cofounders,
             "team_summaries": summaries, "coverage": coverage, "owners": owners, "watchers": watchers,
             "assigned": assigned, "founder_owned": [rid for rid, r in reqs.items() if r.get("owner") == "founder"],
-            "workers": workers}
+            "workers": workers, "seat_limit": fitted}
 
 
 def cost_by_role(run, prop: dict) -> dict:
@@ -422,6 +453,7 @@ def _draft(run, req: dict, note: str, founder: dict | None = None) -> tuple[dict
     prop = validate_workforce({"summary": cof["summary"], "roles": _flat(applied["rows"])}, req, founder=founder)
     prop["team_summaries"] = proposed["team_summaries"]
     prop["assigned"] = proposed["assigned"]  # what Cynqra had to fill in the proposers' answers
+    prop["seat_limit"] = proposed["seat_limit"] + prop["seat_limit"]  # what gave way to keep within the limit
     prop["proposed_seats"] = sum(m["quantity"] for m in proposed["roles"])
     prop["challenge"] = {"removed": applied["removed"], "overruled": applied["overruled"],
                          "failure_stories": applied["failure_stories"], "unreadable": challenge.get("unreadable", "")}

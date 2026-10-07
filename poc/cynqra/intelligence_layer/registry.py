@@ -31,13 +31,19 @@ DOWN_FOR_S = 600  # how long it is left untried the first time it goes down
 # still limiting calls after one wait is likely to keep doing so. On a fixed wait, real run 36972596704 moved seven
 # workers back to a rate-limited model three times, and each time it refused again within two minutes.
 DOWN_MAX_S = 3600
+# An overloaded model (HTTP 503 or 529, "high demand") lacks capacity for a moment; it has not gone away. It is left
+# untried a minute, doubling to five, not ten doubling to an hour: paid run 37589136743 lost an hour of one objective
+# waiting out Google's "high demand" on preview models as if they had gone down
+OVERLOAD_DOWN_S = 60
+OVERLOAD_MAX_S = 300
+_OVERLOAD = re.compile(r"HTTP (503|529)\b|high demand|overloaded", re.I)
 FACTS = ("name", "provider", "ref", "runtime", "version", "context", "tools", "json_schema", "modalities", "mcp",
          "local", "price_in", "price_out", "compute_usd_per_hour", "license", "commercial_use", "params", "hardware",
          "size_gb", "predict", "think", "served_by", "released",
          # normalized at discovery (normalize.py): who made it, who serves it, what it can do
          "display_name", "publisher", "publisher_name", "capabilities", "input_modalities", "type", "speed", "description",
          "max_output", "list_price_in", "list_price_out", "access_provider", "access_type", "rate_limit_per_min",
-         "catalogued")
+         "catalogued", "price_source")
 
 
 def served_version(m: dict) -> str:
@@ -224,7 +230,8 @@ class IntelligenceRegistry:
             if h["errors"] >= DOWN_AFTER_ERRORS and h.get("down_until", 0) <= time.time():
                 # it goes down (again): a call in flight that fails while it is down changes nothing
                 h["trips"] = int(h.get("trips") or 0) + 1
-                h["down_until"] = time.time() + min(DOWN_MAX_S, DOWN_FOR_S * 2 ** (h["trips"] - 1))
+                first, most = (OVERLOAD_DOWN_S, OVERLOAD_MAX_S) if _OVERLOAD.search(error) else (DOWN_FOR_S, DOWN_MAX_S)
+                h["down_until"] = time.time() + min(most, first * 2 ** (h["trips"] - 1))
             elif not error:  # it answered: it is up, whatever the last failures said
                 h.update(down_until=0, trips=0)
             m["health"] = h

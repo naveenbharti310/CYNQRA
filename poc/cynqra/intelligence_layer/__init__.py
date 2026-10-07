@@ -95,6 +95,13 @@ class IntelligenceSupply:
             out.update({k: v for k, v in describe(f["ref"], f, host).items() if v not in (None, "", [])})
         out.update(access_provider=conn.get("name") or adapter.title, access_type=adapter.title,
                    rate_limit_per_min=int((conn.get("rate_limits") or {}).get("calls_per_minute") or 0) or None)
+        # A price Cynqra does not know is the worst case only until the public catalogue names the model's list
+        # price (paid run 37589136743: Gemini at $10/$50 per million against Google's $0.50/$3 and $2/$12 stopped an
+        # objective at its cap and left calibration no budget). A catalogue price of 0 is a free variant's, not this
+        # model's, so it is not taken.
+        lin, lout = out.get("list_price_in"), out.get("list_price_out")
+        if out.get("price_source") == "unknown" and lin and lout and float(lin) > 0 and float(lout) > 0:
+            out.update(price_in=float(lin), price_out=float(lout), price_source="catalogue")
         return out
 
     def catalog(self, connection_id: str) -> dict:
