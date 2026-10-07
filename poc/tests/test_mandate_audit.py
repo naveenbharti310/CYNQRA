@@ -830,6 +830,33 @@ class CutOffReplyTests(unittest.TestCase):
         self.assertEqual(work_effort({"kind": "code", "tier": "LOW"}), "medium")
         self.assertEqual(work_effort({"kind": "deploy", "tier": "HIGH"}), "high")
 
+    def test_each_failed_attempt_thinks_a_step_longer_and_a_new_model_starts_again(self):
+        from cynqra.intelligence import work_effort
+        doc = {"kind": "document", "tier": "LOW"}
+        self.assertEqual([work_effort({**doc, "attempts": n}) for n in range(4)], ["low", "medium", "high", "high"])
+        self.assertEqual([work_effort({"kind": "code", "tier": "LOW", "attempts": n}) for n in range(3)],
+                         ["medium", "high", "high"])
+        self.assertEqual(work_effort({**doc, "attempts": 0, "replacements": 1}), "low", "a replacement starts again")
+
+    def test_the_effort_a_call_used_is_on_its_record_and_a_second_ask_keeps_it(self):
+        from cynqra.intelligence import ModelSource
+        asked = []
+
+        class Access:
+            def intelligence_for(self, worker):
+                return "m1"
+
+            def invoke(self, worker, request):
+                asked.append(request)
+                text = "not json" if len(asked) == 1 else '{"a": 1}'
+                return {"text": text, "tokens_in": 1, "tokens_out": 1, "estimated": False, "error": None}
+
+        src = ModelSource()
+        src.bind(Access())
+        data, usage = src._call("q", effort="high")
+        self.assertEqual((data, usage["effort"]), ({"a": 1}, "high"))
+        self.assertEqual([r.get("effort") for r in asked], ["high", "high"], "the ask for JSON keeps the effort")
+
     def test_the_effort_reaches_the_provider_and_one_that_refuses_it_is_asked_without_it(self):
         srv, url, seen = fake_provider(lambda body, n: (200, reply(), None))
         self.addCleanup(stop, srv)

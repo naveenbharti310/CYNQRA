@@ -361,14 +361,18 @@ class ScriptedSource:
         return json.loads(json.dumps(preset)), self._usage(worker)
 
 
+EFFORTS = ("low", "medium", "high")
+
+
 def work_effort(task: dict) -> str:
     """How long a thinking model may think on a task: high for high-risk work, medium for building (code, forecasts)
     and medium-risk work, low for the rest. Its default is its most, which made paid run 37589136743's calls take
-    three to five minutes and cut replies off."""
+    three to five minutes and cut replies off. Each attempt that failed verification on the same model raises it a
+    step, up to high (the escalation ladder): cheap thinking first, more only where it was needed. A replacement
+    model starts again from the task's own level."""
     tier = str(task.get("tier") or "").upper()
-    if tier == "HIGH":
-        return "high"
-    return "medium" if task.get("kind") in roles.BUILD_TYPES or tier == "MEDIUM" else "low"
+    level = 2 if tier == "HIGH" else 1 if task.get("kind") in roles.BUILD_TYPES or tier == "MEDIUM" else 0
+    return EFFORTS[min(level + max(0, int(task.get("attempts") or 0)), len(EFFORTS) - 1)]
 
 
 class ModelSource:
@@ -410,12 +414,13 @@ class ModelSource:
                    "partial": files, "temperature": round(min(0.3 * repeats, 0.9), 1) if repeats else None,
                    "effort": effort}
         out = self.access.invoke(worker, request)
+        used = effort
         if out.get("error") and not files and "reply truncated" in str(out["error"]):
             # A structured answer cut off at its limit (paid run 37589136743: the SaaS workforce, so the objective
             # failed) is asked once more with less thinking and twice the room, through the same budget reservation;
             # what the cut-off reply cost is kept
-            first = out
-            out = self.access.invoke(worker, {**request, "effort": "low",
+            first, used = out, "low"
+            out = self.access.invoke(worker, {**request, "effort": used,
                                               "max_tokens": max(2 * max_tokens, 2 * model_adapter.HOSTED_MIN_REPLY)})
             if not out.get("error"):
                 out["tokens_in"] += int(first.get("tokens_in") or 0)
@@ -439,7 +444,8 @@ class ModelSource:
             again = ("\n\nYour reply had no files in the required layout. " + files_layout(needs_from)) if files else \
                 "\n\nReply with only one JSON object."
             out2 = self.access.invoke(worker, {"prompt": prompt + again, "max_tokens": max_tokens,
-                                               "want_json": not files, "schema": schema, "temperature": 0.4})
+                                               "want_json": not files, "schema": schema, "temperature": 0.4,
+                                               "effort": used})  # without it a thinking model thinks its most
             if out2.get("error"):
                 raise IntelligenceError(out2["error"], model_id=model_id, usage=out2)
             self.last_text = out2["text"]
@@ -452,7 +458,7 @@ class ModelSource:
             raise IntelligenceError("model did not return a JSON object", model_id=model_id, usage=out)
         usage = {"tokens_in": out["tokens_in"], "tokens_out": out["tokens_out"], "estimated": out["estimated"],
                  "label": out.get("model") or model_id, "latency_s": out.get("latency_s", 0), "model_id": model_id,
-                 "journaled": bool(out.get("journaled"))}
+                 "journaled": bool(out.get("journaled")), "effort": used}
         if out.get("speed"):
             usage.update(out["speed"])
         return data, usage

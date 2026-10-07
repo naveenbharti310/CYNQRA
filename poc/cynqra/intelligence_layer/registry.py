@@ -223,7 +223,7 @@ class IntelligenceRegistry:
             c = {"id": f"c_{self.store.next_id('call'):06d}", "model_id": model_id, "role": role, "purpose": purpose,
                  "task_kind": task_kind, "run_id": run_id, "tokens_in": tin, "tokens_out": tout,
                  "seconds": round(secs, 1), "usd": 0.0 if journaled else self.cost(m, tin, tout, secs),
-                 "journaled": journaled, "write_tps": usage.get("write_tps"),
+                 "journaled": journaled, "effort": usage.get("effort"), "write_tps": usage.get("write_tps"),
                  "error": error[:300], "served_by": m.get("served_by") or "", "model_version": served_version(m),
                  "tenant_id": usage.get("tenant_id") or "local", "at": now()}
             self.store.put("call", c["id"], c)
