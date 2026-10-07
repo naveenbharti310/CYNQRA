@@ -21,9 +21,10 @@ import os
 import time
 from pathlib import Path
 
+from . import attribution as attr
 from .intelligence import IntelligenceError
 from .intelligence_layer import IntelligenceSupply
-from .intelligence_layer.candidates import details, family_key, priority, provider_key
+from .intelligence_layer.candidates import details, examine, family_key, priority, provider_key
 from .intelligence_layer.candidates import select as _select
 from .live_events import EventTail
 from .probe import probe
@@ -55,6 +56,12 @@ def parse_providers(value: str) -> list[str] | None:
 def select(entries: list[dict], limit: int) -> list[dict]:
     """A bounded, provider-fair, family-diverse calibration set. Metadata decides priority only."""
     return _select(entries, limit)
+
+
+def served(result: dict) -> bool:
+    """Whether the provider serves the model it listed: not when its qualification call came back "no longer
+    available" (HTTP 404), as Gemini 2.5 Pro did for a new paid account in run 37587595496."""
+    return not (result.get("error") and attr.diagnose(result["error"]) == "withdrawn")
 
 
 def selection_details(entries: list[dict], selected: list[dict], limit: int) -> dict:
@@ -121,7 +128,15 @@ def main(argv: list[str] | None = None) -> int:
         for c in connections:  # a listing that failed says why here: the key refused, the provider down
             print(f"  {c['name']}: {c['status']} ({c['note']})")
         limit = max(1, args.max_models)
-        selected = select(entries, limit)
+        print("Candidates (one its provider turns out not to serve gives its place to the next):")
+        for m in select(entries, limit):
+            print(f"  {m['id']}  {m['ref']}")
+
+        def examined(m: dict) -> dict:
+            print(f"\nExamining {m['ref']}...", flush=True)
+            return probe(supply, m["id"], log=print)
+
+        selected, results = examine(entries, limit, examined, served)
         manifest = {
             "connections": connections,
             "discovery": selection_details(entries, selected, limit),
@@ -130,14 +145,8 @@ def main(argv: list[str] | None = None) -> int:
                             "capabilities": m.get("capabilities") or [], "context": m.get("context"),
                             "released": m.get("released"),
                             "regression": (m.get("regression") or {}).get("status", "unverified")} for m in selected],
-            "results": [],
+            "results": results,
         }
-        print("Candidates:")
-        for m in selected:
-            print(f"  {m['id']}  {m['ref']}")
-        for m in selected:
-            print(f"\nExamining {m['ref']}...", flush=True)
-            manifest["results"].append(probe(supply, m["id"], log=print))
         statements = objectives(args.objective, args.objective_set)
         runs = []
         for i, (label, statement) in enumerate(statements, 1):
