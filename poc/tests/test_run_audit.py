@@ -67,7 +67,9 @@ class RunAuditTests(unittest.TestCase):
         unreached = {c["check"] for c in rep["runs"][0]["checks"] + rep["runs"][1]["checks"]
                      if c["status"] == run_audit.NOT_EXERCISED}
         self.assertLessEqual(unreached, {"no replacement on one noisy failure",
-                                         "worker identity survives an intelligence change"}, unreached)
+                                         "worker identity survives an intelligence change",
+                                         # neither run came near its cap: no call was refused a reservation
+                                         "refused work waited for the calls in flight"}, unreached)
         for name in ("objective A/B isolation", "each objective earned its own evidence",
                      "no credential in any persisted file", "every decision replays from its own snapshot",
                      "objective evidence reached real selections", "every evidence record carries its provenance",

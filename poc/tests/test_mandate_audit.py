@@ -1951,3 +1951,76 @@ class NoRoundBarrierTests(unittest.TestCase):
             self.e = None
         self.assertIn("t_01", self.ended)
 
+
+    def test_work_refused_by_the_budget_waits_for_a_call_in_flight_to_end_and_never_spins(self):
+        # real run on Claude, objective 1: while a colleague's call ran, one review whose reservation was refused
+        # was taken again at every step, 4,065 times, each time a gateway action and a refused reservation
+        import time
+        from unittest import mock
+        from cynqra import budget, settings as project_settings
+        from cynqra.engine import BudgetHold, Engine
+        self.e.STEP_WAIT_S = 0.05
+        cap = round(budget.ledger(self.e.store)["spent_total"] + 1.0, 6)
+        project_settings.update(self.e.store, {"budget_usd": cap})
+        slow, waiting = self.e.task("t_01"), self.e.task("t_03")
+        slow.update(status="ASSIGNED", owner_worker_id="w_pm")
+        waiting["status"] = "ASSIGNED"
+        self.assertNotEqual(waiting["owner_worker_id"], "w_pm")
+        for t in (slow, waiting):
+            self.e.save_task(t)
+        for tid in ("t_02", "t_04", "t_05", "t_06"):
+            t = self.e.task(tid)
+            t["status"] = "HELD_FOR_TEST"
+            self.e.save_task(t)
+        tries = []
+
+        def act(run, t):
+            res = budget.reserve(run.store, worker_id=t["owner_worker_id"], task_id=t["id"], model_id="m",
+                                 usd=0.8 if t["id"] == "t_01" else 0.5, purpose="model_call")
+            if t["id"] == "t_03":
+                tries.append((time.time(), res["status"]))
+            if res["status"] != "held":
+                raise BudgetHold(res["why"], res)
+            run._tls.reservations.append(res["id"])  # ended when the work ends, as a real call's
+            if t["id"] == "t_01":
+                time.sleep(1.0)
+                self.ended["t_01"] = time.time()
+            with run.lock:
+                t = run.task(t["id"])
+                t["status"] = "VERIFIED"
+                run.save_task(t)
+            return {"did": "worked", "task": t["id"]}
+
+        with mock.patch.dict(Engine.ACTIONS, {"ASSIGNED": act}):
+            for _ in range(200):
+                self.e.step()
+                if all(self.e.task(x)["status"] == "VERIFIED" for x in ("t_01", "t_03")) and not self.e._inflight:
+                    break
+        self.assertEqual([s for _, s in tries], ["refused", "held"], "asked once while the call ran, then again")
+        self.assertGreaterEqual(tries[1][0], self.ended["t_01"], "asked again only after the call it waited on ended")
+        self.assertEqual(self.e._budget_waits, {})
+        self.assertEqual(budget.headroom(self.e.store)["reserved"], 0)
+
+    def test_a_refused_reservation_may_ask_again_when_a_call_it_waited_on_ends_or_the_cap_changes(self):
+        from cynqra import budget, settings as project_settings
+        s = self.e.store
+        cap = round(budget.ledger(s)["spent_total"] + 1.0, 6)
+        project_settings.update(s, {"budget_usd": cap})
+        a = budget.reserve(s, worker_id="w_a", task_id="t_a", model_id="m", usd=0.6, purpose="model_call")
+        b = budget.reserve(s, worker_id="w_b", task_id="t_b", model_id="m", usd=0.3, purpose="model_call")
+        refused = budget.reserve(s, worker_id="w_c", task_id="t_c", model_id="m", usd=0.5, purpose="model_call")
+        self.assertEqual((refused["status"], refused["waiting_on"]), ("refused", sorted([a["id"], b["id"]])))
+        self.assertFalse(budget.may_retry(s, refused), "nothing it waited on has ended: it would be refused again")
+        later = budget.reserve(s, worker_id="w_d", task_id="t_d", model_id="m", usd=0.05, purpose="model_call")
+        self.assertFalse(budget.may_retry(s, refused), "another call starting frees nothing")
+        budget.release(s, [b["id"]])
+        self.assertTrue(budget.may_retry(s, refused))
+        budget.release(s, [a["id"], later["id"]])
+        again = budget.reserve(s, worker_id="w_e", task_id="t_e", model_id="m", usd=0.9, purpose="model_call")
+        stuck = budget.reserve(s, worker_id="w_c", task_id="t_c", model_id="m", usd=0.5, purpose="model_call")
+        self.assertFalse(budget.may_retry(s, stuck))
+        budget.raise_cap(s, cap + 1.0)
+        self.assertTrue(budget.may_retry(s, stuck), "the founder raised the cap")
+        budget.release(s, [again["id"]])
+        self.assertTrue(budget.may_retry(s, {"status": "refused", "waiting_on": [], "cap": cap}),
+                        "nothing was in flight: the breaker decides, nothing to wait for")

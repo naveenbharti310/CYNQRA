@@ -667,14 +667,24 @@ class ClaudeCodeAdapter(ProviderAdapter):
     title = "Claude Code (this computer)"
     auth_methods = ("none",)
     MODELS = ("claude-haiku-4-5", "claude-sonnet-5-5", "claude-opus-5-5")
+    # Claude Code writes every prompt to the one-hour prompt cache, billed at twice the input price, and a later
+    # read of it at a tenth (Opus 5.5: a twentieth). Measured: 1,257 prompt tokens to Sonnet 5.5 reported $0.005072,
+    # 1,257 x $4 + 2 x $2 + 4 x $10 per million. At the plain input price, forecasts and reservations were half of it.
+    CACHE_WRITE = 2.0
+    CACHE_READ = {"claude-opus-5-5": 0.05}
 
     def discover(self, conn: dict, secret: str | None) -> list[dict]:
         out = []
         for ref in _allow(conn) or list(self.MODELS):
             pin, pout = _price(conn, ref)
+            source = price_source(conn, ref)
+            billed = {}
+            if source == "list" and pin:
+                billed = {"price_in": round(pin * self.CACHE_WRITE, 6),
+                          "price_cached_in": round(pin * self.CACHE_READ.get(ref, 0.1), 6)}
             out.append({"ref": ref, "name": ref, "provider": "Anthropic", "runtime": "claude_code", "local": False,
-                        "price_in": pin, "price_out": pout, "price_source": price_source(conn, ref),
-                        "modalities": ["text"], "json_schema": False, "tools": False})
+                        "price_in": pin, "price_out": pout, "price_source": source,
+                        "modalities": ["text"], "json_schema": False, "tools": False, **billed})
         return out
 
     def reachable(self, conn: dict, entry: dict) -> tuple[bool, str]:

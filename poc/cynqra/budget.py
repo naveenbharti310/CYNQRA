@@ -142,7 +142,7 @@ def reserve(store, *, worker_id: str, task_id: str, model_id: str, usd: float, p
         rec = {"id": rid, "task_id": task_id, "worker_id": worker_id, "model_id": model_id, "usd": round(usd, 6),
                "purpose": purpose, "at": now(), "spent_before": round(L["spent_total"], 6), "reserved_before": held}
         if L["state"] == "breaker" or (usd > 0 and L["spent_total"] + held + usd > cap + 1e-12):
-            rec.update(status="refused", in_flight=len(res),
+            rec.update(status="refused", in_flight=len(res), waiting_on=sorted(res), cap=cap,
                        why="the budget breaker is open" if L["state"] == "breaker" else
                        f"spent ${L['spent_total']:.4f} + in flight ${held:.4f} + this call's ${usd:.4f} would pass "
                        f"the ${cap:.2f} cap")
@@ -153,6 +153,17 @@ def reserve(store, *, worker_id: str, task_id: str, model_id: str, usd: float, p
         _save(store, L)
         store.put("reservation", rid, rec)
         return rec
+
+
+def may_retry(store, refused: dict) -> bool:
+    """Whether work refused a reservation while other work was in flight may ask again: once one of the calls it
+    waited on has ended (what it cost is known and its reservation freed) or the cap has changed. Asking again
+    before then is refused the same way (real run on Claude, objective 1: one review asked 4,065 times in a row
+    while a colleague's call ran)."""
+    L = ledger(store)
+    if not refused.get("waiting_on") or float(project_settings.get(store)["budget_usd"]) != float(refused.get("cap", -1)):
+        return True
+    return any(rid not in (L.get("reservations") or {}) for rid in refused.get("waiting_on") or [])
 
 
 def release(store, reservation_ids: list[str], outcome: str = "settled") -> None:

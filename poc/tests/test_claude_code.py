@@ -94,8 +94,12 @@ class ClaudeCodeTests(unittest.TestCase):
             sup.connect_environment()
         models = {m["ref"]: m for m in sup.registry.models()}
         self.assertEqual(set(models), {"claude-haiku-4-5", "claude-sonnet-5-5", "claude-opus-5-5"})
-        self.assertEqual((models["claude-sonnet-5-5"]["price_in"], models["claude-sonnet-5-5"]["price_out"]),
-                         (2.0, 10.0))
+        sonnet, opus = models["claude-sonnet-5-5"], models["claude-opus-5-5"]
+        # list $2 / $10, with every prompt written to the one-hour cache at twice the input price, read at a tenth
+        self.assertEqual((sonnet["price_in"], sonnet["price_out"], sonnet["price_cached_in"]), (4.0, 10.0, 0.2))
+        self.assertEqual((opus["price_in"], opus["price_cached_in"]), (8.0, 0.2), "Opus 5.5 reads at a twentieth")
+        self.assertAlmostEqual(sup.registry.cost(sonnet, 1257 + 2, 4, 1, 0), 0.005076, places=6,
+                               msg="the measured call: $0.005072 reported for 1,257 cached-write + 2 input tokens")
         mid = models["claude-haiku-4-5"]["id"]
         self.assertEqual(sup.gateway.route_kind(mid), "claude_cli")
         c = sup.registry.record_call(mid, role="w", purpose="work", task_kind="code", run_id="r",

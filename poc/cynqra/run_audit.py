@@ -515,6 +515,18 @@ def _budget(out, c):
            f"cap ${h['cap']}, spent ${h['spent']}, reserved now ${h['reserved']} ({len(held)} still held); "
            f"{len(res)} reservation(s), {sum(1 for r in res if r.get('status') == 'refused')} refused",
            over=over[:5])
+    # work refused while colleagues' calls ran asks again only when one of them has ended: a refusal with nothing
+    # spent or freed since the same task's last one is a spin (real run on Claude, objective 1: 4,065 in a row)
+    last, spins = {}, {}
+    for r in sorted((r for r in res if r.get("status") == "refused"), key=lambda r: r["id"]):
+        seen = (r.get("spent_before"), r.get("reserved_before"))
+        if r.get("in_flight") and last.get(r["task_id"]) == seen:
+            spins[r["task_id"]] = spins.get(r["task_id"], 0) + 1
+        last[r["task_id"]] = seen
+    refused = sum(1 for r in res if r.get("status") == "refused")
+    _check(out, "4", "refused work waited for the calls in flight", FAIL if spins else (PASS if refused else
+           NOT_EXERCISED), f"{refused} refused reservation(s); {sum(spins.values())} asked again with nothing spent "
+           "or freed since the last refusal", spins=dict(sorted(spins.items(), key=lambda kv: -kv[1])[:5]))
     stale = [d["decision_id"] for d in c["decisions"] if d.get("status") in ("superseded", "stale", "revalidated")
              or d.get("revalidates")]
     _check(out, "4", "stale evidence never rewrote a decision", PASS,

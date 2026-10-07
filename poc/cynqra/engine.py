@@ -138,6 +138,9 @@ class Engine:
         # live work in flight: task id -> (its future, the actor doing it); each worker takes its next piece as soon
         # as its own call returns, never waiting for a colleague's slower call
         self._inflight: dict[str, tuple] = {}
+        # work whose call was refused while colleagues' calls were in flight: task id -> the refused reservation; it
+        # is taken again only when one of those calls has ended or the cap has changed (budget.may_retry)
+        self._budget_waits: dict[str, dict] = {}
         self._pool: ThreadPoolExecutor | None = None
         if self.store.get("meta", "run") is None:
             # the tenant and workspace this run's evidence belongs to: another tenant's evidence is never this one's
@@ -1124,11 +1127,13 @@ class Engine:
         by_id = {t["id"]: t for t in tasks}
         busy: set[str] = {a for _, a in self._inflight.values() if a.startswith("w_")}  # still on their last piece
         lease_s = self.LIVE_LEASE_S if isinstance(self.intel, ModelSource) else 120.0
+        for tid in [k for k, res in self._budget_waits.items() if budget.may_retry(self.store, res)]:
+            del self._budget_waits[tid]
         out = []
         for t in tasks:
             s = t["status"]
-            if t["id"] in self._inflight or s not in self.ACTIONS or (s == "PLANNED" and not all(
-                    by_id[d]["status"] == "VERIFIED" for d in t["dependencies"])):
+            if t["id"] in self._inflight or t["id"] in self._budget_waits or s not in self.ACTIONS or (
+                    s == "PLANNED" and not all(by_id[d]["status"] == "VERIFIED" for d in t["dependencies"])):
                 continue
             actor = execution.actor(t)
             if actor.startswith("w_"):
@@ -1159,6 +1164,9 @@ class Engine:
             try:
                 return self.ACTIONS[s](self, t)
             except BudgetHold as exc:  # nothing was spent and nothing failed: the work waits for the budget
+                if exc.reservation.get("in_flight"):
+                    with self.lock:
+                        self._budget_waits[tid] = exc.reservation
                 return {"did": "paused", "task": tid, "why": f"budget: {exc}"}
             except ProtocolError as exc:
                 return self._violation(self.task(tid), s, exc)
