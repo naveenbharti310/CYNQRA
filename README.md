@@ -71,6 +71,7 @@ come anyway also pay half. It suggests 20% off instead, which **makes money**.
 | 3 | [docs/3_STATUS_AND_ROADMAP.md](docs/3_STATUS_AND_ROADMAP.md) | What works today, what is proven, what comes next and why in that order | 5 min |
 | 4 | [docs/4_RUN_AND_TEST.md](docs/4_RUN_AND_TEST.md) | How to run it, test it and build it, and what each run proves | 5 min |
 | 5 | [docs/5_DECISIONS.md](docs/5_DECISIONS.md) | What is settled, and why | 5 min |
+| 6 | [docs/6_PHASED_ARCHITECTURE.md](docs/6_PHASED_ARCHITECTURE.md) | The authoritative architecture contract, phase by phase | 10 min |
 
 ## The repository
 
@@ -80,6 +81,10 @@ come anyway also pay half. It suggests 20% off instead, which **makes money**.
 | `desktop/` | Builds the installable app for Windows, macOS and Linux |
 | `.github/workflows/` | The automatic checks and the real-AI test runs on GitHub |
 | `archive/` | History only: earlier plans, notes and experiments. Not needed to work on Cynqra |
+
+## Where it stands
+
+The engine, the screens and the objective intelligence control loop are built and covered by 481 automated tests (`cd poc && python3 -m unittest discover -s tests -t tests`). On real hosted models (the free tiers of Google, NVIDIA, Groq and Mistral so far), the loop chooses an intelligence for each piece of work from evidence it gathers on that objective, and objectives have been delivered and accepted end to end; free-tier limits still stop many runs before delivery. Every real run, what it showed and what was fixed because of it is in [docs/3_STATUS_AND_ROADMAP.md](docs/3_STATUS_AND_ROADMAP.md); how to start one is in [docs/4_RUN_AND_TEST.md](docs/4_RUN_AND_TEST.md).
 
 ## Start in one minute
 
