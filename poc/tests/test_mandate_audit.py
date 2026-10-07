@@ -2024,3 +2024,70 @@ class NoRoundBarrierTests(unittest.TestCase):
         budget.release(s, [again["id"]])
         self.assertTrue(budget.may_retry(s, {"status": "refused", "waiting_on": [], "cap": cap}),
                         "nothing was in flight: the breaker decides, nothing to wait for")
+
+
+class ResumeTests(unittest.TestCase):
+    """The real run on Claude was stopped at the founder's usage limit (95% of the plan's five-hour window) with its
+    first objective midway, to carry on when the window reset: a run reopened from its saved state goes on to delivery,
+    keeps what was verified without paying for it again, and frees what its stopped process had reserved."""
+
+    def setUp(self):
+        self.saved = no_model_env()
+        self.tmp = TempDir()
+        self.srv = ModelsServer()
+        self.sup = supply_with(self.tmp.path, [("Steady", 0.2)], self.srv)
+
+    def tearDown(self):
+        self.sup.close()
+        self.srv.close()
+        self.tmp.cleanup()
+        restore_env(self.saved)
+
+    def test_a_run_stopped_midway_resumes_to_delivery_and_pays_nothing_twice(self):
+        from cynqra import budget
+        from cynqra import run_hosted_examination as rhe
+        folder = self.tmp.path / "objective-run-1"
+        e = live_engine(folder, self.sup, budget_usd=25.0)
+        for _ in range(40):  # some of the work done, then the process stops
+            e.step()
+            if sum(t["status"] == "VERIFIED" for t in e.tasks()) >= 2:
+                break
+        done = {t["id"] for t in e.tasks() if t["status"] == "VERIFIED"}
+        self.assertTrue(done, "work was verified before the stop")
+        calls_before = len(e.store.all("call"))
+        orphan = budget.reserve(e.store, worker_id="w_be", task_id="t_99", model_id="m", usd=0.5,
+                                purpose="model_call")  # a call in flight when the process stopped
+        self.assertEqual(orphan["status"], "held")
+        e.close()
+
+        lines = []
+        r = rhe.resume_objective_run(self.sup, folder, max_minutes=30, log=lines.append)
+        self.assertNotIn("error", r, r.get("error"))
+        self.assertEqual((r["stage"], r["resumed"], r["lifecycle"]), ("accepted", True, "OBJECTIVE_CLOSED"))
+        self.assertTrue(any("resumed from its saved state" in x for x in lines), lines)
+        from cynqra.db import Store
+        s = Store(str(folder / "cynqra.db"))
+        try:
+            calls = s.all("call")[calls_before:]
+            self.assertFalse([c for c in calls if c.get("task_id") in done and c.get("purpose") == "work"],
+                             "verified work is not done, nor paid for, again")
+            self.assertEqual((s.get("reservation", orphan["id"]) or {}).get("status"), "released_after_restart")
+            self.assertEqual(budget.headroom(s)["reserved"], 0)
+            self.assertTrue(any(x["event_type"] == "budget.reservations_released" for x in s.events()))
+        finally:
+            s.close()
+        again = rhe.resume_objective_run(self.sup, folder, max_minutes=30, log=lines.append)
+        self.assertEqual((again["stage"], again.get("journey")), ("accepted", None), "an ended run is only reported")
+
+    def test_a_reservation_whose_task_is_still_held_by_a_live_process_stays(self):
+        from cynqra import budget
+        e = live_engine(self.tmp.path / "run", self.sup)
+        try:
+            lease = e.store.claim_task("t_01", "another_process", 600)
+            self.assertTrue(lease)
+            live = budget.reserve(e.store, worker_id="w", task_id="t_01", model_id="m", usd=0.1, purpose="model_call")
+            dead = budget.reserve(e.store, worker_id="w", task_id="t_02", model_id="m", usd=0.1, purpose="model_call")
+            self.assertEqual(budget.release_orphans(e.store), [dead["id"]])
+            self.assertIn(live["id"], budget.ledger(e.store)["reservations"], "its call may still finish")
+        finally:
+            e.close()

@@ -166,6 +166,20 @@ def may_retry(store, refused: dict) -> bool:
     return any(rid not in (L.get("reservations") or {}) for rid in refused.get("waiting_on") or [])
 
 
+def release_orphans(store) -> list[str]:
+    """A run reopened after its process stopped (a crash, a kill, a usage limit): a reservation held by a call that
+    can no longer finish ends, so it stops taking headroom; nothing was charged for it. A call in flight holds its
+    task's lease and renews it at every step, so a reservation whose task holds no live lease has no call behind
+    it. One held for a task another process is still working on keeps its lease, and stays."""
+    with store.atomic():
+        held = ledger(store).get("reservations") or {}
+        now_ts = time.time()
+        gone = [rid for rid, r in held.items()
+                if not ((store.task_lease(r.get("task_id") or "") or {}).get("expires_at", 0) > now_ts)]
+        release(store, gone, outcome="released_after_restart")  # the same transaction: nothing claims between
+    return gone
+
+
 def release(store, reservation_ids: list[str], outcome: str = "settled") -> None:
     """In-flight work ended: its reservations end; what it really cost was charged when it was recorded."""
     if not reservation_ids:

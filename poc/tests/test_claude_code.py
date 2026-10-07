@@ -16,8 +16,8 @@ from cynqra.intelligence_layer import IntelligenceSupply
 FAKE = Path(__file__).resolve().parent / "fake_claude.py"
 
 
-@unittest.skipUnless(os.name == "posix", "the test double is started through a shell script")
-class ClaudeCodeTests(unittest.TestCase):
+class _FakeClaude(unittest.TestCase):
+    """The claude command replaced by its test double, for each test."""
 
     def setUp(self):
         self.saved = no_model_env()
@@ -41,6 +41,10 @@ class ClaudeCodeTests(unittest.TestCase):
 
     def calls(self) -> list[dict]:
         return [json.loads(x) for x in self.log.read_text(encoding="utf-8").splitlines()]
+
+
+@unittest.skipUnless(os.name == "posix", "the test double is started through a shell script")
+class ClaudeCodeTests(_FakeClaude):
 
     def test_a_call_is_the_model_alone_with_its_real_tokens_and_cost(self):
         out = model_adapter.complete("Convert the founder objective", max_tokens=1500, route=self.route(),
@@ -133,3 +137,46 @@ class ClaudeCodeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(os.name == "posix", "the test double is started through a shell script")
+class ResumeExaminationTests(_FakeClaude):
+    """The examination the founder stopped at a usage limit carries on in the same data root with --resume:
+    qualification kept, the objective left midway continued from its saved state to delivery."""
+
+    def test_resume_keeps_qualification_and_carries_the_objective_on(self):
+        import io
+        from contextlib import redirect_stdout
+        from cynqra import run_hosted_examination as rhe
+        from cynqra.engine import Engine
+        from test_objective_intelligence import SCENARIO
+        root = self.tmp.path / "exam"
+        argv = ["--provider", "claude-code", "--max-models", "2", "--objective", SCENARIO["messy"],
+                "--objective", SCENARIO["messy"], "--to-delivery", "--budget-usd", "5", "--data-root", str(root),
+                "--max-minutes", "0"]  # stopped before their work went anywhere
+        with mock.patch.dict(os.environ, {"CYNQRA_CLAUDE_CODE": "1"}):
+            first = io.StringIO()
+            with redirect_stdout(first):
+                rhe.main(argv)
+            probes = len(self.calls())
+            self.assertIn('"stage": "time_limit"', first.getvalue())
+            # the second objective was refused at its start (every call refused at a usage limit): it never began
+            import shutil
+            shutil.rmtree(root / "objective-run-2")
+            Engine(root / "objective-run-2").close()
+            self.assertEqual(rhe.saved_phase(root / "objective-run-2"), "new")
+            again = io.StringIO()
+            with redirect_stdout(again):
+                code = rhe.main(argv + ["--resume", "--resume-minutes", "10"])
+        out = again.getvalue()
+        self.assertEqual(code, 0, out[-2000:])
+        self.assertIn("Resuming: qualification kept from the earlier run", out)
+        self.assertNotIn("Examining", out, "no model is examined twice")
+        self.assertIn("10.0 now (given on resuming)", out)
+        manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+        one, two = manifest["objective_runs"]
+        self.assertEqual((one["stage"], one["resumed"], one["lifecycle"]), ("accepted", True, "OBJECTIVE_CLOSED"))
+        self.assertEqual((two["stage"], two.get("resumed")), ("time_limit", None),
+                         "the objective that never began ran from its start, under the examination's own limit")
+        self.assertTrue(all(r.get("kept_from_earlier_run") for r in manifest["results"]))
+        self.assertGreater(len(self.calls()), probes, "the work went on")

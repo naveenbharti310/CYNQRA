@@ -152,6 +152,10 @@ class Engine:
         if self.meta["phase"] != "new":
             self._attach(strict=False)  # a run reopened after a restart opens even if its model is gone for now
             self._refuse_outdated()
+            gone = budget.release_orphans(self.store)  # calls its stopped process held can no longer finish
+            if gone:
+                self.event("budget.reservations_released", "company", self.cid, {"reservations": gone,
+                           "why": "the run was reopened; no call is behind them"}, actor="budget_engine")
 
     OUTDATED = ("This project was made by an earlier version of Cynqra, whose team had roles that no longer exist "
                 "(such as the Business Lead: you are the CEO now, with cofounders). It can be read and exported, but "

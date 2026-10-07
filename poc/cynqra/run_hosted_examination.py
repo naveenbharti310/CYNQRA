@@ -248,6 +248,12 @@ def main(argv: list[str] | None = None) -> int:
                     "is for and whether it accepts it (its free model listing; nothing generated)")
     ap.add_argument("--key-site", default="", help="with --key-check: the service a key with no known prefix "
                     "comes from (its web address)")
+    ap.add_argument("--resume", action="store_true", help="carry on an examination whose process stopped (a kill, a "
+                    "crash, a usage limit) in the same --data-root: qualification is kept, finished objectives are "
+                    "reported as they ended, one left midway continues from its saved state, the rest run")
+    ap.add_argument("--resume-minutes", type=float, default=None, help="with --resume: the minutes an objective "
+                    "left midway gets to carry on (default: what its time limit has left), when its time went to "
+                    "waiting on a provider or an account limit rather than to its work")
     ap.add_argument("--record", default="", help="keep every call's request and answer in this file (no keys)")
     ap.add_argument("--replay", default="", help="answer every call from this recording instead of the providers: "
                     "the whole run again, at no cost")
@@ -299,7 +305,12 @@ def main(argv: list[str] | None = None) -> int:
             print(f"\nExamining {m['ref']}...", flush=True)
             return probe(supply, m["id"], log=print)
 
-        selected, results = examine(entries, limit, examined, served, parallel=limit)  # side by side
+        kept = kept_qualification(supply, entries, limit) if args.resume else None
+        if kept:
+            selected, results = kept
+            print("Resuming: qualification kept from the earlier run: " + ", ".join(m["ref"] for m in selected))
+        else:
+            selected, results = examine(entries, limit, examined, served, parallel=limit)  # side by side
         from .sandbox import isolation
         manifest = {
             "connections": connections,
@@ -317,8 +328,12 @@ def main(argv: list[str] | None = None) -> int:
         for i, (label, statement) in enumerate(statements, 1):
             folder = root / ("objective-run" if len(statements) == 1 else f"objective-run-{i}")
             print(f"\nObjective {i} of {len(statements)} ({label}), in {folder.name}:", flush=True)
-            r = objective_run(supply, folder, statement, args.budget_usd, to_delivery=args.to_delivery,
-                              max_minutes=args.max_minutes, live=args.live_events)
+            if args.resume and saved_phase(folder) not in (None, "new"):  # one that never began runs from the start
+                r = resume_objective_run(supply, folder, max_minutes=args.max_minutes, live=args.live_events,
+                                         minutes=args.resume_minutes)
+            else:
+                r = objective_run(supply, folder, statement, args.budget_usd, to_delivery=args.to_delivery,
+                                  max_minutes=args.max_minutes, live=args.live_events)
             runs.append(r | {"label": label, "folder": folder.name})
             print("\nObjective run:\n" + json.dumps(objective_summary(r), indent=2, default=str))
             print("\nSelection report:\n" + json.dumps((r.get("selection_report") or {}).get("summary"), indent=2,
@@ -507,23 +522,7 @@ def objective_run(supply, folder: Path, statement: str, budget_usd: float, *, to
         if to_delivery:
             out["journey"] = journey(e, max_minutes, log)
             out["stage"] = out["journey"]["ended"]
-        p = e.store.get(calibration.KIND, calibration.plan_id(e)) or {}
-        out.update(lifecycle=(e.objective() or {}).get("lifecycle", {}).get("state"),
-                   calibration={k: p.get(k) for k in ("status", "reason", "spent_usd", "budget_usd", "stopping",
-                                                       "coverage")}
-                   | {"trials": [{k: t.get(k) for k in ("item_id", "intelligence_id", "verified", "attribution",
-                                                         "usd")} for t in p.get("trials") or []],
-                      "items": [{k: i.get(k) for k in ("item_id", "work_class", "source_task_id", "candidates",
-                                                        "skipped")} for i in p.get("items") or []]},
-                   decisions=[{k: x.get(k) for k in ("decision_id", "work_item_id", "purpose", "selection_mode",
-                                                      "status", "selection_reason")}
-                              | {"selected": (x.get("selected_intelligence") or {}).get("id"),
-                                 "replayed": controller.replay(e, x["decision_id"])["reproduced"]}
-                              for x in e.decisions()],
-                   selection_report=selection_report(e, p),
-                   calls=calls_summary(e),
-                   spent_usd=e.snapshot()["budget"]["ledger"]["spent_total"], phase=e.meta.get("phase"),
-                   notice=e.meta.get("notice"))
+        _report(e, out)
     except Exception as exc:  # noqa: BLE001 - a real provider can fail at any stage: recorded as it happened
         out.update(error=f"{type(exc).__name__}: {exc}"[:600], notice=e.meta.get("notice"))
         try:
@@ -538,6 +537,111 @@ def objective_run(supply, folder: Path, statement: str, budget_usd: float, *, to
             e.close()
     return out
 
+
+def _report(e, out: dict) -> None:
+    """What an objective run did, from its store: lifecycle, calibration, every decision replayed, the selection
+    report, the calls and the spend."""
+    from . import calibration, controller
+    p = e.store.get(calibration.KIND, calibration.plan_id(e)) or {}
+    out.update(lifecycle=(e.objective() or {}).get("lifecycle", {}).get("state"),
+               calibration={k: p.get(k) for k in ("status", "reason", "spent_usd", "budget_usd", "stopping",
+                                                   "coverage")}
+               | {"trials": [{k: t.get(k) for k in ("item_id", "intelligence_id", "verified", "attribution",
+                                                     "usd")} for t in p.get("trials") or []],
+                  "items": [{k: i.get(k) for k in ("item_id", "work_class", "source_task_id", "candidates",
+                                                    "skipped")} for i in p.get("items") or []]},
+               decisions=[{k: x.get(k) for k in ("decision_id", "work_item_id", "purpose", "selection_mode",
+                                                  "status", "selection_reason")}
+                          | {"selected": (x.get("selected_intelligence") or {}).get("id"),
+                             "replayed": controller.replay(e, x["decision_id"])["reproduced"]}
+                          for x in e.decisions()],
+               selection_report=selection_report(e, p),
+               calls=calls_summary(e),
+               spent_usd=e.snapshot()["budget"]["ledger"]["spent_total"], phase=e.meta.get("phase"),
+               notice=e.meta.get("notice"))
+
+
+def saved_phase(folder: Path) -> str | None:
+    """The phase an objective run's folder was saved in, None when it holds no run. Read without opening the run."""
+    from .db import Store
+    if not (folder / "cynqra.db").exists():
+        return None
+    st = Store(str(folder / "cynqra.db"))
+    try:
+        return (st.get("meta", "run") or {}).get("phase")
+    finally:
+        st.close()
+
+
+def resume_objective_run(supply, folder: Path, *, max_minutes: float = 300.0, log=print, live: bool = False,
+                         minutes: float | None = None) -> dict:
+    """An objective run its process left midway (a kill, a crash, a usage limit), reopened from its saved state: work
+    already verified stays verified and is not paid for again, work that was in flight starts over (nothing was
+    charged for it, and its reservations are released as the run reopens: budget.release_orphans), and the run goes
+    on to delivery with the minutes its time limit has left. A run that had already ended is reported as it ended."""
+    from . import settings as project_settings
+    from .engine import Engine
+    e = Engine(folder, supply=supply)
+    out = {"objective": (e.objective() or {}).get("statement"),
+           "budget_usd": project_settings.get(e.store)["budget_usd"],
+           "stage": e.meta.get("phase"), "to_delivery": True, "resumed": True}
+    tail = None
+    try:
+        if e.meta.get("phase") in ("planning", "running"):  # past its first bindings: the journey carries it on
+            if live:
+                tail = EventTail(e.store, log=log)
+                tail.seq = max((x["seq"] for x in e.store.events()), default=0)  # only what happens from here
+                tail.start()
+            used = minutes_worked(e)
+            left = max(0.0, max_minutes - used) if minutes is None else float(minutes)
+            log(f"  resumed from its saved state: {used:.1f} minutes worked before the stop, {left:.1f} now"
+                + (" (given on resuming)" if minutes is not None else f" (what its {max_minutes:g} have left)"))
+            out["journey"] = journey(e, left, log) | {"minutes_before": round(used, 1)}
+            out["stage"] = out["journey"]["ended"]
+        elif e.meta.get("phase") in ("accepted", "stopped", "stopped_error"):
+            log(f"  already ended ({e.meta.get('phase')}): reported as it ended")
+        else:  # stopped before its first bindings: nothing of its work to keep
+            out["error"] = (f"stopped before its work began (phase {e.meta.get('phase')}): run this objective again "
+                            "without --resume")
+            log("  " + out["error"])
+        _report(e, out)
+    except Exception as exc:  # noqa: BLE001 - as objective_run: recorded as it happened
+        out.update(error=f"{type(exc).__name__}: {exc}"[:600], notice=e.meta.get("notice"))
+    finally:
+        try:
+            if tail is not None:
+                tail.stop()
+        finally:
+            e.close()
+    return out
+
+
+def minutes_worked(e) -> float:
+    """Minutes from the objective's work starting (OBJECTIVE_EXECUTING) to its last saved event: the part of its time
+    limit an earlier process used."""
+    from datetime import datetime
+    events = e.store.events()
+    start = next((x for x in events if x["event_type"] == "objective.state_changed"
+                  and '"OBJECTIVE_EXECUTING"' in str(x.get("payload")) and '"to"' in str(x.get("payload"))), None)
+    if start is None or not events:
+        return 0.0
+    t = lambda x: datetime.fromisoformat(str(x["created_at"])).timestamp()  # noqa: E731
+    return max(0.0, (t(events[-1]) - t(start)) / 60)
+
+
+def kept_qualification(supply, entries: list[dict], limit: int) -> tuple[list[dict], list[dict]] | None:
+    """On --resume: the models this data root's earlier run qualified, still offered and passed for their current
+    version, so the examination is not paid for twice. None when there are none: then they are examined."""
+    kept = []
+    for m in entries:
+        r = supply.registry.get(m["id"]) or {}
+        if (r.get("regression") or {}).get("status") == "passed" and r.get("status") == "active":
+            kept.append(m)
+    if not kept:
+        return None
+    kept = kept[:max(1, int(limit))]
+    return kept, [{"model_id": m["id"], "passed": True, "kept_from_earlier_run": True,
+                   "evidence": (supply.registry.get(m["id"]).get("regression") or {}).get("evidence")} for m in kept]
 
 def journey(e, max_minutes: float, log=print, idle_wait: float = 30.0) -> dict:
     """The work after the first bindings, to delivery: step until idle, answer the first pending decision as an
