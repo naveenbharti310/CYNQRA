@@ -55,11 +55,12 @@ permissions:
   contents: read
 
 jobs:
-  # objective "key-check": only say which provider the CLEAN_API_KEY secret is for and whether it accepts it (its
-  # free model listing; nothing is generated, nothing else runs, and the key is never printed)
+  # objective "key-check" (or "key-check <the service's web address>" for a key with no known prefix): only say which
+  # provider the CLEAN_API_KEY secret is for and whether it accepts it (its free model listing; nothing is generated,
+  # nothing else runs, and the key is never printed)
   key-check:
     name: Check a saved key
-    if: ${{ inputs.objective == 'key-check' }}
+    if: ${{ startsWith(inputs.objective, 'key-check') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -67,12 +68,16 @@ jobs:
       - name: Which provider the key is for, and whether it accepts it
         env:
           CLEAN_API_KEY: ${{ secrets.CLEAN_API_KEY }}
+          OBJECTIVE: ${{ inputs.objective }}
           PYTHONUNBUFFERED: "1"
-        run: python3 poc/run_hosted_examination.py --key-check CLEAN_API_KEY
+        run: |
+          site="${OBJECTIVE#key-check}"
+          site="${site# }"
+          python3 poc/run_hosted_examination.py --key-check CLEAN_API_KEY ${site:+--key-site "$site"}
 
   examine:
     name: Discover and measure hosted intelligence
-    if: ${{ inputs.objective != 'key-check' }}
+    if: ${{ !startsWith(inputs.objective, 'key-check') }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:

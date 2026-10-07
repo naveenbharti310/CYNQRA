@@ -387,5 +387,37 @@ class KeyCheckTests(unittest.TestCase):
         self.assertNotIn(secret, text)
 
 
+    def test_a_key_with_no_prefix_is_checked_against_the_service_it_came_from_only(self):
+        """The founder's CLEAN_API_KEY (51 characters, no provider's prefix) came from cleanapis.com: its page is
+        read without the key, then the usual OpenAI-compatible listings on that domain only, and the first that
+        answers is connected through Cynqra."""
+        from cynqra import run_hosted_examination as rhe
+        from cynqra.intelligence_layer.adapters import SupplyError
+        secret = "Zq9" * 17
+        page = ('<html><head><title>Clean APIs</title><meta name="description" content="One API for many models">'
+                '</head><body><a href="/docs">API docs</a><a href="/pricing">Pricing</a><a href="/x">Blog</a></body>')
+        calls, out = [], []
+
+        def listing(url, headers, timeout=30.0):
+            calls.append((url, json.dumps(headers)))
+            if url == "https://cleanapis.com/api/v1/models":
+                return {"data": [{"id": "model-x", "object": "model"}]}
+            if url.startswith("https://cleanapis.com/"):
+                raise SupplyError(f"{url} answered HTTP 404: not found")
+            return {"data": []}  # the public catalogue, read without a key
+
+        with mock.patch.dict(os.environ, {"CLEAN_API_KEY": secret}), \
+                mock.patch.object(rhe, "_page", return_value=page), \
+                mock.patch("cynqra.intelligence_layer.adapters._get_json", side_effect=listing):
+            self.assertEqual(rhe.key_check("CLEAN_API_KEY", log=out.append, site="https://cleanapis.com/"), 0)
+        text = "\n".join(out)
+        self.assertIn("Clean APIs - One API for many models", text)
+        self.assertIn("API docs -> https://cleanapis.com/docs", text)
+        self.assertNotIn("Blog", text)
+        self.assertIn("accepted at https://cleanapis.com/api/v1 and Cynqra discovers 1 model(s): model-x", text)
+        with_key = [u for u, h in calls if secret in h]
+        self.assertTrue(with_key and all(u.startswith("https://cleanapis.com/") for u in with_key), with_key)
+        self.assertNotIn(secret, text)
+
 if __name__ == "__main__":
     unittest.main()

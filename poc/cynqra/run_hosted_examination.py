@@ -95,16 +95,19 @@ def identify(secret: str) -> tuple[str, str] | None:
     return next(((env, label) for prefix, env, label in KEY_PREFIXES if secret.startswith(prefix)), None)
 
 
-def key_check(name: str, log=print) -> int:
+def key_check(name: str, log=print, site: str = "") -> int:
     """Which provider a saved key is for, and whether that provider accepts it: told from the key's public prefix
-    (it is sent to no other service), then the provider's own model listing, which costs nothing. Nothing is
-    generated, and the key is never printed."""
+    (it is sent to no other service), then the provider's own model listing, which costs nothing; a key with no
+    known prefix is checked against the service the founder names (site). Nothing is generated, and the key is never
+    printed."""
     import tempfile
     secret = (os.environ.get(name) or "").strip()
     if not secret:
         log(f"{name} is not set for this job")
         return 1
     found = identify(secret)
+    if found is None and site:
+        return site_check(name, secret, site, log)
     if found is None:
         log(f"{name}: no provider's prefix ({len(secret)} characters, "
             f"{'letters and digits only' if secret.isalnum() else 'with symbols'}); say which service it is for")
@@ -132,6 +135,80 @@ def key_check(name: str, log=print) -> int:
             supply.close()
 
 
+def _page(url: str) -> str:
+    """A public web page's text, read without any key (at most 500 KB)."""
+    import urllib.request
+    from .model_adapter import USER_AGENT
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": USER_AGENT}), timeout=20) as r:
+        return r.read(500_000).decode("utf-8", errors="replace")
+
+
+def site_check(name: str, secret: str, site: str, log=print) -> int:
+    """A key from a service with no known prefix (cleanapis.com), checked against the site the founder named: its
+    public page read without the key (title, description, links to its docs, pricing, terms and privacy); then the
+    usual OpenAI-compatible model listings on that site's own domain, the key sent nowhere else; the first that
+    answers is connected through Cynqra, as a founder's key is. Nothing is generated, and the key is never
+    printed."""
+    import re
+    import tempfile
+    import urllib.parse
+    from .intelligence_layer.adapters import SupplyError, _get_json
+    url = site if "://" in site else "https://" + site
+    host = (urllib.parse.urlparse(url).hostname or "").lower()
+    if not host:
+        log(f"{name}: {site!r} is not a web address")
+        return 1
+    root, domain = f"https://{host}", host.removeprefix("www.")
+    hide = lambda text: str(text).replace(secret, "[key]")  # noqa: E731 - a reply that echoes the key
+    try:
+        html = _page(root)
+        title = re.search(r"<title[^>]*>(.*?)</title>", html, re.I | re.S)
+        about = re.search(r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']*)', html, re.I)
+        log(f"{root}: {(title.group(1).strip() if title else 'no title')[:120]}"
+            + (f" - {about.group(1).strip()[:300]}" if about else ""))
+        seen = set()
+        for href, text in re.findall(r'<a[^>]+href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', html, re.I | re.S):
+            text = re.sub(r"<[^>]+>|\s+", " ", text).strip()
+            if re.search(r"api|doc|pric|term|privacy|model|about|contact|compan", href + " " + text, re.I) \
+                    and href not in seen and len(seen) < 25:
+                seen.add(href)
+                log(f"  link: {text[:60] or '-'} -> {urllib.parse.urljoin(root + '/', href)[:160]}")
+    except Exception as exc:  # noqa: BLE001 - a page that cannot be read says nothing about the key
+        log(f"{root}: the page could not be read ({str(exc)[:160]})")
+    for base in dict.fromkeys((f"{root}/v1", f"{root}/api/v1", f"{root}/api", f"https://api.{domain}/v1",
+                               f"{root}/openai/v1")):
+        to = (urllib.parse.urlparse(base).hostname or "").lower()
+        if to not in (host, domain) and not to.endswith("." + domain):
+            continue  # the key goes to the founder's service only
+        try:
+            listing = _get_json(base + "/models", {"Authorization": f"Bearer {secret}"}, timeout=20)
+        except SupplyError as exc:
+            log(f"  {base}/models: {hide(exc)[:200]}")
+            continue
+        rows = listing.get("data") if isinstance(listing, dict) else None
+        if not isinstance(rows, list):
+            log(f"  {base}/models: answered, but not with an OpenAI-compatible model list")
+            continue
+        log(f"  {base}/models: {len(rows)} model(s) listed")
+        with tempfile.TemporaryDirectory() as d:
+            supply = IntelligenceSupply(Path(d))
+            try:
+                got = supply.connect({"type": "openai_compatible", "name": f"{domain} (key check)", "endpoint": base,
+                                      "auth": {"method": "env", "env_var": name}, "models": []})
+                conn, refs = got["connection"], sorted(str(m.get("ref") or m["id"]) for m in got["intelligence"])
+                log(f"  Cynqra connected {conn['name']}: {conn.get('status')} ({hide(conn.get('status_note') or '')})")
+                log(f"{name}: a {domain} key; it is accepted at {base} and Cynqra discovers {len(refs)} model(s): "
+                    + ", ".join(refs))
+                return 0 if refs else 1
+            except SupplyError as exc:
+                log(f"  Cynqra could not connect {base}: {hide(exc)[:200]}")
+                return 1
+            finally:
+                supply.close()
+    log(f"{name}: no OpenAI-compatible model list answered on {domain}; its docs name the address to use")
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--max-models", type=int, default=4)
@@ -150,9 +227,11 @@ def main(argv: list[str] | None = None) -> int:
                     "they are saved: the founder's view, live")
     ap.add_argument("--key-check", default="", help="only say which provider the key in this environment variable "
                     "is for and whether it accepts it (its free model listing; nothing generated)")
+    ap.add_argument("--key-site", default="", help="with --key-check: the service a key with no known prefix "
+                    "comes from (its web address)")
     args = ap.parse_args(argv)
     if args.key_check:
-        return key_check(args.key_check)
+        return key_check(args.key_check, site=args.key_site)
 
     keys = {p: env for p, (env, _) in PROVIDERS.items()}
     wanted = parse_providers(args.provider)
