@@ -28,7 +28,7 @@ from __future__ import annotations
 import json
 import os
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 import time
 import uuid
 from datetime import datetime
@@ -99,6 +99,10 @@ class Engine:
         self.intel = None
         self.live_proc = None
         self._tls = threading.local()  # the task a worker thread is acting on, and the budget it has reserved
+        # live work in flight: task id -> (its future, the actor doing it); each worker takes its next piece as soon
+        # as its own call returns, never waiting for a colleague's slower call
+        self._inflight: dict[str, tuple] = {}
+        self._pool: ThreadPoolExecutor | None = None
         if self.store.get("meta", "run") is None:
             # the tenant and workspace this run's evidence belongs to: another tenant's evidence is never this one's
             self.store.put("meta", "run", {"company_id": "co_" + uuid.uuid4().hex[:8], "phase": "new", "mode": "demo",
@@ -244,23 +248,26 @@ class Engine:
             out = self._call(mid, request, pin)
         except SupplyError as exc:
             raise IntelligenceError(str(exc), model_id=mid) from exc
-        if who == binding.SYSTEM and out.get("error"):
-            out = self._system_failover(request, mid, out)
+        if out.get("error") and (who == binding.SYSTEM or not self._task_ctx()):
+            # no task to wait in (the control plane's work, or a worker's stage such as the roadmap): it fails over;
+            # a task's call that fails goes to the Replacement Engine instead (wait, or a stand-in)
+            out = self._system_failover(request, mid, out, who)
         return out
 
-    def _system_failover(self, request: dict, mid: str, out: dict) -> dict:
-        """The control plane's call failed on the provider's or the account's side: the next qualified intelligence
-        takes the control plane's work (controller.system_failover), each at most once for this call. A failure the
-        intelligence caused, or no alternative left, comes back as it was."""
+    def _system_failover(self, request: dict, mid: str, out: dict, who: str = binding.SYSTEM) -> dict:
+        """A call with no task to wait in failed on the provider's or the account's side (real run 37080673901: the
+        planner's free daily allowance ran out mid-roadmap and every objective stopped, with Kimi K3 qualified and
+        answering): the next qualified intelligence takes the work (controller.system_failover), each at most once
+        for this call. A failure the intelligence caused, or no alternative left, comes back as it was."""
         from . import attribution as attr
         tried = [mid]
         while out.get("error") and not attr.clean(attr.call_failure(out["error"])):
-            alt = controller.system_failover(self, tried[-1], out["error"], tried=tried)
+            alt = controller.system_failover(self, tried[-1], out["error"], tried=tried, worker_id=who)
             if alt is None or alt in tried:
                 break
             tried.append(alt)
             try:
-                out = self._call(alt, request, (binding.current(self.store, binding.SYSTEM) or {}).get("version"))
+                out = self._call(alt, request, (binding.current(self.store, who) or {}).get("version"))
             except SupplyError as exc:
                 raise IntelligenceError(str(exc), model_id=alt) from exc
         return out
@@ -953,11 +960,22 @@ class Engine:
                    actor_type="human", authority="founder")
 
     # --- Stage 8: the run ------------------------------------------------------------------------------------------
+    # How long a step waits for some piece of work in flight to finish before it reports that work is going on, so
+    # a caller's time limit is checked while a slow call runs. A live task's lease covers the longest call
+    # (model_adapter.TIMEOUT_S, 600 s) with room to spare, and every step renews the leases of the work in flight.
+    STEP_WAIT_S = 15.0
+    LIVE_LEASE_S = 900.0
+
     def step(self) -> dict:
-        """One round of the run. Every worker with work it can do now takes one piece of it (a person does one
+        """One step of the run. Every worker with work it can do now takes one piece of it (a person does one
         thing at a time), and they work at the same time: each hands its result on, or raises a Blocker, when it is
-        done, and the colleague it concerns picks that up in the next round. Verification and approved actions are
-        the platform's and run in the same round. Model calls overlap; recording their results is serialized."""
+        done, and the colleague it concerns picks that up at the next step. Verification and approved actions are
+        the platform's. Model calls overlap; recording their results is serialized. With live models, a step returns
+        as soon as one piece of work finishes, and a worker whose call returned takes its next piece while a
+        colleague's slower call is still running (real run 37044180144: one slow call held every other worker for
+        51 minutes when a round waited for all of its calls). A prepared script still runs in plan order."""
+        live = isinstance(self.intel, ModelSource)
+        finished = self._collect() if live else []
         with self.lock:
             m = self.meta
             if m["frozen"]:
@@ -968,7 +986,9 @@ class Engine:
                 return {"did": "idle", "why": "budget breaker open"}
             replacement.resume_waiting(self)
             actions = self._round()
-            if not actions:
+            if not actions and finished:
+                return self._summary(finished)
+            if not actions and not self._inflight:
                 tasks = self.tasks()
                 if tasks and all(t["status"] == "VERIFIED" for t in tasks):
                     return delivery.deliver(self)
@@ -976,13 +996,16 @@ class Engine:
                 if waiting:
                     return {"did": "idle", "why": f"waiting for the provider: {waiting[0]['waiting']['why']}"}
                 return {"did": "idle", "why": "waiting on the founder"}
-        if len(actions) == 1 or not isinstance(self.intel, ModelSource):
+        if not live:
             # a prepared script answers at once: its round runs in plan order, so a demo replays the same way
             results = [self._act(tid) for tid in actions]
         else:
-            with ThreadPoolExecutor(max_workers=min(len(actions), project_settings.get(self.store)["parallel_workers"]),
-                                    thread_name_prefix="worker") as pool:
-                results = list(pool.map(self._act, actions))
+            results = finished + self._overlap(actions)
+            if not results:
+                return {"did": "working", "why": f"{len(self._inflight)} piece(s) of work in flight"}
+        return self._summary(results)
+
+    def _summary(self, results: list) -> dict:
         results = [r for r in results if r]
         if not results:
             return {"did": "idle", "why": "nothing could proceed"}
@@ -992,6 +1015,32 @@ class Engine:
         return {"did": "error" if errors else "round", "task": results[0].get("task"), "actions": results,
                 "why": errors[0]["why"] if errors else f"{len(results)} pieces of work at the same time"}
 
+    def _overlap(self, actions: list[str]) -> list:
+        """Start the new pieces of work, then wait until any piece in flight finishes (or STEP_WAIT_S): what
+        finished is returned, the rest keeps running and is collected by a later step."""
+        with self.lock:
+            if self._pool is None:
+                self._pool = ThreadPoolExecutor(max_workers=project_settings.get(self.store)["parallel_workers"],
+                                                thread_name_prefix="worker")
+            for tid in actions:
+                self._inflight[tid] = (self._pool.submit(self._act, tid), execution.actor(self.task(tid)))
+            running = [f for f, _ in self._inflight.values()]
+        if running:
+            wait(running, timeout=self.STEP_WAIT_S, return_when=FIRST_COMPLETED)
+        return self._collect()
+
+    def _collect(self) -> list:
+        """The pieces of work in flight that have finished, in task order; the leases of the others are renewed,
+        so a task is held for as long as its own call runs and is never started twice."""
+        with self.lock:
+            done = sorted(tid for tid, (f, _) in self._inflight.items() if f.done())
+            futures = [self._inflight.pop(tid)[0] for tid in done]
+            for tid in self._inflight:
+                lease = self.store.task_lease(tid)
+                if lease:
+                    self.store.renew_task_lease(tid, lease["lease_id"], self.LIVE_LEASE_S)
+        return [f.result() for f in futures]
+
     ACTIONS = {"PLANNED": execution.assign, "ASSIGNED": execution.work, "REWORK": execution.work,
                "BLOCKED": execution.answer, "REVIEW": execution.verify, "LEAD_REVIEW": execution.lead_review,
                "APPROVED": execution.execute_approved}
@@ -1000,11 +1049,12 @@ class Engine:
         """Select ready work and atomically lease it before any slow model call can start."""
         tasks = self.tasks()
         by_id = {t["id"]: t for t in tasks}
-        busy: set[str] = set()
+        busy: set[str] = {a for _, a in self._inflight.values() if a.startswith("w_")}  # still on their last piece
+        lease_s = self.LIVE_LEASE_S if isinstance(self.intel, ModelSource) else 120.0
         out = []
         for t in tasks:
             s = t["status"]
-            if s not in self.ACTIONS or (s == "PLANNED" and not all(
+            if t["id"] in self._inflight or s not in self.ACTIONS or (s == "PLANNED" and not all(
                     by_id[d]["status"] == "VERIFIED" for d in t["dependencies"])):
                 continue
             actor = execution.actor(t)
@@ -1012,7 +1062,7 @@ class Engine:
                 if actor in busy:
                     continue
                 busy.add(actor)
-            if self.store.claim_task(t["id"], actor):
+            if self.store.claim_task(t["id"], actor, lease_s):
                 out.append(t["id"])
             elif actor in busy:
                 busy.discard(actor)
@@ -1449,6 +1499,21 @@ class Engine:
         }
 
     def close(self) -> None:
+        pool, self._pool = self._pool, None
+        if pool is not None:  # the calls in flight finish and record what they did before the store closes
+            owned = self.lock._is_owned()  # a caller holding the run (a reset) lets that work record its result
+            state = self.lock._release_save() if owned else None
+            try:
+                pool.shutdown(wait=True, cancel_futures=True)
+            finally:
+                if owned:
+                    self.lock._acquire_restore(state)
+            with self.lock:
+                for tid, (f, _) in list(self._inflight.items()):
+                    lease = self.store.task_lease(tid) if f.cancelled() else None
+                    if lease:  # queued, never started: its lease ends with the run
+                        self.store.release_task(tid, lease["lease_id"])
+                self._inflight.clear()
         deploy.stop(self.live_proc)
         self.store.close()
         if self._own is not None:

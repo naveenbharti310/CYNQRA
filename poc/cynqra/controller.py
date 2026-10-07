@@ -450,28 +450,32 @@ def system_intelligence(run, purpose: str = "objective intelligence and workforc
     return d["selected_intelligence"]["id"]
 
 
-def system_failover(run, failed: str, error: str, tried=()) -> str | None:
-    """The control plane's own work has no seat to wait in: when its intelligence's provider or account refuses a
-    call (never the intelligence's fault, and never learned as one), the controller decides again without it and
-    the work goes on with the next qualified intelligence, if there is one. The new decision and the reroute are on
-    the record, with the reason."""
+def system_failover(run, failed: str, error: str, tried=(), worker_id: str | None = None) -> str | None:
+    """Work that has no task to wait in: the control plane's own, or a worker's stage of the run (the planner
+    writing the roadmap). When its intelligence's provider or account refuses a call (never the intelligence's
+    fault, and never learned as one), the controller decides again without it and the work goes on with the next
+    qualified intelligence, if there is one; a worker keeps its seat and its binding history. The new decision and
+    the reroute are on the record, with the reason."""
     cause = attr.call_failure(error)
     out = sorted(set(tried) | {failed})
-    work = work_for_system(run, "control_plane")
+    w = run.worker(worker_id) if worker_id and worker_id != binding.SYSTEM else None
+    work = work_for_worker(run, w, roles.staffing_kinds(w["role"])) if w else work_for_system(run, "control_plane")
+    whose = f"{w['id']}'s" if w else "the control plane's"
     why = f"its {cause['kind']} refused the call ({cause['reason']})"
     d = decide(run, work, "failover", exclude=out, exclude_why={m: why for m in out})
     if d["selected_intelligence"] is None:
         _mark(run, d["decision_id"], status="no_selection",
-              note="no other qualified intelligence is available for the control plane's work")
+              note=f"no other qualified intelligence is available for {whose} work")
         return None
-    b = commit(run, d, work, reason=f"the control plane's intelligence {failed}: {why}; decided again without it",
+    b = commit(run, d, work, reason=f"{whose} intelligence {failed}: {why}; decided again without it",
                by="intelligence_controller", purpose="failover", exclude=out, exclude_why={m: why for m in out},
                candidates_rows=legacy_rows(d))
     if b is None:
         return None
     run.event("intelligence.rerouted", "work_item", work["work_item_id"], {
-        "from": failed, "to": b["intelligence_id"], "worker_id": binding.SYSTEM, "decision_id": b["decision_id"],
-        "cause": cause["kind"], "why": why[:200]}, actor="intelligence_controller", correlation_id=work["work_item_id"])
+        "from": failed, "to": b["intelligence_id"], "worker_id": w["id"] if w else binding.SYSTEM,
+        "decision_id": b["decision_id"], "cause": cause["kind"], "why": why[:200]}, actor="intelligence_controller",
+        correlation_id=work["work_item_id"])
     return b["intelligence_id"]
 
 

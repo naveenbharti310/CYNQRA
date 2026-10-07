@@ -349,6 +349,48 @@ class ControlPlaneFailoverTests(unittest.TestCase):
         finally:
             e.close()
 
+    def test_a_refused_planner_moves_the_roadmap_to_the_next_qualified_intelligence(self):
+        # real run 37080673901: the planner's model (gpt-oss-120b on Groq) used its free daily allowance mid-roadmap
+        # ("tokens per day ... try again in"), and all three objectives stopped there, Kimi K3 qualified and answering
+        from cynqra.engine import Engine
+        from helpers import SCENARIO
+        tpd = json.dumps({"error": {"message": "Rate limit reached for model `quota` on tokens per day (TPD): Limit "
+                                               "200000, Used 199444, Requested 3669. Please try again in 26m3s.",
+                                    "type": "tokens", "code": "rate_limit_exceeded"}})
+        e = Engine(self.tmp.path / "run", supply=self.sup)
+        try:
+            e.create_company("Harbor Recruiting", "live")
+            e.draft_objective(SCENARIO["messy"])
+            e.submit_objective()
+            d = next(x for x in e.pending_decisions() if x["kind"] == "approve_workforce")
+            e.decide(d["id"], "approve")
+            from unittest import mock
+            from cynqra import planner
+            real, seen = planner.plan, {}
+
+            def refuse_then_plan(run, note="", cycle=1):  # the planner's provider stops answering as the plan starts
+                seen.setdefault("boss", run.planner_id())
+                seen.setdefault("on", run.model_of(seen["boss"]))
+                self.srv.refused[seen["on"].capitalize()] = (429, tpd)
+                return real(run, note, cycle=cycle)
+
+            with mock.patch.object(planner, "plan", side_effect=refuse_then_plan):
+                e.define_founder()  # the roadmap: the planner's call is refused, and the plan is written all the same
+            boss, other = seen["boss"], ({"quota", "steady"} - {seen["on"]}).pop()
+            self.assertNotEqual(e.meta.get("phase"), "stopped_error", e.meta.get("notice"))
+            self.assertTrue(e.tasks(), "the roadmap was planned")
+            fo = [x for x in e.decisions() if x["purpose"] == "failover" and x.get("worker_id") == boss]
+            self.assertEqual([(x["selected_intelligence"]["id"], x["status"]) for x in fo], [(other, "committed")])
+            moved = [x["payload"] for x in e.store.events() if x["event_type"] == "intelligence.rerouted"
+                     and x["payload"].get("worker_id") == boss]
+            self.assertEqual([(m["from"], m["to"], m["cause"]) for m in moved], [(seen["on"], other, "provider")])
+            self.assertTrue(e.worker(boss), "the planner keeps its seat")
+            self.assertTrue(controller.replay(e, fo[0]["decision_id"])["reproduced"])
+            self.assertFalse([o for o in e.registry.store.all("outcome") if o.get("model_id") == seen["on"]
+                              and o.get("purpose") == "plan"], "nothing is learned about the refused one")
+        finally:
+            e.close()
+
     def test_with_no_other_intelligence_the_failure_is_reported_as_before(self):
         from cynqra.engine import Engine
         from cynqra.intelligence import IntelligenceError
@@ -531,4 +573,130 @@ class HostedTimeoutTests(unittest.TestCase):
         self.assertLess(time.time() - started, 4.0, "no retry waits")
         self.assertEqual(diagnose(str(ctx.exception)), "timeout")
         self.assertIn(call_failure(str(ctx.exception))["kind"], ("provider", "network"))
+
+
+class NoRoundBarrierTests(unittest.TestCase):
+    """Real run 37044180144: workers moved in lock-step rounds, and a round ended only when every call in it had
+    returned, so one call held open ten minutes five times kept every other worker waiting 51 minutes, and the
+    objective's 70-minute limit was checked only between rounds. Each worker now takes its next piece as soon as its
+    own call returns; a worker still does one thing at a time, and a task is held for its whole call."""
+
+    def setUp(self):
+        from test_objective_intelligence import live_engine
+        self.saved = no_model_env()
+        self.tmp = TempDir()
+        self.srv = ModelsServer()
+        self.sup = supply_with(self.tmp.path, [("Steady", 0.2)], self.srv)
+        self.e = live_engine(self.tmp.path / "run", self.sup)
+        self.started, self.ended = {}, {}
+
+    def tearDown(self):
+        if self.e is not None:
+            self.e.close()
+        self.sup.close()
+        self.srv.close()
+        self.tmp.cleanup()
+        restore_env(self.saved)
+
+    def _work(self, delays: dict):
+        """Four pieces of work: t_01 and t_02 for the same worker, t_03 and t_04 for two others. Each piece takes
+        its delay and is then done; t_05 and t_06 are held, so nothing is delivered."""
+        import time
+        from unittest import mock
+        from cynqra.engine import Engine
+        for tid in ("t_01", "t_02", "t_03", "t_04"):
+            t = self.e.task(tid)
+            t.update(status="ASSIGNED", owner_worker_id="w_pm" if tid in ("t_01", "t_02") else t["owner_worker_id"])
+            self.e.save_task(t)
+        for tid in ("t_05", "t_06"):  # held out of this test: nothing moves them
+            t = self.e.task(tid)
+            t["status"] = "HELD_FOR_TEST"
+            self.e.save_task(t)
+
+        def act(run, t):
+            self.assertNotIn(t["id"], self.started, "a piece of work is started once")
+            self.started[t["id"]] = time.time()
+            time.sleep(delays.get(t["id"], 0.05))
+            with run.lock:  # recording the result is serialized, as the real work records it
+                t = run.task(t["id"])
+                t["status"] = "VERIFIED"
+                run.save_task(t)
+            self.ended[t["id"]] = time.time()
+            return {"did": "worked", "task": t["id"]}
+
+        return mock.patch.dict(Engine.ACTIONS, {"ASSIGNED": act})
+
+    def test_a_slow_call_does_not_hold_up_the_other_workers(self):
+        import time
+        with self._work({"t_01": 2.0}):
+            t0 = time.time()
+            r = self.e.step()
+            self.assertLess(time.time() - t0, 1.5, "the step returned when the fast work finished")
+            done = {x["task"] for x in r.get("actions", [r])}
+            self.assertTrue(done and done <= {"t_03", "t_04"}, done)
+            self.assertIn("t_01", self.e._inflight, "the slow call is still running")
+            self.assertNotIn("t_02", self.started, "its worker does one thing at a time")
+            for _ in range(10):
+                if self.e.step()["did"] == "idle":
+                    break
+        self.assertEqual(sorted(self.started), ["t_01", "t_02", "t_03", "t_04"])
+        self.assertGreaterEqual(self.started["t_02"], self.ended["t_01"], "w_pm's next piece after its own call")
+        self.assertFalse(self.e._inflight)
+
+    def test_a_step_reports_work_in_flight_so_a_time_limit_is_checked(self):
+        import time
+        self.e.STEP_WAIT_S = 0.2
+        with self._work({"t_01": 1.5, "t_03": 1.5, "t_04": 1.5}):
+            t0 = time.time()
+            r = self.e.step()
+            self.assertEqual(r["did"], "working", r)
+            self.assertLess(time.time() - t0, 1.0)
+            self.e.close()  # the calls in flight finish and record what they did before the store closes
+            self.e = None
+        self.assertEqual(sorted(self.ended), ["t_01", "t_03", "t_04"])
+        from cynqra.db import Store
+        s = Store(str(self.tmp.path / "run" / "cynqra.db"))
+        try:
+            self.assertEqual({tid: s.get("task", tid)["status"] for tid in ("t_01", "t_03", "t_04")},
+                             {"t_01": "VERIFIED", "t_03": "VERIFIED", "t_04": "VERIFIED"})
+            self.assertIsNone(s.task_lease("t_01"), "no lease outlives its work")
+        finally:
+            s.close()
+
+    def test_a_task_is_held_for_its_whole_call(self):
+        from cynqra.db import Store
+        self.e.STEP_WAIT_S, self.e.LIVE_LEASE_S = 0.2, 0.5  # a lease shorter than the call: renewed while it runs
+        other = Store(str(self.tmp.path / "run" / "cynqra.db"))
+        try:
+            with self._work({"t_01": 1.5}):
+                self.e.step()
+                for _ in range(20):  # past the short lease three times over while the call runs
+                    if "t_01" in self.ended:
+                        break
+                    self.assertIsNone(other.claim_task("t_01", "another_engine"), "nobody else may start it")
+                    self.e.step()
+                while self.e._inflight:
+                    self.e.step()
+            self.assertIn("t_01", self.ended)
+            self.assertEqual(list(self.started).count("t_01"), 1)
+        finally:
+            other.close()
+
+    def test_closing_while_holding_the_run_waits_for_the_work_in_flight_without_deadlock(self):
+        # the app's reset closes the engine while holding its lock; the work in flight needs that lock to record
+        import threading
+        self.e.STEP_WAIT_S = 0.1
+        with self._work({"t_01": 1.0}):
+            self.e.step()
+            done = threading.Event()
+
+            def reset():
+                with self.e.lock:
+                    self.e.close()
+                done.set()
+
+            threading.Thread(target=reset, daemon=True).start()
+            self.assertTrue(done.wait(10), "close finished")
+            self.e = None
+        self.assertIn("t_01", self.ended)
 
