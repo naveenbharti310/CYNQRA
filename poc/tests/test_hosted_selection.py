@@ -112,6 +112,64 @@ class NewestOfEachLineTests(unittest.TestCase):
         tried, _ = examine(entries, 2, run, served)
         self.assertEqual(len(tried), 4, "at most twice the limit are tried")
 
+    def test_probes_run_side_by_side_in_order_and_a_place_not_served_is_refilled(self):
+        """Paid run 37628067857 spent 27 minutes qualifying three models one after another, 18.6 of them on one
+        model's hung probe. The places still open are now examined side by side."""
+        import threading
+        import time
+        from cynqra.intelligence_layer.candidates import examine
+        entries = [model(r, r, "google") for r in ("a-1", "b-1", "c-1", "d-1", "e-1")]
+        live, most = [0], [0]
+        lock = threading.Lock()
+
+        def run(m):
+            with lock:
+                live[0] += 1
+                most[0] = max(most[0], live[0])
+            time.sleep(0.3)
+            with lock:
+                live[0] -= 1
+            return {"model_id": m["id"], "error": "HTTP 404" if m["id"] == "b-1" else ""}
+
+        served = lambda r: "HTTP 404" not in r["error"]  # noqa: E731
+        start = time.time()
+        tried, results = examine(entries, 3, run, served, parallel=3)
+        self.assertLess(time.time() - start, 0.85, "two waves of 0.3 s, not four probes one after another")
+        self.assertEqual(most[0], 3)
+        self.assertEqual([m["id"] for m in tried], ["a-1", "b-1", "c-1", "d-1"], "b-1's place went to d-1")
+        self.assertEqual([r["model_id"] for r in results], ["a-1", "b-1", "c-1", "d-1"], "results in order")
+        self.assertEqual([m["id"] for m in examine(entries, 3, run, served)[0]], ["a-1", "b-1", "c-1", "d-1"],
+                         "one at a time chooses the same")
+
+    def test_a_probes_first_short_answer_has_five_minutes_and_the_rest_the_models_own_deadline(self):
+        from cynqra import probe
+
+        class Gateway:
+            seen = []
+
+            def invoke(self, model_id, request, pinned_version=None, limit_s=None):
+                self.seen.append(limit_s)
+                return {"text": '{"problem": "p", "users": "u", "outcome": "o", "constraints": "c", "success": "s", '
+                                '"scope": "s", "risks": "r", "product": "p", "inferred_fields": [], '
+                                '"missing_fields": []}', "tokens_in": 1, "tokens_out": 1, "estimated": False,
+                        "error": None, "model_id": model_id}
+
+        class Registry:
+            def record_call(self, *a, **k):
+                return {"usd": 0.0, "seconds": 0.0, "tokens_in": 1, "tokens_out": 1}
+
+            def record_outcome(self, *a, **k):
+                return None
+
+        class Supply:
+            gateway, registry = Gateway(), Registry()
+
+        run = probe._Run(Supply(), "m1", "probe")
+        run.objective(lambda s: None)
+        run.invoke("w_eng_a", {"prompt": "next"})
+        self.assertEqual(Gateway.seen[0], probe.FIRST_ANSWER_S)
+        self.assertEqual(Gateway.seen[-1], None, "the code rounds keep the model's own deadline")
+
     def test_the_examination_counts_a_404_as_not_served_and_an_empty_account_as_served(self):
         from cynqra.run_hosted_examination import served
         self.assertFalse(served({"error": 'RuntimeError: HTTP 404 from provider: [{"error": {"code": 404, "message": '

@@ -56,7 +56,11 @@ class IntelligenceGateway:
         self._calls: dict[str, deque] = {}
         self.lock = threading.Lock()
 
-    def invoke(self, model_id: str, request: dict, pinned_version: str | None = None) -> dict:
+    def invoke(self, model_id: str, request: dict, pinned_version: str | None = None,
+               limit_s: float | None = None) -> dict:
+        """One call to an intelligence. limit_s caps a deadline the gateway sets from the model's record (never one a
+        connection set): a qualification probe's first, short answer is not given the 15 minutes an unknown model
+        otherwise gets."""
         req = {k: request[k] for k in REQUEST_KEYS if k in request}
         entry = self.registry.get(model_id)
         if entry.get("status") == "retired":
@@ -74,7 +78,7 @@ class IntelligenceGateway:
         except SupplyError as exc:
             return self._failed(entry, str(exc))
         if route.pop("_deadline_from_record", False):
-            route["CYNQRA_TIMEOUT"] = str(self.deadline(model_id))
+            route["CYNQRA_TIMEOUT"] = str(int(min(self.deadline(model_id), limit_s or float("inf"))))
         fault = entry.get("fault") or {}
         if fault.get("offline"):
             route["offline"] = True

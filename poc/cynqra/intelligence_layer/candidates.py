@@ -127,18 +127,32 @@ def select(entries: list[dict], limit: int, prefer: list[str] | None = None) -> 
     return chosen[:limit]
 
 
-def examine(entries: list[dict], limit: int, run_one, served=lambda result: True) -> tuple[list[dict], list[dict]]:
+def examine(entries: list[dict], limit: int, run_one, served=lambda result: True,
+            parallel: int = 1) -> tuple[list[dict], list[dict]]:
     """Qualification work on a bounded set, in select's order. A candidate its provider turns out not to serve (it
     lists the model, then answers HTTP 404, "no longer available to new users") gives its place to the next, so the
-    limit counts models that can be used; at most twice the limit are tried. Returns the candidates tried and their
-    results, in order."""
-    limit = max(1, int(limit))
-    tried, results = [], []
-    for m in select(entries, len(entries)):
-        if len(tried) >= 2 * limit or sum(1 for r in results if served(r)) >= limit:
+    limit counts models that can be used; at most twice the limit are tried. With parallel, the places still open are
+    examined side by side, up to parallel at once: qualification then takes about as long as its slowest probe, not
+    the sum of them (paid run 37628067857: 27 minutes one after another, 18.6 of them one model's hung probe).
+    Returns the candidates tried and their results, in select's order."""
+    from concurrent.futures import ThreadPoolExecutor
+    limit, parallel = max(1, int(limit)), max(1, int(parallel))
+    order = select(entries, len(entries))
+    tried, results, i = [], [], 0
+    while i < len(order):
+        need = limit - sum(1 for r in results if served(r))
+        room = 2 * limit - len(tried)
+        if need <= 0 or room <= 0:
             break
-        tried.append(m)
-        results.append(run_one(m))
+        batch = order[i:i + min(need, room, parallel)]
+        i += len(batch)
+        if len(batch) == 1:
+            out = [run_one(batch[0])]
+        else:
+            with ThreadPoolExecutor(max_workers=len(batch), thread_name_prefix="cynqra-probe") as pool:
+                out = list(pool.map(run_one, batch))
+        tried += batch
+        results += out
     return tried, results
 
 

@@ -277,7 +277,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"\nExamining {m['ref']}...", flush=True)
             return probe(supply, m["id"], log=print)
 
-        selected, results = examine(entries, limit, examined, served)
+        selected, results = examine(entries, limit, examined, served, parallel=limit)  # side by side
         from .sandbox import isolation
         manifest = {
             "connections": connections,
@@ -415,14 +415,20 @@ def objective_summary(run: dict) -> dict:
 def calls_summary(e) -> dict:
     """The run's calls in figures: how many, the tokens, the share of input read from the providers' prompt caches,
     the answers its journal held (paid for once), and how long the models were let think."""
+    from .intelligence_layer.adapters import cache_minimum
     calls = e.store.all("call")
     tin = sum(int(c.get("tokens_in") or 0) for c in calls)
     cached = sum(int(c.get("tokens_cached") or 0) for c in calls)
+    minimums = [(c, cache_minimum(c.get("label") or "")) for c in calls]
     efforts: dict[str, int] = {}
     for c in calls:
         efforts[str(c.get("effort") or "default")] = efforts.get(str(c.get("effort") or "default"), 0) + 1
     return {"calls": len(calls), "tokens_in": tin, "tokens_out": sum(int(c.get("tokens_out") or 0) for c in calls),
             "tokens_cached": cached, "cache_hit_rate": round(cached / tin, 3) if tin else None,
+            # whether a 0 means no hits: the provider may not report its cache, and never caches a short prompt
+            "cache_reported_by_provider": sum(1 for c in calls if c.get("cache_reported")),
+            "under_cache_minimum": sum(1 for c, n in minimums if n and int(c.get("tokens_in") or 0) < n),
+            "median_tokens_in": sorted(int(c.get("tokens_in") or 0) for c in calls)[len(calls) // 2] if calls else None,
             "journaled": sum(1 for c in calls if c.get("journaled")), "by_effort": efforts}
 
 

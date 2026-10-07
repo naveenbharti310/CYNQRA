@@ -175,7 +175,8 @@ class IntelligenceSupply:
 
         if not pending:
             return []
-        return examine([m for m in pending if not m.get("local")] + local, limit, one, served)[1]
+        # hosted candidates are examined side by side; a model on this computer is one of them at most (above)
+        return examine([m for m in pending if not m.get("local")] + local, limit, one, served, parallel=limit)[1]
 
     def remove_connection(self, connection_id: str) -> None:
         for m in self.registry.models():

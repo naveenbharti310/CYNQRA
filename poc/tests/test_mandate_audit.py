@@ -738,6 +738,36 @@ class PromptCacheTests(unittest.TestCase):
         self.assertEqual((got["cache_hit_rate"], got["journaled"], got["by_effort"]),
                          (0.4, 1, {"low": 1, "high": 1}))
 
+    def test_a_run_tells_no_cache_hits_from_a_provider_that_does_not_report_them_or_a_prompt_too_short(self):
+        """Paid run 37628067857 measured 0 cached tokens over 168,641: its prompts (median about 1,700 tokens) were
+        under Gemini 3's caching minimum of 4,096, and Google's OpenAI-compatible route reports no cache figures."""
+        from cynqra.intelligence_layer.adapters import cache_minimum
+        from cynqra.model_adapter import _cache_reported
+        from cynqra.run_hosted_examination import calls_summary
+        self.assertTrue(_cache_reported({"prompt_tokens": 10, "prompt_tokens_details": {"cached_tokens": 0}}))
+        self.assertTrue(_cache_reported({"input_tokens": 10, "cache_read_input_tokens": 0}))
+        self.assertFalse(_cache_reported({"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}))
+        self.assertEqual([cache_minimum(r) for r in ("gemini-3.5-flash-lite", "models/gemini-2.5-pro", "gpt-4o-mini",
+                                                     "kimi-k3")], [4096, 2048, 1024, None])
+
+        class Run:
+            class store:
+                @staticmethod
+                def all(kind):
+                    return [{"label": "gemini-3.5-flash-lite", "tokens_in": 1700, "cache_reported": False},
+                            {"label": "gemini-3.1-pro-preview", "tokens_in": 5000, "cache_reported": False},
+                            {"label": "kimi-k3", "tokens_in": 900, "cache_reported": True}]
+
+        got = calls_summary(Run())
+        self.assertEqual((got["cache_reported_by_provider"], got["under_cache_minimum"], got["median_tokens_in"]),
+                         (1, 1, 1700))
+
+    def test_a_hosted_reply_says_whether_its_provider_reports_the_cache(self):
+        srv, url, _ = fake_provider(lambda body, n: (200, reply(), None))
+        self.addCleanup(stop, srv)
+        out = model_adapter.complete("hi", max_tokens=100, route=hosted_route(url))
+        self.assertIs(out["cache_reported"], False, "a plain usage block says nothing about a cache")
+
 
 class ProvenanceTests(unittest.TestCase):
     """Files team members wrote, tool output, test output and other models' replies all enter later prompts, and only
@@ -1219,7 +1249,7 @@ class DeadlineTests(unittest.TestCase):
                                           usage={"latency_s": sec, "tokens_in": 10, "tokens_out": 10}, run_id="r",
                                           error=error)
 
-    def _timeout_sent(self) -> float:
+    def _timeout_sent(self, limit_s=None) -> float:
         seen = {}
 
         def fake(prompt, route=None, **_):
@@ -1227,9 +1257,15 @@ class DeadlineTests(unittest.TestCase):
             return {"text": "{}", "tokens_in": 1, "tokens_out": 1, "estimated": False, "latency_s": 0.1, "error": None}
 
         with mock.patch("cynqra.intelligence_layer.gateway.model_adapter.complete", side_effect=fake):
-            self.sup.gateway.invoke(self.mid, {"prompt": "hi"})
+            self.sup.gateway.invoke(self.mid, {"prompt": "hi"}, limit_s=limit_s)
         self.assertNotIn("_deadline_from_record", seen)
         return float(seen["CYNQRA_TIMEOUT"])
+
+    def test_a_short_limit_caps_the_deadline_from_the_record_and_never_a_limit_someone_set(self):
+        self.assertEqual(self._timeout_sent(limit_s=300), 300.0, "an unknown model's 15 minutes cut to five")
+        self.assertEqual(self._timeout_sent(), 900.0)
+        with mock.patch.dict(os.environ, {"CYNQRA_TIMEOUT": "1800"}):
+            self.assertEqual(self._timeout_sent(limit_s=300), 1800.0, "the environment's own limit is kept")
 
     def test_the_deadline_follows_the_models_own_answers(self):
         from cynqra.intelligence_layer import gateway
@@ -1262,19 +1298,44 @@ class CutOffReplyTests(unittest.TestCase):
         model_adapter._NO_EFFORT.clear()
 
     def test_the_works_risk_sets_how_long_to_think(self):
-        from cynqra.intelligence import work_effort
-        self.assertEqual(work_effort({"kind": "document", "tier": "LOW"}), "low")
-        self.assertEqual(work_effort({"kind": "document", "tier": "MEDIUM"}), "medium")
-        self.assertEqual(work_effort({"kind": "code", "tier": "LOW"}), "medium")
-        self.assertEqual(work_effort({"kind": "deploy", "tier": "HIGH"}), "high")
+        from cynqra import roles
+        from cynqra.intelligence import review_effort, work_effort
+        self.assertEqual(work_effort({"kind": "document", "risk_tier": "LOW"}), "low")
+        self.assertEqual(work_effort({"kind": "decision", "risk_tier": "MEDIUM"}), "low")
+        self.assertEqual(work_effort({"kind": "code", "risk_tier": "LOW"}), "medium")
+        self.assertEqual(work_effort({"kind": "deploy", "risk_tier": "HIGH"}), "medium")
+        self.assertEqual(work_effort({"kind": "deploy", "risk_tier": roles.risk("deploy")}), "medium",
+                         "read from the field a planned task really carries (risk_tier)")
+        self.assertEqual((review_effort(0), review_effort(1), review_effort(3)), ("low", "medium", "medium"))
 
     def test_each_failed_attempt_thinks_a_step_longer_and_a_new_model_starts_again(self):
         from cynqra.intelligence import work_effort
-        doc = {"kind": "document", "tier": "LOW"}
+        doc = {"kind": "document", "risk_tier": "LOW"}
         self.assertEqual([work_effort({**doc, "attempts": n}) for n in range(4)], ["low", "medium", "high", "high"])
-        self.assertEqual([work_effort({"kind": "code", "tier": "LOW", "attempts": n}) for n in range(3)],
+        self.assertEqual([work_effort({"kind": "code", "risk_tier": "LOW", "attempts": n}) for n in range(3)],
                          ["medium", "high", "high"])
         self.assertEqual(work_effort({**doc, "attempts": 0, "replacements": 1}), "low", "a replacement starts again")
+
+    def test_a_review_thinks_little_at_first_and_more_on_a_second_look(self):
+        from cynqra.intelligence import ModelSource
+        asked = []
+
+        class Access:
+            def intelligence_for(self, worker):
+                return "m1"
+
+            def invoke(self, worker, request):
+                asked.append(request)
+                return {"text": '{"verdict": "approve", "note": "ok"}', "tokens_in": 1, "tokens_out": 1,
+                        "estimated": False, "error": None}
+
+        src = ModelSource()
+        src.bind(Access())
+        task = {"id": "t_08", "title": "Deploy", "kind": "deploy", "expected_output": "live", "risk_tier": "HIGH"}
+        for rnd in (0, 1):
+            src.review(task, worker="w_cto", objective={}, rules=[], owner="DevOps", work={"proposal": {"a": 1}},
+                       round_index=rnd)
+        self.assertEqual([r["effort"] for r in asked], ["low", "medium"])
 
     def test_the_effort_a_call_used_is_on_its_record_and_a_second_ask_keeps_it(self):
         from cynqra.intelligence import ModelSource

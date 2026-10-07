@@ -51,6 +51,15 @@ LIST_PRICES = {
     "gemini-3.5-flash": (1.50, 9.00),
 }
 WORST_PRICE = (10.00, 50.00)
+# The fewest input tokens a provider's prompt cache serves (published, 7 Oct 2026): a shorter prompt is never cached,
+# whatever its prefix. Google: 4,096 for the Gemini 3 models, 2,048 for Gemini 2.5. OpenAI: 1,024.
+CACHE_MIN_TOKENS = (("gemini-3", 4096), ("gemini-2.5", 2048), ("gpt-", 1024), ("o3", 1024), ("o4", 1024))
+
+
+def cache_minimum(ref: str) -> int | None:
+    """The provider's caching minimum for a model, where it is published; None where it is not known."""
+    name = str(ref or "").lower().removeprefix("models/").split("/")[-1]
+    return next((n for prefix, n in CACHE_MIN_TOKENS if name.startswith(prefix)), None)
 # Provider types designed for but not built in V1. Listed so the product can say so; they cannot be connected.
 PLANNED = {"bedrock": "AWS Bedrock (IAM authentication): planned after V1; it is an adapter added here"}
 NOT_CHAT = ("embed", "tts", "whisper", "dall-e", "moderation", "image", "audio", "realtime", "transcribe", "search",

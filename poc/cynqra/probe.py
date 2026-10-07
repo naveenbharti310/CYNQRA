@@ -38,6 +38,7 @@ CHECK_HANDOFF = {"acceptance_check": (
 
 
 ENGINEER = roles.prompt_text({"id": "w_eng_a", "role": "Engineer", "title": "Software Engineer"})
+FIRST_ANSWER_S = 300  # the probe's first call: seven fields, about a thousand tokens (Gemini 3.1 Pro: 60 s)
 
 
 class _Run:
@@ -46,7 +47,7 @@ class _Run:
 
     def __init__(self, supply, model_id: str, source: str):
         self.supply, self.reg, self.model_id, self.source = supply, supply.registry, model_id, source
-        self.run_id = f"{source}_{int(time.time())}"
+        self.run_id = f"{source}_{int(time.time())}_{model_id}"  # probes run side by side: one run id each
         self.src = ModelSource()
         self.src.bind(self)
         self.usd = 0.0
@@ -54,8 +55,10 @@ class _Run:
     def intelligence_for(self, worker: str) -> str:
         return self.model_id
 
+    limit_s: float | None = None  # set while a call must answer sooner than the model's own deadline
+
     def invoke(self, worker: str, request: dict) -> dict:
-        return self.supply.gateway.invoke(self.model_id, request)
+        return self.supply.gateway.invoke(self.model_id, request, limit_s=self.limit_s)
 
     def outcome(self, kind, verified, usage, attempt, failure=""):
         c = self.reg.record_call(self.model_id, role=self.source, purpose=kind, task_kind=kind, usage=usage,
@@ -68,8 +71,15 @@ class _Run:
         return c
 
     def objective(self, log) -> tuple[bool, dict]:
-        """A structured answer. One field left empty is what the founder fills in review; more is not the job."""
-        data, u = self.src.structure_objective(CHECK_OBJECTIVE)
+        """A structured answer. One field left empty is what the founder fills in review; more is not the job. It is
+        short (seven fields), so it has FIRST_ANSWER_S to come back: a model that holds it longer is inconclusive
+        and gives its place to the next (paid run 37628067857: Gemini 3.8 Flash held it 18.6 minutes, then the
+        connection dropped)."""
+        self.limit_s = FIRST_ANSWER_S
+        try:
+            data, u = self.src.structure_objective(CHECK_OBJECTIVE)
+        finally:
+            self.limit_s = None
         empty = [k for k in OBJECTIVE_KEYS if not str(data.get(k) or "").strip()]
         ok = len(empty) <= 1
         self.outcome("objective", ok, u, 1, "empty fields: " + ", ".join(empty) if empty else "")

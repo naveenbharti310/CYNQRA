@@ -380,14 +380,22 @@ EFFORTS = ("low", "medium", "high")
 
 
 def work_effort(task: dict) -> str:
-    """How long a thinking model may think on a task: high for high-risk work, medium for building (code, forecasts)
-    and medium-risk work, low for the rest. Its default is its most, which made paid run 37589136743's calls take
-    three to five minutes and cut replies off. Each attempt that failed verification on the same model raises it a
-    step, up to high (the escalation ladder): cheap thinking first, more only where it was needed. A replacement
-    model starts again from the task's own level."""
-    tier = str(task.get("tier") or "").upper()
-    level = 2 if tier == "HIGH" else 1 if task.get("kind") in roles.BUILD_TYPES or tier == "MEDIUM" else 0
+    """How long a thinking model may think on a task: medium for building (code, forecasts) and for high-risk work,
+    low for the rest. A model's own default is its most, which made paid run 37589136743's calls take three to five
+    minutes and cut replies off. Each attempt that failed verification on the same model raises it a step, up to high
+    (the escalation ladder): cheap thinking first, more only where verification showed it was needed. A replacement
+    model starts again from the task's own level. (Until 7 October this read a "tier" field tasks do not have, so
+    every task started as low risk; paid run 37628067857 delivered all three objectives with no call above medium.)"""
+    tier = str(task.get("risk_tier") or task.get("tier") or "").upper()
+    level = 1 if task.get("kind") in roles.BUILD_TYPES or tier == "HIGH" else 0
     return EFFORTS[min(level + max(0, int(task.get("attempts") or 0)), len(EFFORTS) - 1)]
+
+
+def review_effort(round_index: int = 0) -> str:
+    """How long a reviewer may think: low on the first round (the platform has already run its automatic checks, and
+    a deploy still needs the founder's approval and production verification), medium once work came back for a
+    second look. Paid run 37628067857: a deploy review at the model's medium setting took seven minutes."""
+    return "low" if int(round_index or 0) < 1 else "medium"
 
 
 class ModelSource:
@@ -474,7 +482,8 @@ class ModelSource:
             # asks again and then replaces it (real run 36990295187 stopped three objectives here, unnamed)
             raise IntelligenceError("model did not return a JSON object", model_id=model_id, usage=out)
         usage = {"tokens_in": out["tokens_in"], "tokens_out": out["tokens_out"],
-                 "tokens_cached": int(out.get("tokens_cached") or 0), "estimated": out["estimated"],
+                 "tokens_cached": int(out.get("tokens_cached") or 0), "cache_reported": bool(out.get("cache_reported")),
+                 "estimated": out["estimated"],
                  "label": out.get("model") or model_id, "latency_s": out.get("latency_s", 0), "model_id": model_id,
                  "journaled": bool(out.get("journaled")), "effort": used}
         if out.get("speed"):
@@ -739,7 +748,7 @@ class ModelSource:
                           needs_from=who[0] if who else "", effort=work_effort(task))
 
     def review(self, task: dict, worker: str, objective: dict, rules: list[str], owner: str, work: dict,
-               persona: str = "", **_) -> tuple[dict, dict]:
+               persona: str = "", round_index: int = 0, **_) -> tuple[dict, dict]:
         """A cofounder reviews its team member's work before it counts: files that passed the platform's checks, or
         a proposal before it goes to the founder."""
         crit = "; ".join(task.get("acceptance_criteria") or [])
@@ -756,7 +765,8 @@ class ModelSource:
                   "was asked and is right for this company. Send it back only for a concrete problem, and say exactly "
                   "what to change; the platform has already run its automatic checks.\n"
                   'Return JSON: {"verdict": "approve" or "revise", "note": "..."}')
-        return self._call(prompt, max_tokens=800, schema=SCHEMAS["review"], worker=worker)
+        return self._call(prompt, max_tokens=800, schema=SCHEMAS["review"], worker=worker,
+                          effort=review_effort(round_index))
 
     def answer_blocker(self, task: dict, worker: str, objective: dict, rules: list[str], blocker: dict,
                        artifact_index: list[str], persona: str = "", **_) -> tuple[dict, dict]:

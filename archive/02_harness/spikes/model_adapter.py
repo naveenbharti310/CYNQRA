@@ -384,6 +384,15 @@ def _tokens_cached(usage: dict) -> int:
     return max(0, min(n, total))
 
 
+def _cache_reported(usage: dict) -> bool:
+    """Whether the provider's usage says anything about its prompt cache, so a run can tell "no cache hits" from "the
+    provider does not report them". Google's OpenAI-compatible route has been reported to leave them out; and Gemini
+    caches no prompt under its minimum (4,096 tokens for the Gemini 3 models: adapters.CACHE_MIN_TOKENS)."""
+    details = usage.get("prompt_tokens_details")
+    return (isinstance(details, dict) and "cached_tokens" in details) or any(
+        k in usage for k in ("prompt_cache_hit_tokens", "cache_read_input_tokens", "cached_tokens"))
+
+
 def _post(url: str, payload: dict, headers: dict, timeout: float = TIMEOUT_S, retry: bool = True,
           waits: tuple = RETRY_WAITS_S) -> dict:
     """One call, retried on the provider's side. A hosted model that is overloaded is retried on the short, spread
@@ -426,7 +435,7 @@ def _openai(prompt: str, model: str, max_tokens: int = 1500) -> dict:
         "text": (data["choices"][0]["message"]["content"] or ""),
         "tokens_in": int(usage.get("prompt_tokens") or 0),
         "tokens_out": _tokens_out(usage),
-        "tokens_cached": _tokens_cached(usage),
+        "tokens_cached": _tokens_cached(usage), "cache_reported": _cache_reported(usage),
         "estimated": False,
     }
 
@@ -468,7 +477,7 @@ def _anthropic(prompt: str, model: str, max_tokens: int = 1500) -> dict:
         + int(usage.get("cache_read_input_tokens") or 0)
         + int(usage.get("cache_creation_input_tokens") or 0),
         "tokens_out": int(usage.get("output_tokens") or 0),
-        "tokens_cached": _tokens_cached(usage),
+        "tokens_cached": _tokens_cached(usage), "cache_reported": _cache_reported(usage),
         "estimated": False,
     }
 
@@ -604,10 +613,11 @@ def _local_openai(prompt: str, model: str, max_tokens: int, want_json: bool = Fa
     if cut and not partial:
         raise _Truncated("reply truncated at max_tokens", {"tokens_in": int(usage.get("prompt_tokens") or 0),
                                                             "tokens_out": _tokens_out(usage),
-                                                            "tokens_cached": _tokens_cached(usage)})
+                                                            "tokens_cached": _tokens_cached(usage),
+                                                            "cache_reported": _cache_reported(usage)})
     out = {"text": choice["message"].get("content") or "", "tokens_in": int(usage.get("prompt_tokens") or 0),
-           "tokens_out": _tokens_out(usage), "tokens_cached": _tokens_cached(usage), "estimated": False,
-           "truncated": cut}
+           "tokens_out": _tokens_out(usage), "tokens_cached": _tokens_cached(usage),
+           "cache_reported": _cache_reported(usage), "estimated": False, "truncated": cut}
     t = data.get("timings") or {}  # llama-server's own measurement of this call
     if t.get("predicted_per_second"):
         out["speed"] = {"read_tps": round(float(t.get("prompt_per_second") or 0), 1),
@@ -670,8 +680,8 @@ def _hf(prompt: str, model: str, max_tokens: int, want_json: bool = False, schem
     if not text.strip() and not cut:
         raise RuntimeError("the model returned no answer")
     return {"text": text, "tokens_in": int(usage.get("prompt_tokens") or 0),
-            "tokens_out": _tokens_out(usage), "tokens_cached": _tokens_cached(usage), "estimated": False,
-            "truncated": cut}
+            "tokens_out": _tokens_out(usage), "tokens_cached": _tokens_cached(usage),
+            "cache_reported": _cache_reported(usage), "estimated": False, "truncated": cut}
 
 
 def _cmd(prompt: str) -> dict:
@@ -902,6 +912,7 @@ def _complete(prompt: str, max_tokens: int, want_json: bool, schema: dict | None
             "tokens_in": int(billed.get("tokens_in") or 0),
             "tokens_out": int(billed.get("tokens_out") or 0),
             "tokens_cached": int(billed.get("tokens_cached") or 0),
+            "cache_reported": bool(billed.get("cache_reported")),
             "estimated": not billed,
             "error": f"{'RuntimeError' if isinstance(exc, _Truncated) else type(exc).__name__}: {exc}",
         }
