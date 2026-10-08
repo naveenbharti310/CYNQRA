@@ -70,7 +70,7 @@ def scorecard(store, worker_id: str, model_id: str | None, reg=None) -> dict:
                        "retries": len(ver) - len(passed),
                        "tokens_per_verified": round(tokens / len(verified_tasks)) if verified_tasks else None,
                        "cache_hit_rate": round(cached / tin, 3) if tin else None},
-        "economics": {"usd": round(usd, 4),
+        "economics": {"usd": round(usd, 4), "verified_tasks": len(verified_tasks),
                       "usd_per_verified": round(usd / len(verified_tasks), 4) if verified_tasks else None},
         "human_friction": {"escalations": len(esc), "rejections": len(rej)},
     }
@@ -102,7 +102,11 @@ def below(card: dict, forecast_per_task: float | None = None, t: dict | None = N
         out.append(f"{r['protocol_violations']} protocol violations")
     if r["calls"] + r["failed_calls"] >= t["min_calls"] and (r["failure_rate"] or 0) >= t["failure_rate"]:
         out.append(f"{r['failed_calls']} of {r['calls'] + r['failed_calls']} calls failed")
-    if forecast_per_task and e["usd_per_verified"] and e["usd_per_verified"] > t["cost_vs_forecast"] * forecast_per_task:
+    # cost per verified task is judged, like quality, only over enough verified tasks: over one it is that task's cost,
+    # and a first failed attempt beside it made a model look three times its forecast (real run of 8 Oct: a build
+    # moved off a model after its first failed check, to the most expensive one)
+    if (forecast_per_task and e["usd_per_verified"] and e.get("verified_tasks", t["min_verifications"]) >= t["min_verifications"]
+            and e["usd_per_verified"] > t["cost_vs_forecast"] * forecast_per_task):
         out.append(f"{dollars(e['usd_per_verified'])} per verified task, over {t['cost_vs_forecast']}x the forecast "
                    f"{dollars(forecast_per_task)}")
     return out

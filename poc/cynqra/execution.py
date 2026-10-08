@@ -14,6 +14,7 @@ that keeps failing goes to the Replacement Engine, and to the founder only when 
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -441,8 +442,22 @@ def settle(run, t: dict, pending: dict, extra: dict, settler: str, why: str) -> 
     return {"did": "settled", "task": t["id"], "decision": d["id"], "by": settler}
 
 
+# A failure the founder's retry did not change is not retried again: the real run of 8 Oct on Claude retried one
+# refused write 74 times, an examination founder approving each escalation, until the objective's time ran out.
+SAME_FAILURE_ESCALATIONS = 2
+
+
+def _failure_key(t: dict, why: str) -> str:
+    return re.sub(r"\s+", " ", why.replace(f"{t['id']}: ", "")).strip()[:300]
+
+
 def escalate(run, t: dict, why: str) -> dict:
     owner = t["owner_worker_id"]
+    seen = t.setdefault("escalated", {})
+    key = _failure_key(t, why)
+    seen[key] = seen.get(key, 0) + 1
+    if seen[key] >= SAME_FAILURE_ESCALATIONS:
+        return give_up(run, t, why, seen[key])
     esc = run.send("Escalation", {"issue": why, "required_action": "Founder decides: retry the task or stop the run.",
                                   "severity": "SEV-2"}, {"raised_by": owner, "owner": "founder"}, t["id"], owner)
     d = run.decision("escalation", problem=why, recommendation="Retry the task once more with the failure as feedback.",
@@ -454,6 +469,20 @@ def escalate(run, t: dict, why: str) -> dict:
     run.event("task.failed", "task", t["id"], {"reason": why[:200]}, correlation_id=t["id"], actor=owner,
               actor_type="worker", protocol_hash=esc["object_hash"])
     return {"did": "escalated", "task": t["id"], "decision": d["id"]}
+
+
+def give_up(run, t: dict, why: str, times: int) -> dict:
+    """The same failure came back after the founder's retry: the run stops on it, said plainly, instead of asking
+    for the same retry again. Nothing more is spent on it; Resume retries it once its cause has changed."""
+    t.update({"status": "FAILED", "failed_from": t["status"], "gave_up": True, "decision_id": None})
+    run.save_task(t)
+    notice = (f"Stopped on {t['id']}: it failed the same way {times} times, a retry included: {why[:300]}. "
+              "Nothing more was spent on it. Change what makes it fail, then Resume.")
+    run.set_meta(phase="stopped_error", failed_stage="run", notice=notice)
+    run.event("task.failed", "task", t["id"], {"reason": why[:200], "same_failure": times, "retried": False},
+              correlation_id=t["id"], actor=t["owner_worker_id"], actor_type="worker")
+    objective.transition(run, "OBJECTIVE_BLOCKED", f"{t['id']} kept failing the same way", by="execution")
+    return {"did": "error", "task": t["id"], "why": notice}
 
 
 def answer(run, t: dict) -> dict:

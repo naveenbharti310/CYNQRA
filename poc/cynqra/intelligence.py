@@ -22,6 +22,7 @@ import re
 from pathlib import Path
 
 from . import model_adapter, provenance, roles
+from .file_rules import RULE as FILE_RULE
 
 HERE = Path(__file__).resolve().parent
 SCENARIOS = HERE.parent / "scenarios"
@@ -99,6 +100,7 @@ def files_layout(needs_from: str) -> str:
             "the complete file content, exactly as it should be saved\n"
             "=== END FILE ===\n"
             "Write file contents as plain text, not escaped and not inside code fences. "
+            f"Every file must be {FILE_RULE}; any other name is refused. "
             'If a fact you need is missing, return only: {"result": "blocked", "category": "missing_input", '
             f'"description": "...", "needs_from": "{needs_from}"}}')
 

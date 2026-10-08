@@ -2192,3 +2192,66 @@ class SpeedTests(unittest.TestCase):
         self.assertGreater(long, base)
         from cynqra.intelligence_layer.adapters import HOSTED_TIMEOUT_S
         self.assertEqual(sup.gateway.deadline(mid, 10_000_000), HOSTED_TIMEOUT_S, "never past the ceiling")
+
+
+class LoopTests(unittest.TestCase):
+    """The real run of 8 Oct on Claude: a DevOps task wrote a Dockerfile, the file rules refused every name without
+    an extension and the reason did not say what they allow, and each escalation the examination founder approved
+    tried the same thing again: 74 work calls until the objective's time ran out. And a build moved off its model
+    after one failed check, on a cost per verified task taken over a single task."""
+
+    def setUp(self):
+        self.saved = no_model_env()
+        self.tmp = TempDir()
+        self.srv = ModelsServer()
+        self.sup = supply_with(self.tmp.path, [("Steady", 0.2)], self.srv)
+        self.e = live_engine(self.tmp.path / "run", self.sup)
+
+    def tearDown(self):
+        self.e.close()
+        self.sup.close()
+        self.srv.close()
+        self.tmp.cleanup()
+        restore_env(self.saved)
+
+    def test_conventional_build_files_are_written_and_a_refusal_says_what_the_rule_allows(self):
+        from cynqra import file_rules
+        from cynqra.intelligence import files_layout
+        t = next(x for x in self.e.tasks() if x["kind"] in ("code", "deploy")) if any(
+            x["kind"] in ("code", "deploy") for x in self.e.tasks()) else self.e.tasks()[0]
+        owner = t["owner_worker_id"]
+        for name in ("Dockerfile", "deploy/docker-compose.yml", ".dockerignore", "pyproject.toml"):
+            g = self.e.gateway(owner, t["id"], "write_file", target=name, content="# config\n")
+            self.assertEqual(g["status"], "executed", f"{name}: {g['policy']['reason']}")
+        g = self.e.gateway(owner, t["id"], "write_file", target="run.sh", content="echo hi\n")
+        self.assertNotEqual(g["status"], "executed", "a script is still refused")
+        self.assertIn("Dockerfile", g["policy"]["reason"], "the refusal says what the rule allows")
+        self.assertIn(file_rules.RULE, files_layout("w_cto"), "every task is told the rule before it writes")
+
+    def test_the_same_failure_after_the_founders_retry_stops_the_run_and_resume_tries_again(self):
+        t = self.e.task("t_01")
+        why = "t_01: writes kept being refused (target 'Dockerfile' is outside the workspace rules)"
+        first = execution.escalate(self.e, t, why)
+        self.assertEqual(first["did"], "escalated", "the first time, the founder decides")
+        self.e.decide(first["decision"], "approve")
+        self.assertEqual(self.e.meta["phase"], "running")
+        again = execution.escalate(self.e, self.e.task("t_01"), why)
+        self.assertEqual(again["did"], "error", "the same failure after the retry: not asked again")
+        self.assertEqual(self.e.meta["phase"], "stopped_error")
+        self.assertIn("failed the same way 2 times", self.e.meta["notice"])
+        self.assertFalse([d for d in self.e.pending_decisions() if d.get("task_id") == "t_01"],
+                         "no new retry for an examination founder to approve")
+        self.assertTrue(self.e.task("t_01")["gave_up"])
+        self.e.resume()
+        back = self.e.task("t_01")
+        self.assertEqual((self.e.meta["phase"], back["gave_up"], back["escalated"]), ("running", False, {}))
+        self.assertIn(back["status"], ("PLANNED", "ASSIGNED", "REWORK", "BLOCKED", "LEAD_REVIEW"))
+
+    def test_cost_per_verified_task_is_judged_only_over_enough_verified_tasks(self):
+        from cynqra import performance
+        card = {"quality": {"verifications": 2, "acceptance_rate": 0.5},
+                "reliability": {"protocol_violations": 0, "calls": 3, "failed_calls": 0, "failure_rate": 0.0},
+                "economics": {"usd": 2.0, "verified_tasks": 1, "usd_per_verified": 2.0}}
+        self.assertEqual(performance.below(card, 0.06), [], "one verified task is not a cost per verified task")
+        card["economics"].update(verified_tasks=2, usd_per_verified=1.0)
+        self.assertTrue(any("per verified task" in r for r in performance.below(card, 0.06)))

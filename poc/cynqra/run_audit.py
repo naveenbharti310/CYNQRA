@@ -527,6 +527,17 @@ def _budget(out, c):
     _check(out, "4", "refused work waited for the calls in flight", FAIL if spins else (PASS if refused else
            NOT_EXERCISED), f"{refused} refused reservation(s); {sum(spins.values())} asked again with nothing spent "
            "or freed since the last refusal", spins=dict(sorted(spins.items(), key=lambda kv: -kv[1])[:5]))
+    # a failure the founder's retry did not change is not retried again and again (real run of 8 Oct: one refused
+    # write failed its task 24 times, 74 work calls, each escalation approved and the same thing tried again)
+    again: dict = {}
+    for e in c["events"]:
+        if e["event_type"] == "task.failed":
+            k = (e["aggregate_id"], re.sub(r"\s+", " ", str(e["payload"].get("reason") or ""))[:200])
+            again[k] = again.get(k, 0) + 1
+    loops = {f"{k[0]}: {k[1][:80]}": n for k, n in again.items() if n > 2}
+    _check(out, "4", "no task repeated the same failure without end", FAIL if loops else (PASS if again else
+           NOT_EXERCISED), f"{len(again)} task failure(s) by cause; {len(loops)} repeated more than twice",
+           loops=dict(sorted(loops.items(), key=lambda kv: -kv[1])[:5]))
     stale = [d["decision_id"] for d in c["decisions"] if d.get("status") in ("superseded", "stale", "revalidated")
              or d.get("revalidates")]
     _check(out, "4", "stale evidence never rewrote a decision", PASS,

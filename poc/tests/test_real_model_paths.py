@@ -174,9 +174,12 @@ class WorkerReplyTests(unittest.TestCase):
         self.e.run_until_idle()
         self.e.decide(self.e.pending_decisions()[0]["id"], "approve")
         self.e.run_until_idle()
-        d = self.e.pending_decisions()[0]
-        self.assertEqual((d["kind"], d["task_id"]), ("escalation", "t_03"))
-        self.e.decide(d["id"], "approve")
+        # the same failure after the founder's retry is not asked again: the run stops on it (real run of 8 Oct:
+        # 74 work calls on one refused write), and Resume sends the task back to the stage that failed
+        self.assertEqual(self.e.meta["phase"], "stopped_error")
+        self.assertIn("t_03", self.e.meta["notice"])
+        self.assertFalse(self.e.pending_decisions())
+        self.e.resume()
         self.assertEqual(self.e.task("t_03")["status"], "PLANNED")
 
 

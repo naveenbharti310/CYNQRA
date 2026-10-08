@@ -17,7 +17,7 @@ from . import binding, budget, policy, worker_runtime
 from .db import SECRET, digest, now
 from .testrunner import run_unittests
 
-ALLOWED_EXT = {".py", ".md", ".html", ".json", ".txt", ".css", ".js"}
+from .file_rules import ALLOWED_EXT, RULE as FILE_RULE, allowed as allowed_file  # noqa: E402,F401
 MAX_FILE = 200_000  # bytes
 # Output a worker may never write: credentials. Found in a write, the write is refused and the refusal audited.
 NO_COST = ("deploy_production", "product_rule_decision", "assign_task", "answer_blocker", "send_protocol",
@@ -86,8 +86,9 @@ def execute(run, worker_id: str, task_id: str, action_type: str, target: str = "
     elif action_type == "write_file":
         folder = run.workspace(worker_id, task_id) / "out"
         rel = Path(target)
-        if rel.is_absolute() or ".." in rel.parts or rel.suffix not in ALLOWED_EXT or len(rel.parts) > 3:
-            return _refuse(run, action, task_id, auth, f"target {target!r} is outside the workspace rules")
+        if not allowed_file(target):
+            return _refuse(run, action, task_id, auth, f"target {target!r} is outside the workspace rules: a file "
+                                                       f"must be {FILE_RULE}")
         if content is None or len(content.encode("utf-8")) > MAX_FILE:
             return _refuse(run, action, task_id, auth, "content missing or larger than 200 KB")
         if SECRET.search(content):

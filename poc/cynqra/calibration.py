@@ -44,7 +44,7 @@ from .intelligence_layer.candidates import select as bounded
 from .intelligence_layer.registry import RegistryError, served_version
 
 KIND = "calibration_plan"
-ALLOWED_EXT = {".py", ".md", ".html", ".json", ".txt", ".css", ".js"}
+from .file_rules import ALLOWED_EXT, allowed as allowed_file  # noqa: E402,F401
 
 
 class _Access:
@@ -320,8 +320,8 @@ def _write(out: Path, files: dict) -> list[str]:
     refused = []
     for name, text in (files or {}).items():
         rel = Path(str(name))
-        if (not isinstance(text, str) or rel.is_absolute() or ".." in rel.parts or rel.suffix not in ALLOWED_EXT
-                or len(rel.parts) > 3 or len(text.encode("utf-8")) > 200_000 or SECRET.search(text)):
+        if (not isinstance(text, str) or not allowed_file(rel) or len(text.encode("utf-8")) > 200_000
+                or SECRET.search(text)):
             refused.append(str(name))
             continue
         dest = out / rel

@@ -1259,6 +1259,13 @@ class Engine:
                     self._staff()
                 self._roadmap(note=self.meta.get("cycle_note", "") if self.cycle() > 1 else "")
             else:
+                for t in self.tasks():  # work that kept failing the same way is tried again, its count cleared
+                    if t.get("gave_up"):
+                        back = t.get("failed_from")
+                        t.update({"status": back if back in ("PLANNED", "BLOCKED", "LEAD_REVIEW") else
+                                  ("REWORK" if t["kind"] in roles.FILE_TYPES else "ASSIGNED"),
+                                  "gave_up": False, "escalated": {}, "attempts": 0, "cut_offs": 0})
+                        self.save_task(t)
                 self.set_meta(phase="running", failed_stage=None, notice="")
                 objective.transition(self, "OBJECTIVE_EXECUTING", "resumed after an intelligence error", by="founder")
             return self.meta

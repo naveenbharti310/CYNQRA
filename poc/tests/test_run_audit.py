@@ -69,7 +69,9 @@ class RunAuditTests(unittest.TestCase):
         self.assertLessEqual(unreached, {"no replacement on one noisy failure",
                                          "worker identity survives an intelligence change",
                                          # neither run came near its cap: no call was refused a reservation
-                                         "refused work waited for the calls in flight"}, unreached)
+                                         "refused work waited for the calls in flight",
+                                         # nor did any task fail its way to the founder
+                                         "no task repeated the same failure without end"}, unreached)
         for name in ("objective A/B isolation", "each objective earned its own evidence",
                      "no credential in any persisted file", "every decision replays from its own snapshot",
                      "objective evidence reached real selections", "every evidence record carries its provenance",
