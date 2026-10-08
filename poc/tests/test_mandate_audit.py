@@ -1973,10 +1973,16 @@ class NoRoundBarrierTests(unittest.TestCase):
             t["status"] = "HELD_FOR_TEST"
             self.e.save_task(t)
         tries = []
+        import threading
+        slow_holds = threading.Event()  # the two start in the same step: t_03 asks only once t_01's call holds
 
         def act(run, t):
+            if t["id"] == "t_03":
+                self.assertTrue(slow_holds.wait(10))
             res = budget.reserve(run.store, worker_id=t["owner_worker_id"], task_id=t["id"], model_id="m",
                                  usd=0.8 if t["id"] == "t_01" else 0.5, purpose="model_call")
+            if t["id"] == "t_01":
+                slow_holds.set()
             if t["id"] == "t_03":
                 tries.append((time.time(), res["status"]))
             if res["status"] != "held":
@@ -2095,3 +2101,94 @@ class ResumeTests(unittest.TestCase):
             self.assertIn(live["id"], budget.ledger(e.store)["reservations"], "its call may still finish")
         finally:
             e.close()
+
+
+class SpeedTests(unittest.TestCase):
+    """The real run of 7 Oct on Claude: setup was quick (4 minutes), but the objective's calibration took 10 more
+    with its items one after another, the plans had 18 and 21 tasks in 8 waves, and a model was cut off twice at 468
+    seconds writing long code. Each is now addressed."""
+
+    def setUp(self):
+        self.saved = no_model_env()
+        self.tmp = TempDir()
+        self.srv = ModelsServer()
+        self.sup = supply_with(self.tmp.path, [("Steady", 0.2), ("Careful", 0.6)], self.srv)
+
+    def tearDown(self):
+        self.sup.close()
+        self.srv.close()
+        self.tmp.cleanup()
+        restore_env(self.saved)
+
+    def test_calibration_items_run_side_by_side_within_the_budget(self):
+        import threading
+        import time
+        real, spans, lock = calibration._round, [], threading.Lock()
+
+        def timed(run, p, it, todo, rnd):
+            t0 = time.time()
+            time.sleep(0.3)
+            out = real(run, p, it, todo, rnd)
+            with lock:
+                spans.append((it["item_id"], t0, time.time()))
+            return out
+
+        with mock.patch.object(calibration, "_round", side_effect=timed):
+            e = live_engine(self.tmp.path / "run", self.sup)
+        try:
+            p = e.store.get(calibration.KIND, calibration.plan_id(e))
+            self.assertEqual(p["status"], "completed", p.get("reason"))
+            items = {s[0] for s in spans}
+            self.assertGreater(len(items), 1, "more than one item was calibrated")
+            overlap = any(a[0] != b[0] and a[1] < b[2] and b[1] < a[2] for a in spans for b in spans)
+            self.assertTrue(overlap, "items ran side by side, not one after another")
+            self.assertLessEqual(p["spent_usd"], p["budget_usd"] + 1e-9)
+        finally:
+            e.close()
+
+    def test_a_plan_larger_than_its_objective_needs_is_asked_once_more_and_the_second_kept(self):
+        from cynqra import planner
+        from cynqra.intelligence import PLAN_MAX_TASKS
+        e = live_engine(self.tmp.path / "run", self.sup)
+        real, asked = e.intel.plan, []
+
+        def inflated(plan: dict) -> dict:
+            tasks = plan["tasks"]
+            doc = next(t for t in tasks if t["kind"] == "document")
+            at = tasks.index(doc) + 1
+            rows = tasks[:at] + [dict(doc, title=f"{doc['title']} ({i})") for i in range(PLAN_MAX_TASKS)] + tasks[at:]
+            new = {id(t): f"t_{n:02d}" for n, t in enumerate(rows, 1)}
+            old = {t["id"]: new[id(t)] for t in tasks}
+            return dict(plan, tasks=[dict(t, id=new[id(t)], dependencies=[old[d] for d in t["dependencies"]])
+                                     for t in rows])
+
+        def plan(*a, **kw):
+            asked.append(kw.get("feedback") or "")
+            out = real(*a, **kw)
+            return (inflated(out[0]), out[1]) if len(asked) in (1, 3, 4) else out
+
+        try:
+            with mock.patch.object(e.intel, "plan", side_effect=plan):
+                planner.plan(e)
+            self.assertIn(f"at most {PLAN_MAX_TASKS} tasks", asked[1], "asked again with the reason")
+            self.assertLessEqual(len(e.tasks()), PLAN_MAX_TASKS)
+            with mock.patch.object(e.intel, "plan", side_effect=plan):
+                planner.plan(e)  # the first answer too large again, then the second too: kept as it came
+            self.assertGreater(len(e.tasks()), PLAN_MAX_TASKS, "a second large plan is taken, not refused")
+        finally:
+            e.close()
+
+    def test_a_long_reply_gets_the_time_it_takes_at_the_models_slower_speed(self):
+        from cynqra.intelligence_layer import gateway
+        sup = self.sup
+        mid = sup.registry.models()[0]["id"]
+        for _ in range(5):  # short answers on record: 20 s each, writing 100 tokens a second
+            sup.registry.record_call(mid, role="w", purpose="work", task_kind="document", run_id="r",
+                                     usage={"latency_s": 20, "tokens_in": 10, "tokens_out": 2000})
+        base = sup.gateway.deadline(mid)
+        self.assertEqual(base, gateway.DEADLINE_FLOOR_S, "a short reply: the record alone")
+        long = sup.gateway.deadline(mid, 32000)
+        self.assertEqual(long, int(gateway.DEADLINE_WRITE_FACTOR * 32000 / 100 + gateway.DEADLINE_THINK_S))
+        self.assertGreater(long, base)
+        from cynqra.intelligence_layer.adapters import HOSTED_TIMEOUT_S
+        self.assertEqual(sup.gateway.deadline(mid, 10_000_000), HOSTED_TIMEOUT_S, "never past the ceiling")

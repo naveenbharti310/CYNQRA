@@ -19,7 +19,7 @@ import re
 
 from . import policy, roles
 from .db import now
-from .intelligence import IntelligenceError, as_int, ask
+from .intelligence import PLAN_MAX_TASKS, PLAN_MAX_WAVES, IntelligenceError, as_int, ask
 from .objective import _slug_list
 
 TOOLS = {"document": ["write_file"], "decision": ["product_rule_decision"], "code": ["write_file", "run_tests"],
@@ -198,6 +198,18 @@ def coordination(owner: dict, workers: list[dict]) -> dict:
             "reviewed_by": lead}
 
 
+def oversized(tasks: list[dict]) -> str | None:
+    """Why a plan is larger than its objective needs (PLAN_MAX_TASKS tasks, PLAN_MAX_WAVES waves), said so the
+    planner can answer with a leaner one; None when it fits."""
+    depth = len(waves(tasks))
+    if len(tasks) <= PLAN_MAX_TASKS and depth <= PLAN_MAX_WAVES:
+        return None
+    return (f"the plan has {len(tasks)} tasks in {depth} waves: plan the fewest that meet every acceptance criterion, "
+            f"at most {PLAN_MAX_TASKS} tasks in at most {PLAN_MAX_WAVES} waves. Merge work one member can do in one "
+            "reply into one task (a document task may write several document types), and let tasks that do not need "
+            "each other's output run side by side")
+
+
 def waves(tasks: list[dict]) -> list[list[str]]:
     """The work as waves: each task in the first wave after every task it depends on. Tasks in one wave can run side
     by side; the number of waves is the plan's sequential depth."""
@@ -289,10 +301,20 @@ def plan(run, note: str = "", cycle: int = 1) -> dict:
     earlier = [t for t in run.tasks() if int(t.get("cycle") or 1) < cycle]
     done = {t["id"] for t in earlier}
     rids = [] if cycle > 1 else [r["id"] for r in run.requirements()["requirements"] if r.get("owner") != "founder"]
+    answers = []
+
+    def check(d: dict) -> dict:
+        answers.append(1)
+        out = validate_plan(d, workers, rids, start=len(earlier) + 1, done=done)
+        why = oversized(out["tasks"]) if len(answers) == 1 and run.meta.get("mode") == "live" else None
+        if why:  # asked once more for a leaner plan; a second answer is taken at the size it comes
+            raise IntelligenceError(why)
+        return out
+
     p, usage = ask(lambda feedback: run.intel.plan(run.objective_ctx(), workers, run.requirements(), note=note,
                                                    feedback=feedback, planner=boss, persona=run.persona(boss),
                                                    cycle=cycle, done=[f"{t['id']}: {t['title']}" for t in earlier]),
-                   lambda d: validate_plan(d, workers, rids, start=len(earlier) + 1, done=done))
+                   check)
     run.record_call("plan", boss, "plan", usage)
     p = enrich(p, workers)
     order = []

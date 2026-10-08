@@ -254,6 +254,14 @@ FORECAST_CONTRACT = ("Forecast contract. forecast.py at the repository root defi
 
 # Contract-first build (R10 of the architecture review): build tasks chained one after another made a dozen
 # multi-minute calls in a row. The contract fixes the boundaries first; the builds then run side by side.
+# A plan sized to its objective: the real run of 7 Oct planned 18 and 21 tasks in 8 waves, each wave waiting on the
+# one before, where an earlier run planned about 7 per objective; the work took twice as long for no more of it.
+PLAN_MAX_TASKS = 12
+PLAN_MAX_WAVES = 6
+PLAN_LEAN = (f"Plan the fewest tasks that meet every acceptance criterion: at most {PLAN_MAX_TASKS} tasks in at most "
+             f"{PLAN_MAX_WAVES} waves (a wave is the tasks that can run once the earlier ones are done). Work one member "
+             "can do in one reply is one task: a document task may write several of its owner's document types. Let "
+             "tasks that do not need each other's output run side by side rather than one after another.\n")
 CONTRACT_FIRST = ("Plan the build contract first. An early document task fixes the contract: which build task owns "
                   "which files, the routes and the data shapes between them. Each build task then depends on that "
                   "contract and not on another build task, unless it truly needs that task's code, so the builds run "
@@ -688,7 +696,7 @@ class ModelSource:
                   "requirement ids it satisfies; a document task names the document types it writes, from those its "
                   f"owner writes. Task types:\n{types}\n"
                   "A task's owner must be a worker who may own its type. Ids t_01, t_02 and so on; dependencies may "
-                  "only name earlier tasks.\n" + CONTRACT_FIRST
+                  "only name earlier tasks.\n" + CONTRACT_FIRST + PLAN_LEAN
                   + (f"This is cycle {cycle}: the product is live. Done in earlier cycles, not to plan again:\n"
                      + "\n".join(f"* {x}" for x in done or []) + "\nPlan only the new work the founder asks for, "
                      "ending with one review_merge and one deploy, with at least one code task.\nThe founder asks: "

@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -232,29 +233,61 @@ def run_plan(run, p: dict) -> dict:
         "items": [i["item_id"] for i in p["items"] if not i.get("skipped")],
         "candidates": {i["item_id"]: i["candidates"] for i in p["items"] if not i.get("skipped")},
         "budget_usd": p["budget_usd"], "policy": p["policy_version"]}, actor="intelligence_controller")
-    for it in p["items"]:
+    lock = threading.Condition()
+    held = {"usd": 0.0}  # the upper bounds of trials in flight: items run side by side within one budget
+
+    def item(it: dict) -> None:
         if it.get("skipped"):
-            p["stopping"][it["item_id"]] = {"stopped": True, "reason": it["skipped"]}
-            continue
+            with lock:
+                p["stopping"][it["item_id"]] = {"stopped": True, "reason": it["skipped"]}
+            return
         rounds = int(pol["max_rounds"].get(it["tier"], 1))
         todo = list(it["candidates"])
         for rnd in range(1, rounds + 1):
             if not todo:
                 break
-            room = p["budget_usd"] - p["spent_usd"]
-            todo = [c for c in todo if it["upper_bound_usd"][c] <= room + 1e-12] or []
-            if not todo:
-                p["stopping"][it["item_id"]] = {"stopped": True, "reason": "budget", "round": rnd}
-                break
-            trials = _round(run, p, it, todo, rnd)
-            p["trials"] += trials
-            p["spent_usd"] = round(p["spent_usd"] + sum(t["usd"] for t in trials), 6)
-            run.store.put(KIND, p["plan_id"], p)
-            stop, why, todo = _stop(run, it, rnd, rounds, pol, p["trials"])
+            with lock:
+                while True:  # what does not fit now may fit once the trials in flight have cost what they cost
+                    room = p["budget_usd"] - p["spent_usd"] - held["usd"]
+                    fit = [c for c in todo if it["upper_bound_usd"][c] <= room + 1e-12]
+                    if fit or held["usd"] <= 0:
+                        break
+                    lock.wait()
+                todo = fit
+                if not todo:
+                    p["stopping"][it["item_id"]] = {"stopped": True, "reason": "budget", "round": rnd}
+                    break
+                reserve = sum(it["upper_bound_usd"][c] for c in todo)
+                held["usd"] += reserve
+            try:
+                trials = _round(run, p, it, todo, rnd)
+            finally:
+                with lock:
+                    held["usd"] -= reserve
+                    lock.notify_all()
+            with lock:
+                p["trials"] += trials
+                p["spent_usd"] = round(p["spent_usd"] + sum(t["usd"] for t in trials), 6)
+                run.store.put(KIND, p["plan_id"], p)
+                seen = list(p["trials"])
+            stop, why, todo = _stop(run, it, rnd, rounds, pol, seen)
             if stop:
-                p["stopping"][it["item_id"]] = {"stopped": True, "reason": why, "round": rnd}
+                with lock:
+                    p["stopping"][it["item_id"]] = {"stopped": True, "reason": why, "round": rnd}
                 break
-        p["stopping"].setdefault(it["item_id"], {"stopped": True, "reason": "max_rounds", "round": rounds})
+        with lock:
+            p["stopping"].setdefault(it["item_id"], {"stopped": True, "reason": "max_rounds", "round": rounds})
+
+    # items side by side when every candidate is hosted (the real run of 7 Oct: three items one after another took 10
+    # of the objective's first 14 minutes, each round waiting on its slowest model); a model on this machine is
+    # still asked one thing at a time
+    hosted = all(not run.registry.get(c).get("local") for it in p["items"] for c in it.get("candidates") or [])
+    if hosted and len(p["items"]) > 1:
+        with ThreadPoolExecutor(max_workers=len(p["items"]), thread_name_prefix="calibration-item") as pool:
+            list(pool.map(item, p["items"]))
+    else:
+        for it in p["items"]:
+            item(it)
     p.update(status="completed", completed_at=now())
     run.store.put(KIND, p["plan_id"], p)
     verified = sum(1 for t in p["trials"] if t.get("verified"))
