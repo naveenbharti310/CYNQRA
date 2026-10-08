@@ -125,7 +125,8 @@ def run(root: Path, argv: list[str], *, timeout: int = DEFAULT_TIMEOUT,
         kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     else:
         kwargs["start_new_session"] = True
-    proc = subprocess.Popen(command, **kwargs)
+    from . import sandbox  # limits, and no network where the host allows it
+    proc = subprocess.Popen(sandbox.wrap(command, cpu_s=timeout + 10), **kwargs)
     try:
         stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired as exc:

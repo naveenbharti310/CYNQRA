@@ -53,16 +53,27 @@ def machine_usd(store, seconds: float) -> float:
     return round(float(seconds) * float(project_settings.get(store)["compute_usd_per_hour"]) / 3600, 6)
 
 
-def charge(store, worker_id: str, task_id: str, usd: float, layer: str) -> dict:
+def charge(store, worker_id: str, task_id: str, usd: float, layer: str, key: str | None = None) -> dict:
     """Charge money to a worker, a task and a layer. Returns what crossed: warnings (percent marks) and whether the
-    breaker must open now. One transaction: concurrent workers' charges never overwrite one another."""
+    breaker must open now. One transaction: concurrent workers' charges never overwrite one another. With key (a
+    model answer's call_uid), the charge is made at most once, its mark written in the same transaction: an answer a
+    run reuses from its journal after a crash is charged then only if its first charge never committed."""
     if layer not in LAYERS:
         raise ValueError(f"unknown budget layer {layer}")
     out = {"warned": [], "breaker": False}
     if usd <= 0:
         return out
     with store.atomic():
+        if key and store.get("charge", key):
+            return out
+        if key:
+            store.put("charge", key, {"usd": round(usd, 6), "task_id": task_id, "worker_id": worker_id})
         return _charge(store, worker_id, task_id, usd, layer, out)
+
+
+def charged(store, key: str | None) -> bool:
+    """Whether the answer with this call_uid has been charged in this run (charge, key)."""
+    return bool(key) and store.get("charge", key) is not None
 
 
 def _charge(store, worker_id: str, task_id: str, usd: float, layer: str, out: dict) -> dict:
@@ -131,7 +142,7 @@ def reserve(store, *, worker_id: str, task_id: str, model_id: str, usd: float, p
         rec = {"id": rid, "task_id": task_id, "worker_id": worker_id, "model_id": model_id, "usd": round(usd, 6),
                "purpose": purpose, "at": now(), "spent_before": round(L["spent_total"], 6), "reserved_before": held}
         if L["state"] == "breaker" or (usd > 0 and L["spent_total"] + held + usd > cap + 1e-12):
-            rec.update(status="refused", in_flight=len(res),
+            rec.update(status="refused", in_flight=len(res), waiting_on=sorted(res), cap=cap,
                        why="the budget breaker is open" if L["state"] == "breaker" else
                        f"spent ${L['spent_total']:.4f} + in flight ${held:.4f} + this call's ${usd:.4f} would pass "
                        f"the ${cap:.2f} cap")
@@ -142,6 +153,31 @@ def reserve(store, *, worker_id: str, task_id: str, model_id: str, usd: float, p
         _save(store, L)
         store.put("reservation", rid, rec)
         return rec
+
+
+def may_retry(store, refused: dict) -> bool:
+    """Whether work refused a reservation while other work was in flight may ask again: once one of the calls it
+    waited on has ended (what it cost is known and its reservation freed) or the cap has changed. Asking again
+    before then is refused the same way (real run on Claude, objective 1: one review asked 4,065 times in a row
+    while a colleague's call ran)."""
+    L = ledger(store)
+    if not refused.get("waiting_on") or float(project_settings.get(store)["budget_usd"]) != float(refused.get("cap", -1)):
+        return True
+    return any(rid not in (L.get("reservations") or {}) for rid in refused.get("waiting_on") or [])
+
+
+def release_orphans(store) -> list[str]:
+    """A run reopened after its process stopped (a crash, a kill, a usage limit): a reservation held by a call that
+    can no longer finish ends, so it stops taking headroom; nothing was charged for it. A call in flight holds its
+    task's lease and renews it at every step, so a reservation whose task holds no live lease has no call behind
+    it. One held for a task another process is still working on keeps its lease, and stays."""
+    with store.atomic():
+        held = ledger(store).get("reservations") or {}
+        now_ts = time.time()
+        gone = [rid for rid, r in held.items()
+                if not ((store.task_lease(r.get("task_id") or "") or {}).get("expires_at", 0) > now_ts)]
+        release(store, gone, outcome="released_after_restart")  # the same transaction: nothing claims between
+    return gone
 
 
 def release(store, reservation_ids: list[str], outcome: str = "settled") -> None:

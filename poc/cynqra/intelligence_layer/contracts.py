@@ -43,7 +43,7 @@ class SupplyError(ValueError):
 AUTH_METHODS = ("api_key", "none")  # OAuth and IAM arrive with the adapters that need them (Bedrock: IAM)
 CREDENTIAL_METHODS = ("env", "secret", "none")
 LOCAL_SERVERS = ("llama", "ollama", "endpoint", "command")
-REQUEST_KEYS = ("prompt", "max_tokens", "want_json", "schema", "temperature", "partial")
+REQUEST_KEYS = ("prompt", "max_tokens", "want_json", "schema", "temperature", "partial", "effort")
 # Provider options a connection may set; everything else a call needs comes from the adapter.
 SETTINGS = ("CYNQRA_EFFORT", "CYNQRA_THINK", "CYNQRA_NUM_PREDICT", "CYNQRA_NUM_CTX", "CYNQRA_TEMPERATURE",
             "CYNQRA_SEED", "CYNQRA_TIMEOUT", "CYNQRA_KEEP_ALIVE")

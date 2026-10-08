@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 import time
@@ -36,8 +37,9 @@ from pathlib import Path
 
 from . import binding, budget, calibration, controller, delivery, deploy, execution, gateway, numbers, objective
 from . import objective_evidence, people, performance, planner, policies, policy, replacement, roles, seats, synthesis
+from . import attribution, model_adapter, telemetry
 from . import settings as project_settings
-from .db import IST, Store, digest, now
+from .db import IST, Store, digest, now, scrub
 from .intelligence import SCENARIOS, IntelligenceError, ModelSource, ScriptedSource
 from .intelligence_layer import IntelligenceSupply, SupplyError, VersionChanged, router
 from .intelligence_layer.registry import RegistryError
@@ -67,6 +69,39 @@ class BudgetHold(RuntimeError):
         self.reservation = reservation
 
 
+_PROVIDER_SAYS = re.compile(r'"message"\s*:\s*"([^"]{1,200})')
+
+
+def _why_not_qualified(sup, tried: list[dict]) -> str:
+    """Why nothing connected could do its qualification work, provider by provider, in its own words: an empty
+    account or a refused key is the founder's to fix, and a run refused for it says so (paid run 37587595496: every
+    call to Google came back 402, "prepayment credits are depleted", and the founder was told only to connect a
+    provider)."""
+    why: dict[tuple, list] = {}
+    for r in tried:
+        if not r.get("error") and r.get("qualification_status") != "failed":
+            continue
+        m = sup.registry.get(r["model_id"])
+        conn = sup.connections.find_id(m.get("connection_id")) or {}
+        if not r.get("error") or r.get("error_kind") == "model_error":
+            what, fix, said = "did not pass its qualification work", "", ""
+        else:
+            cause = attribution.diagnose(r["error"])
+            what = replacement.PLAIN.get(cause, "its provider did not answer")
+            fix = {"no_credit": "add credit to the account",
+                   "access": "give Cynqra a key the provider accepts"}.get(cause, "")
+            found = _PROVIDER_SAYS.search(r["error"])
+            said = scrub(found.group(1).strip()) if found else ""  # a provider can quote the key it refused
+        why.setdefault((conn.get("name") or "", what, fix, said), []).append(m["name"])
+    if not why:
+        return ""
+    parts = []
+    for (name, what, fix, said), models in why.items():
+        parts.append(f"{name + ': ' if name else ''}{', '.join(models)}: {what}"
+                     + (f' (the provider says: "{said}")' if said else "") + (f"; {fix}" if fix else ""))
+    return ". Qualification could not pass: " + "; ".join(parts)
+
+
 def scenarios() -> list[dict]:
     """The prepared demos: each one a scenario folder with a scenario.json."""
     out = []
@@ -86,6 +121,7 @@ class Engine:
         # what Cynqra learns across projects (lessons.py): the app keeps it beside every run; a lone run keeps its own
         self.memory = Path(memory) if memory else self.dir / "lessons.json"
         self.dir.mkdir(parents=True, exist_ok=True)
+        model_adapter.forget(self.dir / "journal.jsonl")  # reopened in this process: read the journal as it is now
         self.store = Store(str(self.dir / "cynqra.db"))
         self.paths = {k: self.dir / k for k in ("workspaces", "integration", "main", "releases", "live", "exports",
                                                  "verify")}
@@ -102,6 +138,9 @@ class Engine:
         # live work in flight: task id -> (its future, the actor doing it); each worker takes its next piece as soon
         # as its own call returns, never waiting for a colleague's slower call
         self._inflight: dict[str, tuple] = {}
+        # work whose call was refused while colleagues' calls were in flight: task id -> the refused reservation; it
+        # is taken again only when one of those calls has ended or the cap has changed (budget.may_retry)
+        self._budget_waits: dict[str, dict] = {}
         self._pool: ThreadPoolExecutor | None = None
         if self.store.get("meta", "run") is None:
             # the tenant and workspace this run's evidence belongs to: another tenant's evidence is never this one's
@@ -113,6 +152,10 @@ class Engine:
         if self.meta["phase"] != "new":
             self._attach(strict=False)  # a run reopened after a restart opens even if its model is gone for now
             self._refuse_outdated()
+            gone = budget.release_orphans(self.store)  # calls its stopped process held can no longer finish
+            if gone:
+                self.event("budget.reservations_released", "company", self.cid, {"reservations": gone,
+                           "why": "the run was reopened; no call is behind them"}, actor="budget_engine")
 
     OUTDATED = ("This project was made by an earlier version of Cynqra, whose team had roles that no longer exist "
                 "(such as the Business Lead: you are the CEO now, with cofounders). It can be read and exported, but "
@@ -175,14 +218,15 @@ class Engine:
             sup = self._shared or self._local_supply()
             if not sup.registry.available():
                 sup.connect_environment()
+            tried = []
             if strict and not sup.registry.available():
                 # discovered is not qualified: what is connected does its qualification work first (bounded), and
                 # only what passes may be assigned
-                sup.qualify()
+                tried = sup.qualify()
             if strict and not sup.registry.available():
                 raise EngineError("live mode needs intelligence: connect a provider (OpenAI-compatible, Anthropic or "
                                   "a model on this machine), or name one in the environment; what is connected must "
-                                  "pass its qualification work first")
+                                  "pass its qualification work first" + _why_not_qualified(sup, tried))
             source = self._injected or ModelSource()
         source.bind(self)
         self.supply, self.intel = sup, source
@@ -241,11 +285,11 @@ class Engine:
         mid, pin = self._resolve(worker_id)
         self._reserve(worker_id, mid, request)
         try:
-            out = self._call(mid, request, pin)
+            out = self._call(mid, request, pin, worker_id)
         except VersionChanged as exc:
             replacement.version_changed(self, who, exc, task_id=self._task_ctx())  # kept after its check, or rebound
             mid, pin = self._resolve(worker_id)
-            out = self._call(mid, request, pin)
+            out = self._call(mid, request, pin, worker_id)
         except SupplyError as exc:
             raise IntelligenceError(str(exc), model_id=mid) from exc
         if out.get("error") and (who == binding.SYSTEM or not self._task_ctx()):
@@ -267,7 +311,7 @@ class Engine:
                 break
             tried.append(alt)
             try:
-                out = self._call(alt, request, (binding.current(self.store, who) or {}).get("version"))
+                out = self._call(alt, request, (binding.current(self.store, who) or {}).get("version"), who)
             except SupplyError as exc:
                 raise IntelligenceError(str(exc), model_id=alt) from exc
         return out
@@ -277,7 +321,12 @@ class Engine:
         if not tid or self.meta["phase"] not in policies.body("budget")["reserve_in_phases"]:
             return
         entry = self.registry.get(mid)
-        usd = budget.call_upper_bound(entry, request, self.registry.stats(mid).get("write_tps"))
+        # the most the call may write is what the provider is allowed to send, not only what the caller asked for: a
+        # hosted model gets at least HOSTED_MIN_REPLY, reasoning included, and is billed for all of it
+        allowed = {**request, "max_tokens": model_adapter.reply_limit(int(request.get("max_tokens") or 4000),
+                                                                      bool(entry.get("local")),
+                                                                      self.supply.gateway.route_kind(mid))}
+        usd = budget.call_upper_bound(entry, allowed, self.registry.stats(mid).get("write_tps"))
         res = budget.reserve(self.store, worker_id=worker_id, task_id=tid, model_id=mid, usd=usd,
                              purpose="model_call")
         if res["status"] == "held":
@@ -314,18 +363,34 @@ class Engine:
                       extra={"needed_cap": max(cap * 1.5, need), "reservation": res["id"]})
         objective.transition(self, "OBJECTIVE_BLOCKED", "the budget cap would be passed", by="budget_engine")
 
-    def _call(self, mid: str, request: dict, pin: str | None) -> dict:
+    def _call(self, mid: str, request: dict, pin: str | None, worker_id: str | None = None) -> dict:
         """The model call itself, the slow part, made without holding the run: while one worker waits for its
-        intelligence, the others record their results. Everything before and after the call is serialized."""
-        local = bool(self.registry.get(mid).get("local"))
+        intelligence, the others record their results. Everything before and after the call is serialized. Each
+        call is a span in the run's traces.jsonl (telemetry.py)."""
+        entry = self.registry.get(mid)
+        local = bool(entry.get("local"))
         owned = self.lock._is_owned()
         state = self.lock._release_save() if owned else None
+        # a live run journals its calls in its own folder: reopened after a crash or a restart, it never pays
+        # twice for an answer it already has (model_adapter.journal)
+        path = self.dir / "journal.jsonl" if self.meta.get("mode") == "live" else None
+        start, out, failure = time.time_ns(), None, ""
         try:
-            if local:
-                with _LOCAL_CALLS:
-                    return self.supply.gateway.invoke(mid, request, pinned_version=pin)
-            return self.supply.gateway.invoke(mid, request, pinned_version=pin)
+            with model_adapter.journal(path):
+                if local:
+                    with _LOCAL_CALLS:
+                        out = self.supply.gateway.invoke(mid, request, pinned_version=pin)
+                else:
+                    out = self.supply.gateway.invoke(mid, request, pinned_version=pin)
+                return out
+        except Exception as exc:
+            failure = f"{type(exc).__name__}: {exc}"
+            raise
         finally:
+            telemetry.call(self.dir / "traces.jsonl", run_id=self.meta.get("company_id") or "",
+                           task_id=self._task_ctx(),
+                           worker_id=worker_id, entry=entry, request=request, out=out, start_ns=start,
+                           end_ns=time.time_ns(), error=failure)
             if owned:
                 self.lock._acquire_restore(state)
 
@@ -498,27 +563,42 @@ class Engine:
         if purpose in ("assign", "review", "answer_blocker"):  # coordination on a task is not the task's own kind
             kind = {"answer_blocker": "answer"}.get(purpose, purpose)
         role = (self.worker(worker) or {}).get("role", worker)
+        # An answer this run already recorded (reused from its journal after a crash or a restart) is metered and
+        # charged once: by its call_uid, whatever point the crash came at (model_adapter.journal, budget.charge)
+        uid = usage.get("call_uid")
+        prior = self.store.get("call_uid", uid) if uid else None
+        if prior and budget.charged(self.store, uid):
+            self._end_reservations()
+            return self.store.get("call", prior["id"])
         c = self.registry.record_call(model_id, role=role, purpose=purpose, task_kind=kind, usage=usage,
                                       run_id=self.cid)
         with self.store.atomic():  # numbered and metered as one: concurrent workers never share a record
-            n = self.store.next_id("call")
-            rec = {"id": f"call_{n:04d}", "task_id": task_id, "worker": worker, "purpose": purpose, **usage,
-                   "usd": c["usd"], "model_version": c.get("model_version"), "at": now(),
-                   **controller.stamp(self, self.store.get("task", task_id) if task_id.startswith("t_") else None)}
-            self.store.put("call", rec["id"], rec)
-            if task_id.startswith("t_") and purpose == "work":
-                m = self.store.get("meter", task_id) or {"usd": 0.0, "seconds": 0.0, "tokens": 0}
-                self.store.put("meter", task_id, {"usd": m["usd"] + c["usd"], "seconds": m["seconds"] + c["seconds"],
-                                                  "tokens": m["tokens"] + c["tokens_in"] + c["tokens_out"]})
-        self.spend(worker, task_id, c["usd"], "inference")
+            rec = self.store.get("call", prior["id"]) if prior else None
+            if rec is None:
+                n = self.store.next_id("call")
+                rec = {"id": f"call_{n:04d}", "task_id": task_id, "worker": worker, "purpose": purpose, **usage,
+                       "usd": c["usd"], "model_version": c.get("model_version"), "at": now(),
+                       **controller.stamp(self, self.store.get("task", task_id) if task_id.startswith("t_") else None)}
+                self.store.put("call", rec["id"], rec)
+                if uid:
+                    self.store.put("call_uid", uid, {"id": rec["id"]})
+                if task_id.startswith("t_") and purpose == "work":
+                    m = self.store.get("meter", task_id) or {"usd": 0.0, "seconds": 0.0, "tokens": 0}
+                    self.store.put("meter", task_id, {"usd": m["usd"] + c["usd"],
+                                                      "seconds": m["seconds"] + c["seconds"],
+                                                      "tokens": m["tokens"] + c["tokens_in"] + c["tokens_out"]})
+        self.spend(worker, task_id, c["usd"], "inference", key=uid)
+        self._end_reservations()
+        return rec
+
+    def _end_reservations(self) -> None:
         held = getattr(self._tls, "reservations", None)
         if held:  # what the call really cost is charged: its reservation ends
             budget.release(self.store, held)
             self._tls.reservations = []
-        return rec
 
-    def spend(self, worker_id: str, task_id: str, usd: float, layer: str) -> None:
-        crossed = budget.charge(self.store, worker_id, task_id, usd, layer)
+    def spend(self, worker_id: str, task_id: str, usd: float, layer: str, key: str | None = None) -> None:
+        crossed = budget.charge(self.store, worker_id, task_id, usd, layer, key=key)
         L = budget.ledger(self.store)
         cap = project_settings.get(self.store)["budget_usd"]
         corr = task_id if task_id.startswith("t_") else self.cid
@@ -1051,11 +1131,13 @@ class Engine:
         by_id = {t["id"]: t for t in tasks}
         busy: set[str] = {a for _, a in self._inflight.values() if a.startswith("w_")}  # still on their last piece
         lease_s = self.LIVE_LEASE_S if isinstance(self.intel, ModelSource) else 120.0
+        for tid in [k for k, res in self._budget_waits.items() if budget.may_retry(self.store, res)]:
+            del self._budget_waits[tid]
         out = []
         for t in tasks:
             s = t["status"]
-            if t["id"] in self._inflight or s not in self.ACTIONS or (s == "PLANNED" and not all(
-                    by_id[d]["status"] == "VERIFIED" for d in t["dependencies"])):
+            if t["id"] in self._inflight or t["id"] in self._budget_waits or s not in self.ACTIONS or (
+                    s == "PLANNED" and not all(by_id[d]["status"] == "VERIFIED" for d in t["dependencies"])):
                 continue
             actor = execution.actor(t)
             if actor.startswith("w_"):
@@ -1086,6 +1168,9 @@ class Engine:
             try:
                 return self.ACTIONS[s](self, t)
             except BudgetHold as exc:  # nothing was spent and nothing failed: the work waits for the budget
+                if exc.reservation.get("in_flight"):
+                    with self.lock:
+                        self._budget_waits[tid] = exc.reservation
                 return {"did": "paused", "task": tid, "why": f"budget: {exc}"}
             except ProtocolError as exc:
                 return self._violation(self.task(tid), s, exc)
@@ -1174,6 +1259,13 @@ class Engine:
                     self._staff()
                 self._roadmap(note=self.meta.get("cycle_note", "") if self.cycle() > 1 else "")
             else:
+                for t in self.tasks():  # work that kept failing the same way is tried again, its count cleared
+                    if t.get("gave_up"):
+                        back = t.get("failed_from")
+                        t.update({"status": back if back in ("PLANNED", "BLOCKED", "LEAD_REVIEW") else
+                                  ("REWORK" if t["kind"] in roles.FILE_TYPES else "ASSIGNED"),
+                                  "gave_up": False, "escalated": {}, "attempts": 0, "cut_offs": 0})
+                        self.save_task(t)
                 self.set_meta(phase="running", failed_stage=None, notice="")
                 objective.transition(self, "OBJECTIVE_EXECUTING", "resumed after an intelligence error", by="founder")
             return self.meta

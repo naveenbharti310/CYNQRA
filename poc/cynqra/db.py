@@ -85,7 +85,9 @@ def now() -> str:
 # What a key looks like. A key is never written to the database, whatever carried it there (a provider's error
 # message quoting it, say): it is replaced before the write. The gateway refuses files that hold one.
 SECRET = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----|\bsk-ant-[\w-]{20,}|\bsk-[A-Za-z0-9_-]{32,}"
-                    r"|\bhf_[A-Za-z0-9]{30,}|\bAKIA[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{36,}\b")
+                    r"|\bhf_[A-Za-z0-9]{30,}|\bAKIA[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{36,}\b"
+                    # Google, Groq and NVIDIA keys, as their providers issue them
+                    r"|\bAIza[0-9A-Za-z_-]{30,}|\bgsk_[A-Za-z0-9]{20,}|\bnvapi-[A-Za-z0-9_-]{20,}")
 KEY_REMOVED = "[key removed]"
 
 

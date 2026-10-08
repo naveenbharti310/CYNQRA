@@ -148,7 +148,9 @@ def backtest(folder: Path, timeout: int = 60) -> dict:
     if not (folder / "forecast.py").exists():
         return {**out, "passed": False, "why": "forecast.py is missing at the repository root"}
     try:
-        proc = subprocess.run([python_exe(), "-c", RUNNER, str(folder)], input=json.dumps({"history": history,
+        from . import sandbox  # limits, and no network where the host allows it
+        proc = subprocess.run(sandbox.wrap([python_exe(), "-c", RUNNER, str(folder)], cpu_s=timeout + 10),
+                              input=json.dumps({"history": history,
                               "horizon": HOLDOUT}), capture_output=True, text=True, timeout=timeout, env=clean_env(),
                               cwd=str(folder), creationflags=NO_WINDOW)
     except subprocess.TimeoutExpired:

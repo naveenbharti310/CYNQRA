@@ -95,6 +95,13 @@ class IntelligenceSupply:
             out.update({k: v for k, v in describe(f["ref"], f, host).items() if v not in (None, "", [])})
         out.update(access_provider=conn.get("name") or adapter.title, access_type=adapter.title,
                    rate_limit_per_min=int((conn.get("rate_limits") or {}).get("calls_per_minute") or 0) or None)
+        # A price Cynqra does not know is the worst case only until the public catalogue names the model's list
+        # price (paid run 37589136743: Gemini at $10/$50 per million against Google's $0.50/$3 and $2/$12 stopped an
+        # objective at its cap and left calibration no budget). A catalogue price of 0 is a free variant's, not this
+        # model's, so it is not taken.
+        lin, lout = out.get("list_price_in"), out.get("list_price_out")
+        if out.get("price_source") == "unknown" and lin and lout and float(lin) > 0 and float(lout) > 0:
+            out.update(price_in=float(lin), price_out=float(lout), price_source="catalogue")
         return out
 
     def catalog(self, connection_id: str) -> dict:
@@ -138,11 +145,13 @@ class IntelligenceSupply:
 
     def qualify(self, entries: list[dict] | None = None, limit: int = 3, log=lambda s: None) -> list[dict]:
         """Global qualification for discovered intelligence that has none yet (mandate 16): a discovered model is
-        not qualified until its qualification work passes (probe.py). Bounded: at most limit candidates, fair across
-        providers and diverse across families (candidates.py), and only ones that can be reached now. A provider
-        failure leaves a model unverified (inconclusive), never failed. Returns the probe results."""
+        not qualified until its qualification work passes (probe.py). Bounded: at most limit candidates its provider
+        serves, fair across providers and diverse across families, the newest of each (candidates.py), and only ones
+        that can be reached now. A provider failure leaves a model unverified (inconclusive), never failed. Returns
+        the probe results."""
+        from .. import attribution
         from ..probe import probe  # the probe drives a model source; imported here to keep the layer acyclic
-        from .candidates import select
+        from .candidates import examine
         pool = entries if entries is not None else self.registry.models()
         pending = []
         for m in pool:
@@ -153,15 +162,21 @@ class IntelligenceSupply:
                 continue
             pending.append(m)
         local = [m for m in pending if m.get("local")][:1]  # a model on this computer loads gigabytes: one at a time
-        chosen = select([m for m in pending if not m.get("local")] + local, limit) if pending else []
-        out = []
-        for m in chosen:
+
+        def one(m: dict) -> dict:
             try:
-                out.append(probe(self, m["id"], log=log))
+                return probe(self, m["id"], log=log)
             except Exception as exc:  # noqa: BLE001 - a probe that cannot run leaves the model unverified
-                out.append({"model_id": m["id"], "passed": False, "qualification_status": "inconclusive",
-                            "error": str(exc)[:300]})
-        return out
+                return {"model_id": m["id"], "passed": False, "qualification_status": "inconclusive",
+                        "error": str(exc)[:300]}
+
+        def served(r: dict) -> bool:  # a model its provider lists but no longer serves gives its place to the next
+            return not (r.get("error") and attribution.diagnose(r["error"]) == "withdrawn")
+
+        if not pending:
+            return []
+        # hosted candidates are examined side by side; a model on this computer is one of them at most (above)
+        return examine([m for m in pending if not m.get("local")] + local, limit, one, served, parallel=limit)[1]
 
     def remove_connection(self, connection_id: str) -> None:
         for m in self.registry.models():

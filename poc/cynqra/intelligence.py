@@ -21,7 +21,8 @@ import os
 import re
 from pathlib import Path
 
-from . import roles
+from . import model_adapter, provenance, roles
+from .file_rules import RULE as FILE_RULE
 
 HERE = Path(__file__).resolve().parent
 SCENARIOS = HERE.parent / "scenarios"
@@ -99,6 +100,7 @@ def files_layout(needs_from: str) -> str:
             "the complete file content, exactly as it should be saved\n"
             "=== END FILE ===\n"
             "Write file contents as plain text, not escaped and not inside code fences. "
+            f"Every file must be {FILE_RULE}; any other name is refused. "
             'If a fact you need is missing, return only: {"result": "blocked", "category": "missing_input", '
             f'"description": "...", "needs_from": "{needs_from}"}}')
 
@@ -183,10 +185,10 @@ def plan_schema(worker_ids: list[str]) -> dict:
             "id": S, "workstream_id": S, "milestone_id": S, "kind": {"type": "string", "enum": list(roles.TASK_TYPES)},
             "owner_worker_id": {"type": "string", "enum": list(worker_ids)}, "title": S, "inputs": S,
             "expected_output": S, "acceptance_criteria": LIST, "requirement_ids": LIST, "documents": LIST,
-            "dependencies": LIST, "deadline_day": {"type": "integer"}},
+            "dependencies": LIST, "files": LIST, "deadline_day": {"type": "integer"}},
             "required": ["id", "workstream_id", "milestone_id", "kind", "owner_worker_id", "title", "inputs",
                          "expected_output", "acceptance_criteria", "requirement_ids", "documents", "dependencies",
-                         "deadline_day"]}}}})
+                         "files", "deadline_day"]}}}})
 
 
 def _unfence(body: str) -> str:
@@ -252,10 +254,33 @@ FORECAST_CONTRACT = ("Forecast contract. forecast.py at the repository root defi
                      "week before.")
 
 
+# Contract-first build (R10 of the architecture review): build tasks chained one after another made a dozen
+# multi-minute calls in a row. The contract fixes the boundaries first; the builds then run side by side.
+# A plan sized to its objective: the real run of 7 Oct planned 18 and 21 tasks in 8 waves, each wave waiting on the
+# one before, where an earlier run planned about 7 per objective; the work took twice as long for no more of it.
+PLAN_MAX_TASKS = 12
+PLAN_MAX_WAVES = 6
+PLAN_LEAN = (f"Plan the fewest tasks that meet every acceptance criterion: at most {PLAN_MAX_TASKS} tasks in at most "
+             f"{PLAN_MAX_WAVES} waves (a wave is the tasks that can run once the earlier ones are done). Work one member "
+             "can do in one reply is one task: a document task may write several of its owner's document types. Let "
+             "tasks that do not need each other's output run side by side rather than one after another.\n")
+CONTRACT_FIRST = ("Plan the build contract first. An early document task fixes the contract: which build task owns "
+                  "which files, the routes and the data shapes between them. Each build task then depends on that "
+                  "contract and not on another build task, unless it truly needs that task's code, so the builds run "
+                  "side by side; no two build tasks write the same file, and files lists each build task's own files "
+                  "(app.py belongs to exactly one). review_merge depends on every build task.\n")
+
+
 def task_brief(task: dict) -> str:
-    """What a task's type asks of its owner, from the catalog."""
+    """What a task's type asks of its owner, from the catalog, and for a build task the files it owns and the files
+    the builds working alongside it own (contract-first, CONTRACT_FIRST)."""
     kind = task["kind"]
     out = f"Task type {kind}: {roles.TASK_TYPES[kind]['about']}.\n"
+    if task.get("files"):
+        out += f"Files this task owns: {', '.join(task['files'])}.\n"
+    if task.get("others_files"):
+        out += ("Builds working alongside this one own these files; do not write them, and fit them by the contract: "
+                + ", ".join(f"{f} ({t})" for f, t in sorted(task["others_files"].items())) + ".\n")
     if kind == "document":
         out += ("Write these documents, one Markdown file each, and cite in them the requirement ids this task covers ("
                 + (", ".join(task.get("requirement_ids") or []) or "none") + "):\n"
@@ -361,6 +386,35 @@ class ScriptedSource:
         return json.loads(json.dumps(preset)), self._usage(worker)
 
 
+EFFORTS = ("low", "medium", "high")
+
+
+def _both_reported(a: dict, b: dict) -> float | None:
+    """Two answers' cost as their provider reported it, or None (priced from tokens) unless both carry one."""
+    if a.get("usd_reported") is None or b.get("usd_reported") is None:
+        return None
+    return round(float(a["usd_reported"]) + float(b["usd_reported"]), 6)
+
+
+def work_effort(task: dict) -> str:
+    """How long a thinking model may think on a task: medium for building (code, forecasts) and for high-risk work,
+    low for the rest. A model's own default is its most, which made paid run 37589136743's calls take three to five
+    minutes and cut replies off. Each attempt that failed verification on the same model raises it a step, up to high
+    (the escalation ladder): cheap thinking first, more only where verification showed it was needed. A replacement
+    model starts again from the task's own level. (Until 7 October this read a "tier" field tasks do not have, so
+    every task started as low risk; paid run 37628067857 delivered all three objectives with no call above medium.)"""
+    tier = str(task.get("risk_tier") or task.get("tier") or "").upper()
+    level = 1 if task.get("kind") in roles.BUILD_TYPES or tier == "HIGH" else 0
+    return EFFORTS[min(level + max(0, int(task.get("attempts") or 0)), len(EFFORTS) - 1)]
+
+
+def review_effort(round_index: int = 0) -> str:
+    """How long a reviewer may think: low on the first round (the platform has already run its automatic checks, and
+    a deploy still needs the founder's approval and production verification), medium once work came back for a
+    second look. Paid run 37628067857: a deploy review at the model's medium setting took seven minutes."""
+    return "low" if int(round_index or 0) < 1 else "medium"
+
+
 class ModelSource:
     """Real intelligence: each call goes through the Intelligence Gateway to what the worker is bound to now."""
     kind = "model"
@@ -376,8 +430,10 @@ class ModelSource:
         self.access = access
 
     def _call(self, prompt: str, max_tokens: int = 4000, files: bool = False, schema: dict | None = None,
-              worker: str = "system", needs_from: str = "") -> tuple[dict, dict]:
-        """One model call. files=True: a JSON header followed by file blocks, so no constrained JSON mode."""
+              worker: str = "system", needs_from: str = "", effort: str = "medium") -> tuple[dict, dict]:
+        """One model call. files=True: a JSON header followed by file blocks, so no constrained JSON mode. effort:
+        how long a thinking model may think (low, medium, high), from the work's risk; a provider that does not
+        take it is asked without it."""
 
         def parse(text: str):
             data = _parse_json(text)
@@ -394,9 +450,23 @@ class ModelSource:
         model_id = self.access.intelligence_for(worker)
         key = hashlib.sha256(f"{model_id}|{prompt}".encode("utf-8")).hexdigest()
         repeats = self.answered.get(key, 0)
-        out = self.access.invoke(worker, {"prompt": prompt, "max_tokens": max_tokens, "want_json": not files,
-                                          "schema": schema, "partial": files,
-                                          "temperature": round(min(0.3 * repeats, 0.9), 1) if repeats else None})
+        request = {"prompt": prompt, "max_tokens": max_tokens, "want_json": not files, "schema": schema,
+                   "partial": files, "temperature": round(min(0.3 * repeats, 0.9), 1) if repeats else None,
+                   "effort": effort}
+        out = self.access.invoke(worker, request)
+        used, uid = effort, out.get("call_uid")  # the answer's id, while this usage is that one answer alone
+        if out.get("error") and not files and "reply truncated" in str(out["error"]):
+            # A structured answer cut off at its limit (paid run 37589136743: the SaaS workforce, so the objective
+            # failed) is asked once more with less thinking and twice the room, through the same budget reservation;
+            # what the cut-off reply cost is kept
+            first, used, uid = out, "low", None
+            out = self.access.invoke(worker, {**request, "effort": used,
+                                              "max_tokens": max(2 * max_tokens, 2 * model_adapter.HOSTED_MIN_REPLY)})
+            # the cut-off reply was billed: its tokens go with the answer, or with the failure if the retry fails
+            out = {**out, "tokens_in": int(out.get("tokens_in") or 0) + int(first.get("tokens_in") or 0),
+                   "tokens_out": int(out.get("tokens_out") or 0) + int(first.get("tokens_out") or 0),
+                   "tokens_cached": int(out.get("tokens_cached") or 0) + int(first.get("tokens_cached") or 0),
+                   "usd_reported": _both_reported(out, first)}
         model_id = out.get("model_id") or model_id
         if out.get("error"):
             raise IntelligenceError(out["error"], model_id=model_id, usage=out)
@@ -415,20 +485,28 @@ class ModelSource:
         if not isinstance(data, dict) or no_files:
             again = ("\n\nYour reply had no files in the required layout. " + files_layout(needs_from)) if files else \
                 "\n\nReply with only one JSON object."
+            uid = None  # two answers' tokens in one usage: charged as they come
             out2 = self.access.invoke(worker, {"prompt": prompt + again, "max_tokens": max_tokens,
-                                               "want_json": not files, "schema": schema, "temperature": 0.4})
+                                               "want_json": not files, "schema": schema, "temperature": 0.4,
+                                               "effort": used})  # without it a thinking model thinks its most
             if out2.get("error"):
                 raise IntelligenceError(out2["error"], model_id=model_id, usage=out2)
             self.last_text = out2["text"]
             data = parse(out2["text"])
             out["tokens_in"] += out2["tokens_in"]
             out["tokens_out"] += out2["tokens_out"]
+            out["tokens_cached"] = int(out.get("tokens_cached") or 0) + int(out2.get("tokens_cached") or 0)
+            out["usd_reported"] = _both_reported(out, out2)
         if not isinstance(data, dict):
             # the provider answered and the intelligence's reply could not be read: named, so the Replacement Engine
             # asks again and then replaces it (real run 36990295187 stopped three objectives here, unnamed)
             raise IntelligenceError("model did not return a JSON object", model_id=model_id, usage=out)
-        usage = {"tokens_in": out["tokens_in"], "tokens_out": out["tokens_out"], "estimated": out["estimated"],
-                 "label": out.get("model") or model_id, "latency_s": out.get("latency_s", 0), "model_id": model_id}
+        usage = {"tokens_in": out["tokens_in"], "tokens_out": out["tokens_out"],
+                 "tokens_cached": int(out.get("tokens_cached") or 0), "cache_reported": bool(out.get("cache_reported")),
+                 "estimated": out["estimated"],
+                 "label": out.get("model") or model_id, "latency_s": out.get("latency_s", 0), "model_id": model_id,
+                 "journaled": bool(out.get("journaled")), "effort": used, "call_uid": uid,
+                 "usd_reported": out.get("usd_reported")}
         if out.get("speed"):
             usage.update(out["speed"])
         return data, usage
@@ -438,7 +516,8 @@ class ModelSource:
         """The start of every role's prompt. What stays the same through a run comes first (the contract, the
         objective, then the rules, which only grow), the role after it: a local server reuses its cache for the
         part a prompt shares with the one before, so a change of speaker does not mean reading it all again."""
-        return DELIVERY_CONTRACT + "\n\n" + ModelSource._ctx(objective, rules) + "\n" + (persona or "") + "\n\n"
+        return (DELIVERY_CONTRACT + "\n\n" + provenance.RULE + "\n\n" + ModelSource._ctx(objective, rules) + "\n"
+                + (persona or "") + "\n\n")
 
     @staticmethod
     def _ctx(objective: dict, rules: list[str]) -> str:
@@ -455,7 +534,8 @@ class ModelSource:
 
     def structure_objective(self, messy: str) -> tuple[dict, dict]:
         """Stage 0: the founder's words as the seven objective fields."""
-        data, usage = self._call(self.objective_prompt + messy + "\n", max_tokens=1500, schema=SCHEMAS["objective"])
+        data, usage = self._call(self.objective_prompt + messy + "\n", max_tokens=1500, schema=SCHEMAS["objective"],
+                                 effort="low")
         empty = [k for k in OBJECTIVE_KEYS if not str(data.get(k) or "").strip()]
         if not empty:
             return data, usage
@@ -618,7 +698,7 @@ class ModelSource:
                   "requirement ids it satisfies; a document task names the document types it writes, from those its "
                   f"owner writes. Task types:\n{types}\n"
                   "A task's owner must be a worker who may own its type. Ids t_01, t_02 and so on; dependencies may "
-                  "only name earlier tasks.\n"
+                  "only name earlier tasks.\n" + CONTRACT_FIRST + PLAN_LEAN
                   + (f"This is cycle {cycle}: the product is live. Done in earlier cycles, not to plan again:\n"
                      + "\n".join(f"* {x}" for x in done or []) + "\nPlan only the new work the founder asks for, "
                      "ending with one review_merge and one deploy, with at least one code task.\nThe founder asks: "
@@ -626,7 +706,7 @@ class ModelSource:
                      (f"The founder rejected the previous roadmap: {note}\n" if note else "")) +
                   'Return JSON: {"workstreams": [{"id", "name"}], "milestones": [{"id", "name", "due_day"}], '
                   '"tasks": [{"id", "workstream_id", "milestone_id", "kind", "owner_worker_id", "title", "inputs", '
-                  '"expected_output", "acceptance_criteria", "requirement_ids", "documents", "dependencies", '
+                  '"expected_output", "acceptance_criteria", "requirement_ids", "documents", "dependencies", "files", '
                   '"deadline_day"}]}' + self._refused(feedback))
         return self._call(prompt, max_tokens=4000, schema=plan_schema([w["id"] for w in workers]), worker=planner)
 
@@ -640,22 +720,25 @@ class ModelSource:
                   "List only the artifacts the worker needs. Put every closed list or rule they must not invent "
                   "into acceptance_check.\n"
                   'Return JSON: {"artifacts": [ids], "context_ref": "...", "acceptance_check": "..."}')
-        return self._call(prompt, max_tokens=1500, schema=SCHEMAS["handoff"], worker=worker)
+        return self._call(prompt, max_tokens=1500, schema=SCHEMAS["handoff"], worker=worker, effort="low")
 
     def work(self, task: dict, worker: str, objective: dict, rules: list[str], handoff: dict,
              inbox: dict[str, str], feedback: str = "", answers: list[dict] | None = None,
              previous: dict[str, str] | None = None, repo_files: list[str] | None = None, persona: str = "",
              answerers: list[str] | None = None, **_) -> tuple[dict, dict]:
-        files = "".join(f"=== FILE: {k} ===\n{v.rstrip()}\n=== END FILE ===\n" for k, v in inbox.items()) or "none"
+        # what others wrote, tools printed and generated code output is fenced as data (provenance.py)
+        files = provenance.files(inbox, "files team members wrote") if inbox else "none"
         extra = ""
         if answers:
-            extra += "\nAnswers to your Blockers:\n" + "\n".join(a.get("acceptance_check", "") for a in answers)
+            extra += "\nAnswers to your Blockers:\n" + provenance.data(
+                "\n".join(a.get("acceptance_check", "") for a in answers), "your cofounder's answers")
         if feedback:
-            extra += "\nYour last attempt failed a check. Fix it:\n" + feedback
+            extra += "\nYour last attempt failed a check. Fix it:\n" + provenance.data(
+                feedback, "Cynqra's checks and tools (what they quote came from the code and the tools)")
         if previous:
             extra += ("\nYour files so far. They are kept as they are: send only the files you change or add, each one "
                       'complete. To remove a file, add "delete": ["name"] to the JSON object.\n'
-                      + "".join(f"=== FILE: {k} ===\n{v.rstrip()}\n=== END FILE ===\n" for k, v in previous.items()))
+                      + provenance.files(previous, "your own files so far"))
         kind = task["kind"]
         delivers_files = kind in roles.FILE_TYPES
         shape = None if delivers_files else (
@@ -683,38 +766,35 @@ class ModelSource:
                      + files_layout(who[0] if who else "") if delivers_files else f"Return one JSON object: {shape}"))
         return self._call(prompt, max_tokens=8000 if kind in roles.BUILD_TYPES else 3000, files=delivers_files,
                           schema=None if delivers_files else SCHEMAS["proposal"], worker=worker,
-                          needs_from=who[0] if who else "")
+                          needs_from=who[0] if who else "", effort=work_effort(task))
 
     def review(self, task: dict, worker: str, objective: dict, rules: list[str], owner: str, work: dict,
-               persona: str = "", **_) -> tuple[dict, dict]:
+               persona: str = "", round_index: int = 0, **_) -> tuple[dict, dict]:
         """A cofounder reviews its team member's work before it counts: files that passed the platform's checks, or
         a proposal before it goes to the founder."""
         crit = "; ".join(task.get("acceptance_criteria") or [])
-        body, left = "", 14000
-        for name, text in (work.get("files") or {}).items():
-            piece = f"=== FILE: {name} ===\n{text[:left].rstrip()}\n=== END FILE ===\n"
-            body += piece
-            left -= len(piece)
-            if left <= 0:
-                body += "(the rest of the files are not shown)\n"
-                break
+        body = provenance.files(work["files"], f"files {owner} wrote", limit=14000) \
+            if work.get("files") else ""
         if work.get("proposal"):
-            body += "Proposal for the founder:\n" + json.dumps(work["proposal"], indent=1) + "\n"
+            body += "Proposal for the founder:\n" + provenance.data(json.dumps(work["proposal"], indent=1),
+                                                                    f"{owner}'s proposal")
         prompt = (self._head(persona, objective, rules) +
                   f"{owner}, on your team, finished task {task['id']} ({task['title']}). Expected output: "
-                  f"{task['expected_output']}.\n" + (f"Acceptance criteria: {crit}\n" if crit else "") +
-                  f"{work.get('checks') or ''}\n{body}"
+                  f"{task['expected_output']}.\n" + (f"Acceptance criteria: {crit}\n" if crit else "")
+                  + (provenance.data(work["checks"], "Cynqra's checks") if work.get("checks") else "\n") + body +
                   "Review it as the cofounder accountable for this area, before it counts. Approve it if it does what "
                   "was asked and is right for this company. Send it back only for a concrete problem, and say exactly "
                   "what to change; the platform has already run its automatic checks.\n"
                   'Return JSON: {"verdict": "approve" or "revise", "note": "..."}')
-        return self._call(prompt, max_tokens=800, schema=SCHEMAS["review"], worker=worker)
+        return self._call(prompt, max_tokens=800, schema=SCHEMAS["review"], worker=worker,
+                          effort=review_effort(round_index))
 
     def answer_blocker(self, task: dict, worker: str, objective: dict, rules: list[str], blocker: dict,
                        artifact_index: list[str], persona: str = "", **_) -> tuple[dict, dict]:
         prompt = (self._head(persona, objective, rules) +
-                  f"{blocker.get('raised_by')} raised a Blocker on {task['id']} ({task['title']}): "
-                  f"{blocker.get('description')}\nArtifacts that exist: {json.dumps(artifact_index)}\n"
+                  f"{blocker.get('raised_by')} raised a Blocker on {task['id']} ({task['title']}):\n"
+                  + provenance.data(str(blocker.get("description") or ""), f"{blocker.get('raised_by')}'s Blocker") +
+                  f"Artifacts that exist: {json.dumps(artifact_index)}\n"
                   "Clear it using only the objective, the decided rules and the artifacts. If it needs a new product "
                   "decision, say so plainly and give the safest reading for now.\n"
                   'Return JSON: {"artifacts": [ids], "context_ref": "...", "acceptance_check": "the missing facts"}')

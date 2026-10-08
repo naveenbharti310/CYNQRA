@@ -54,5 +54,130 @@ class HostedSelectionTests(unittest.TestCase):
         self.assertEqual(chosen[0]["id"], "a")
 
 
+# The 19 models Google's API listed for the founder's paid key in run 37587595496
+GEMINI = ("gemini-2.5-flash gemini-2.5-flash-lite gemini-2.5-pro gemini-3.1-flash-lite gemini-3.1-flash-lite-preview "
+          "gemini-3.1-pro-preview gemini-3.5-flash gemini-3.5-flash-lite gemini-3.6-flash gemini-3.7-flash "
+          "gemini-3.8-flash gemini-3-flash-preview gemini-flash-latest gemini-flash-lite-latest gemini-omni-1.1-flash "
+          "gemini-omni-flash-preview gemini-pro-latest gemma-4-26b-a4b-it gemma-4-31b-it").split()
+
+
+class NewestOfEachLineTests(unittest.TestCase):
+    """Run 37587595496: of the 19 models on the founder's paid Google key, the three examined were Gemini 3 Flash
+    Preview, Gemini 2.5 Pro and Gemini 3.1 Pro Preview. A "-preview" name counted as a family of its own, so the old
+    2.5 Pro took a place beside 3.1 Pro Preview (and Google then refused it as no longer available to new users), and
+    3 Flash Preview stood apart from 3.5 to 3.8 Flash. Inside a family a release date the public catalogue lacks
+    counted as the oldest. A preview or a moving alias is now a release of its family, and the newest version stands
+    for it."""
+
+    def test_the_newest_of_each_gemini_line_is_examined(self):
+        chosen = [m["ref"] for m in select([model(r, r, "google") for r in GEMINI], 3)]
+        self.assertEqual(sorted(chosen), ["gemini-3.1-pro-preview", "gemini-3.5-flash-lite", "gemini-3.8-flash"])
+        for old in ("gemini-2.5-pro", "gemini-3-flash-preview", "gemini-2.5-flash", "gemini-pro-latest"):
+            self.assertNotIn(old, chosen)
+
+    def test_one_place_per_line_however_the_names_are_written(self):
+        from cynqra.intelligence_layer.candidates import family_key
+        self.assertEqual(family_key("gemini-3.1-pro-preview"), family_key("gemini-2.5-pro"))
+        self.assertEqual(family_key("gemini-3-flash-preview"), family_key("gemini-3.8-flash"))
+        self.assertEqual(family_key("gemini-2.5-flash-preview-05-20"), family_key("gemini-3.8-flash"))
+        self.assertNotEqual(family_key("gemini-3.8-flash"), family_key("gemini-3.5-flash-lite"))
+        chosen = [m["ref"] for m in select([model(r, r, "google") for r in GEMINI], len(GEMINI))]
+        self.assertEqual(len({family_key(r) for r in chosen[:6]}), 6, "six lines, one place each, before any repeat")
+        self.assertEqual(sorted(chosen[:6]), ["gemini-3.1-pro-preview", "gemini-3.5-flash-lite", "gemini-3.8-flash",
+                                              "gemini-omni-1.1-flash", "gemma-4-26b-a4b-it", "gemma-4-31b-it"])
+
+    def test_a_release_date_the_catalogue_lacks_never_puts_an_old_release_first(self):
+        entries = [model("old", "gemini-2.5-flash", "google", released=1_750_000_000),
+                   model("new", "gemini-3.8-flash", "google", released=0)]
+        self.assertEqual(select(entries, 1)[0]["id"], "new")
+
+    def test_a_pinned_release_before_a_moving_alias_and_a_stable_one_before_its_preview(self):
+        entries = [model("alias", "gemini-flash-lite-latest", "google"),
+                   model("preview", "gemini-3.1-flash-lite-preview", "google"),
+                   model("stable", "gemini-3.1-flash-lite", "google")]
+        self.assertEqual(select(entries, 1)[0]["id"], "stable")
+        self.assertEqual(select(entries[:2], 1)[0]["id"], "preview", "a pinned preview before the moving alias")
+
+    def test_a_model_its_provider_no_longer_serves_gives_its_place_to_the_next(self):
+        from cynqra.intelligence_layer.candidates import examine
+        entries = [model(r, r, "google") for r in ("a-1", "b-1", "c-1", "d-1", "e-1", "f-1")]
+        gone = {"a-1"}
+        run = lambda m: {"model_id": m["id"], "error": "HTTP 404 from provider: no longer available"} \
+            if m["id"] in gone else {"model_id": m["id"], "passed": True}  # noqa: E731
+        served = lambda r: "HTTP 404" not in (r.get("error") or "")  # noqa: E731
+        tried, results = examine(entries, 2, run, served)
+        self.assertEqual([m["id"] for m in tried], ["a-1", "b-1", "c-1"], "two models that can be used")
+        self.assertEqual([r["model_id"] for r in results], ["a-1", "b-1", "c-1"])
+        gone = {m["id"] for m in entries}
+        tried, _ = examine(entries, 2, run, served)
+        self.assertEqual(len(tried), 4, "at most twice the limit are tried")
+
+    def test_probes_run_side_by_side_in_order_and_a_place_not_served_is_refilled(self):
+        """Paid run 37628067857 spent 27 minutes qualifying three models one after another, 18.6 of them on one
+        model's hung probe. The places still open are now examined side by side."""
+        import threading
+        import time
+        from cynqra.intelligence_layer.candidates import examine
+        entries = [model(r, r, "google") for r in ("a-1", "b-1", "c-1", "d-1", "e-1")]
+        live, most = [0], [0]
+        lock = threading.Lock()
+
+        def run(m):
+            with lock:
+                live[0] += 1
+                most[0] = max(most[0], live[0])
+            time.sleep(0.3)
+            with lock:
+                live[0] -= 1
+            return {"model_id": m["id"], "error": "HTTP 404" if m["id"] == "b-1" else ""}
+
+        served = lambda r: "HTTP 404" not in r["error"]  # noqa: E731
+        start = time.time()
+        tried, results = examine(entries, 3, run, served, parallel=3)
+        self.assertLess(time.time() - start, 0.85, "two waves of 0.3 s, not four probes one after another")
+        self.assertEqual(most[0], 3)
+        self.assertEqual([m["id"] for m in tried], ["a-1", "b-1", "c-1", "d-1"], "b-1's place went to d-1")
+        self.assertEqual([r["model_id"] for r in results], ["a-1", "b-1", "c-1", "d-1"], "results in order")
+        self.assertEqual([m["id"] for m in examine(entries, 3, run, served)[0]], ["a-1", "b-1", "c-1", "d-1"],
+                         "one at a time chooses the same")
+
+    def test_a_probes_first_short_answer_has_five_minutes_and_the_rest_the_models_own_deadline(self):
+        from cynqra import probe
+
+        class Gateway:
+            seen = []
+
+            def invoke(self, model_id, request, pinned_version=None, limit_s=None):
+                self.seen.append(limit_s)
+                return {"text": '{"problem": "p", "users": "u", "outcome": "o", "constraints": "c", "success": "s", '
+                                '"scope": "s", "risks": "r", "product": "p", "inferred_fields": [], '
+                                '"missing_fields": []}', "tokens_in": 1, "tokens_out": 1, "estimated": False,
+                        "error": None, "model_id": model_id}
+
+        class Registry:
+            def record_call(self, *a, **k):
+                return {"usd": 0.0, "seconds": 0.0, "tokens_in": 1, "tokens_out": 1}
+
+            def record_outcome(self, *a, **k):
+                return None
+
+        class Supply:
+            gateway, registry = Gateway(), Registry()
+
+        run = probe._Run(Supply(), "m1", "probe")
+        run.objective(lambda s: None)
+        run.invoke("w_eng_a", {"prompt": "next"})
+        self.assertEqual(Gateway.seen[0], probe.FIRST_ANSWER_S)
+        self.assertEqual(Gateway.seen[-1], None, "the code rounds keep the model's own deadline")
+
+    def test_the_examination_counts_a_404_as_not_served_and_an_empty_account_as_served(self):
+        from cynqra.run_hosted_examination import served
+        self.assertFalse(served({"error": 'RuntimeError: HTTP 404 from provider: [{"error": {"code": 404, "message": '
+                                          '"This model models/gemini-2.5-pro is no longer available to new users."}}]'}))
+        self.assertTrue(served({"error": "RuntimeError: HTTP 402 from provider: Your prepayment credits are depleted."}),
+                        "another model on the same empty account would only be refused again")
+        self.assertTrue(served({"passed": True}))
+
+
 if __name__ == "__main__":
     unittest.main()

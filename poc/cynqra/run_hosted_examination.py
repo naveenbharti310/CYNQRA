@@ -21,9 +21,10 @@ import os
 import time
 from pathlib import Path
 
+from . import attribution as attr
 from .intelligence import IntelligenceError
 from .intelligence_layer import IntelligenceSupply
-from .intelligence_layer.candidates import details, family_key, priority, provider_key
+from .intelligence_layer.candidates import details, examine, family_key, priority, provider_key
 from .intelligence_layer.candidates import select as _select
 from .live_events import EventTail
 from .probe import probe
@@ -37,7 +38,26 @@ PROVIDERS = {"google": ("GEMINI_API_KEY", "Google Gemini (environment)"),
              "anthropic": ("ANTHROPIC_API_KEY", "Anthropic (environment)"),
              "groq": ("GROQ_API_KEY", "Groq (environment)"),
              "mistral": ("MISTRAL_API_KEY", "Mistral (environment)"),
+             # Claude through Claude Code on this computer: no key, its "key" is the opt-in (ClaudeCodeAdapter)
+             "claude-code": ("CYNQRA_CLAUDE_CODE", "Claude Code (this computer)"),
              "meta": ("META_API_KEY", "Meta (environment)")}
+
+
+REPLAY_KEY = "replay-without-a-key"  # never sent anywhere: a replay answers every listing and call from its recording
+
+
+def replay_keys(wanted: list[str] | None) -> list[str]:
+    """For a replay: a placeholder in place of each named provider's missing key, so its connection is built from the
+    recording after the key was rotated or removed. A replay sends nothing to a provider (a call or listing the
+    recording lacks fails, adapters._get_json), so the placeholder is never sent. Returns the providers given one."""
+    filled = []
+    # provider=all: every provider but Claude Code, which is connected only when asked for by name
+    for p in wanted if wanted is not None else [p for p in PROVIDERS if p != "claude-code"]:
+        env = PROVIDERS[p][0]
+        if not os.environ.get(env):
+            os.environ[env] = "1" if p == "claude-code" else REPLAY_KEY  # Claude Code's opt-in is a "1", not a key
+            filled.append(p)
+    return filled
 
 
 def parse_providers(value: str) -> list[str] | None:
@@ -57,6 +77,12 @@ def select(entries: list[dict], limit: int) -> list[dict]:
     return _select(entries, limit)
 
 
+def served(result: dict) -> bool:
+    """Whether the provider serves the model it listed: not when its qualification call came back "no longer
+    available" (HTTP 404), as Gemini 2.5 Pro did for a new paid account in run 37587595496."""
+    return not (result.get("error") and attr.diagnose(result["error"]) == "withdrawn")
+
+
 def selection_details(entries: list[dict], selected: list[dict], limit: int) -> dict:
     return details(entries, selected, limit)
 
@@ -71,6 +97,135 @@ def limit_environment(wanted: list[str]) -> list[str]:
         if p not in wanted and os.environ.pop(env, None) is not None:
             gone.append(env)
     return gone
+
+
+# The public prefixes of providers' keys, most specific first: enough to tell which service a saved key is for
+# without sending it to any other. An empty variable name: recognised, but Cynqra has no connection for it yet.
+KEY_PREFIXES = (("sk-ant-", "ANTHROPIC_API_KEY", "Anthropic"), ("sk-proj-", "OPENAI_API_KEY", "OpenAI"),
+                ("sk-svcacct-", "OPENAI_API_KEY", "OpenAI"), ("sk-or-", "", "OpenRouter"),
+                ("AIza", "GEMINI_API_KEY", "Google Gemini"), ("gsk_", "GROQ_API_KEY", "Groq"),
+                ("nvapi-", "NVIDIA_API_KEY", "NVIDIA"), ("hf_", "", "Hugging Face"), ("xai-", "", "xAI"),
+                ("csk-", "", "Cerebras"))
+
+
+def identify(secret: str) -> tuple[str, str] | None:
+    """(environment variable, provider) for a key, from its public prefix; None when the prefix says nothing
+    (a bare "sk-" is used by several providers; Mistral's and Meta's keys have no prefix)."""
+    return next(((env, label) for prefix, env, label in KEY_PREFIXES if secret.startswith(prefix)), None)
+
+
+def key_check(name: str, log=print, site: str = "") -> int:
+    """Which provider a saved key is for, and whether that provider accepts it: told from the key's public prefix
+    (it is sent to no other service), then the provider's own model listing, which costs nothing; a key with no
+    known prefix is checked against the service the founder names (site). Nothing is generated, and the key is never
+    printed."""
+    import tempfile
+    secret = (os.environ.get(name) or "").strip()
+    if not secret:
+        log(f"{name} is not set for this job")
+        return 1
+    found = identify(secret)
+    if found is None and site:
+        return site_check(name, secret, site, log)
+    if found is None:
+        log(f"{name}: no provider's prefix ({len(secret)} characters, "
+            f"{'letters and digits only' if secret.isalnum() else 'with symbols'}); say which service it is for")
+        return 1
+    env, label = found
+    if not env:
+        log(f"{name}: a {label} key; Cynqra has no {label} connection yet, so it was not sent anywhere")
+        return 1
+    limit_environment([])  # only this key: every other provider's key leaves the process
+    for other in ("OPENAI_API_KEY", "HF_TOKEN", "CYNQRA_OPENAI_URL", "CYNQRA_ANTHROPIC_URL"):
+        os.environ.pop(other, None)
+    os.environ[env] = secret
+    with tempfile.TemporaryDirectory() as d:
+        supply = IntelligenceSupply(Path(d))
+        try:
+            entries = supply.connect_environment()
+            for c in connection_report(supply):
+                log(f"  {c['name']}: {c['status']} ({c['note']})")
+            refs = sorted(str(m.get("ref") or m["id"]) for m in entries)
+            log(f"{name}: a {label} key; the provider "
+                + (f"accepted it and lists {len(refs)} model(s): {', '.join(refs)}" if refs else
+                   "listed no model for it (refused, or nothing chat-capable): see the connection above"))
+            return 0 if refs else 1
+        finally:
+            supply.close()
+
+
+def _page(url: str) -> str:
+    """A public web page's text, read without any key (at most 500 KB)."""
+    import urllib.request
+    from .model_adapter import USER_AGENT
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": USER_AGENT}), timeout=20) as r:
+        return r.read(500_000).decode("utf-8", errors="replace")
+
+
+def site_check(name: str, secret: str, site: str, log=print) -> int:
+    """A key from a service with no known prefix (cleanapis.com), checked against the site the founder named: its
+    public page read without the key (title, description, links to its docs, pricing, terms and privacy); then the
+    usual OpenAI-compatible model listings on that site's own domain, the key sent nowhere else; the first that
+    answers is connected through Cynqra, as a founder's key is. Nothing is generated, and the key is never
+    printed."""
+    import re
+    import tempfile
+    import urllib.parse
+    from .intelligence_layer.adapters import SupplyError, _get_json
+    url = site if "://" in site else "https://" + site
+    host = (urllib.parse.urlparse(url).hostname or "").lower()
+    if not host:
+        log(f"{name}: {site!r} is not a web address")
+        return 1
+    root, domain = f"https://{host}", host.removeprefix("www.")
+    hide = lambda text: str(text).replace(secret, "[key]")  # noqa: E731 - a reply that echoes the key
+    try:
+        html = _page(root)
+        title = re.search(r"<title[^>]*>(.*?)</title>", html, re.I | re.S)
+        about = re.search(r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']*)', html, re.I)
+        log(f"{root}: {(title.group(1).strip() if title else 'no title')[:120]}"
+            + (f" - {about.group(1).strip()[:300]}" if about else ""))
+        seen = set()
+        for href, text in re.findall(r'<a[^>]+href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', html, re.I | re.S):
+            text = re.sub(r"<[^>]+>|\s+", " ", text).strip()
+            if re.search(r"api|doc|pric|term|privacy|model|about|contact|compan", href + " " + text, re.I) \
+                    and href not in seen and len(seen) < 25:
+                seen.add(href)
+                log(f"  link: {text[:60] or '-'} -> {urllib.parse.urljoin(root + '/', href)[:160]}")
+    except Exception as exc:  # noqa: BLE001 - a page that cannot be read says nothing about the key
+        log(f"{root}: the page could not be read ({str(exc)[:160]})")
+    for base in dict.fromkeys((f"{root}/v1", f"{root}/api/v1", f"{root}/api", f"https://api.{domain}/v1",
+                               f"{root}/openai/v1")):
+        to = (urllib.parse.urlparse(base).hostname or "").lower()
+        if to not in (host, domain) and not to.endswith("." + domain):
+            continue  # the key goes to the founder's service only
+        try:
+            listing = _get_json(base + "/models", {"Authorization": f"Bearer {secret}"}, timeout=20)
+        except SupplyError as exc:
+            log(f"  {base}/models: {hide(exc)[:200]}")
+            continue
+        rows = listing.get("data") if isinstance(listing, dict) else None
+        if not isinstance(rows, list):
+            log(f"  {base}/models: answered, but not with an OpenAI-compatible model list")
+            continue
+        log(f"  {base}/models: {len(rows)} model(s) listed")
+        with tempfile.TemporaryDirectory() as d:
+            supply = IntelligenceSupply(Path(d))
+            try:
+                got = supply.connect({"type": "openai_compatible", "name": f"{domain} (key check)", "endpoint": base,
+                                      "auth": {"method": "env", "env_var": name}, "models": []})
+                conn, refs = got["connection"], sorted(str(m.get("ref") or m["id"]) for m in got["intelligence"])
+                log(f"  Cynqra connected {conn['name']}: {conn.get('status')} ({hide(conn.get('status_note') or '')})")
+                log(f"{name}: a {domain} key; it is accepted at {base} and Cynqra discovers {len(refs)} model(s): "
+                    + ", ".join(refs))
+                return 0 if refs else 1
+            except SupplyError as exc:
+                log(f"  Cynqra could not connect {base}: {hide(exc)[:200]}")
+                return 1
+            finally:
+                supply.close()
+    log(f"{name}: no OpenAI-compatible model list answered on {domain}; its docs name the address to use")
+    return 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -89,10 +244,31 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-minutes", type=float, default=300.0, help="time limit for the work after first bindings")
     ap.add_argument("--live-events", action="store_true", help="print each objective run's events to the log as "
                     "they are saved: the founder's view, live")
+    ap.add_argument("--key-check", default="", help="only say which provider the key in this environment variable "
+                    "is for and whether it accepts it (its free model listing; nothing generated)")
+    ap.add_argument("--key-site", default="", help="with --key-check: the service a key with no known prefix "
+                    "comes from (its web address)")
+    ap.add_argument("--resume", action="store_true", help="carry on an examination whose process stopped (a kill, a "
+                    "crash, a usage limit) in the same --data-root: qualification is kept, finished objectives are "
+                    "reported as they ended, one left midway continues from its saved state, the rest run")
+    ap.add_argument("--resume-minutes", type=float, default=None, help="with --resume: the minutes an objective "
+                    "left midway gets to carry on (default: what its time limit has left), when its time went to "
+                    "waiting on a provider or an account limit rather than to its work")
+    ap.add_argument("--record", default="", help="keep every call's request and answer in this file (no keys)")
+    ap.add_argument("--replay", default="", help="answer every call from this recording instead of the providers: "
+                    "the whole run again, at no cost")
     args = ap.parse_args(argv)
+    if args.key_check:
+        return key_check(args.key_check, site=args.key_site)
+    if args.record or args.replay:
+        os.environ["CYNQRA_CASSETTE"] = os.path.abspath(args.replay or args.record)
+        os.environ["CYNQRA_CASSETTE_MODE"] = "replay" if args.replay else "record"
 
     keys = {p: env for p, (env, _) in PROVIDERS.items()}
     wanted = parse_providers(args.provider)
+    if args.replay:
+        for p in replay_keys(wanted):
+            print(f"provider {p}: no key needed to replay ({keys[p]} not set)")
     if wanted is not None:
         missing = [p for p in wanted if not os.environ.get(keys[p])]
         if len(missing) == len(wanted):
@@ -121,30 +297,43 @@ def main(argv: list[str] | None = None) -> int:
         for c in connections:  # a listing that failed says why here: the key refused, the provider down
             print(f"  {c['name']}: {c['status']} ({c['note']})")
         limit = max(1, args.max_models)
-        selected = select(entries, limit)
+        print("Candidates (one its provider turns out not to serve gives its place to the next):")
+        for m in select(entries, limit):
+            print(f"  {m['id']}  {m['ref']}")
+
+        def examined(m: dict) -> dict:
+            print(f"\nExamining {m['ref']}...", flush=True)
+            return probe(supply, m["id"], log=print)
+
+        kept = kept_qualification(supply, entries, limit) if args.resume else None
+        if kept:
+            selected, results = kept
+            print("Resuming: qualification kept from the earlier run: " + ", ".join(m["ref"] for m in selected))
+        else:
+            selected, results = examine(entries, limit, examined, served, parallel=limit)  # side by side
+        from .sandbox import isolation
         manifest = {
             "connections": connections,
+            "isolation": isolation(),  # what this host gave the code the team wrote (sandbox.py)
             "discovery": selection_details(entries, selected, limit),
             "candidates": [{"id": m["id"], "ref": m["ref"], "name": m["name"],
                             "provider": m.get("access_provider") or m.get("provider"),
                             "capabilities": m.get("capabilities") or [], "context": m.get("context"),
                             "released": m.get("released"),
                             "regression": (m.get("regression") or {}).get("status", "unverified")} for m in selected],
-            "results": [],
+            "results": results,
         }
-        print("Candidates:")
-        for m in selected:
-            print(f"  {m['id']}  {m['ref']}")
-        for m in selected:
-            print(f"\nExamining {m['ref']}...", flush=True)
-            manifest["results"].append(probe(supply, m["id"], log=print))
         statements = objectives(args.objective, args.objective_set)
         runs = []
         for i, (label, statement) in enumerate(statements, 1):
             folder = root / ("objective-run" if len(statements) == 1 else f"objective-run-{i}")
             print(f"\nObjective {i} of {len(statements)} ({label}), in {folder.name}:", flush=True)
-            r = objective_run(supply, folder, statement, args.budget_usd, to_delivery=args.to_delivery,
-                              max_minutes=args.max_minutes, live=args.live_events)
+            if args.resume and saved_phase(folder) not in (None, "new"):  # one that never began runs from the start
+                r = resume_objective_run(supply, folder, max_minutes=args.max_minutes, live=args.live_events,
+                                         minutes=args.resume_minutes)
+            else:
+                r = objective_run(supply, folder, statement, args.budget_usd, to_delivery=args.to_delivery,
+                                  max_minutes=args.max_minutes, live=args.live_events)
             runs.append(r | {"label": label, "folder": folder.name})
             print("\nObjective run:\n" + json.dumps(objective_summary(r), indent=2, default=str))
             print("\nSelection report:\n" + json.dumps((r.get("selection_report") or {}).get("summary"), indent=2,
@@ -155,6 +344,15 @@ def main(argv: list[str] | None = None) -> int:
         if len(runs) > 1:
             manifest["comparison"] = comparison(runs)
             print("\nAcross objectives:\n" + json.dumps(manifest["comparison"], indent=2, default=str))
+        if os.environ.get("CYNQRA_CASSETTE_MODE") == "replay":
+            from .model_adapter import cassette_stats
+            manifest["replay"] = cassette_stats()
+            print("\nReplay: " + json.dumps(manifest["replay"]))
+        from .intelligence_layer.weather import report as weather_report
+        from .model_adapter import pace_stats
+        manifest["weather"] = weather_report(supply.registry)  # shareable: counts and rates, no content
+        manifest["pacing"] = pace_stats()  # waits the providers' rate-limit headers asked for
+        print("\nProvider weather: " + json.dumps(manifest["weather"], default=str))
         (root / "manifest.json").write_text(json.dumps(manifest, indent=2, default=str), encoding="utf-8")
         passed = sum(bool(r.get("passed")) for r in manifest["results"])
         print(json.dumps({"models_examined": len(selected), "passed": passed,
@@ -248,7 +446,27 @@ def objective_summary(run: dict) -> dict:
             "decisions": len(decisions), "selection_modes": modes,
             "all_replayed": all(d.get("replayed") for d in decisions) if decisions else None,
             "selected": sorted({str(d.get("selected")) for d in decisions if d.get("selected")}),
-            "spent_usd": run.get("spent_usd")}
+            "calls": run.get("calls"), "spent_usd": run.get("spent_usd")}
+
+
+def calls_summary(e) -> dict:
+    """The run's calls in figures: how many, the tokens, the share of input read from the providers' prompt caches,
+    the answers its journal held (paid for once), and how long the models were let think."""
+    from .intelligence_layer.adapters import cache_minimum
+    calls = e.store.all("call")
+    tin = sum(int(c.get("tokens_in") or 0) for c in calls)
+    cached = sum(int(c.get("tokens_cached") or 0) for c in calls)
+    minimums = [(c, cache_minimum(c.get("label") or "")) for c in calls]
+    efforts: dict[str, int] = {}
+    for c in calls:
+        efforts[str(c.get("effort") or "default")] = efforts.get(str(c.get("effort") or "default"), 0) + 1
+    return {"calls": len(calls), "tokens_in": tin, "tokens_out": sum(int(c.get("tokens_out") or 0) for c in calls),
+            "tokens_cached": cached, "cache_hit_rate": round(cached / tin, 3) if tin else None,
+            # whether a 0 means no hits: the provider may not report its cache, and never caches a short prompt
+            "cache_reported_by_provider": sum(1 for c in calls if c.get("cache_reported")),
+            "under_cache_minimum": sum(1 for c, n in minimums if n and int(c.get("tokens_in") or 0) < n),
+            "median_tokens_in": sorted(int(c.get("tokens_in") or 0) for c in calls)[len(calls) // 2] if calls else None,
+            "journaled": sum(1 for c in calls if c.get("journaled")), "by_effort": efforts}
 
 
 # What an examination founder answers: the recommendation, except a decision that would spend more than the cap
@@ -304,22 +522,7 @@ def objective_run(supply, folder: Path, statement: str, budget_usd: float, *, to
         if to_delivery:
             out["journey"] = journey(e, max_minutes, log)
             out["stage"] = out["journey"]["ended"]
-        p = e.store.get(calibration.KIND, calibration.plan_id(e)) or {}
-        out.update(lifecycle=(e.objective() or {}).get("lifecycle", {}).get("state"),
-                   calibration={k: p.get(k) for k in ("status", "reason", "spent_usd", "budget_usd", "stopping",
-                                                       "coverage")}
-                   | {"trials": [{k: t.get(k) for k in ("item_id", "intelligence_id", "verified", "attribution",
-                                                         "usd")} for t in p.get("trials") or []],
-                      "items": [{k: i.get(k) for k in ("item_id", "work_class", "source_task_id", "candidates",
-                                                        "skipped")} for i in p.get("items") or []]},
-                   decisions=[{k: x.get(k) for k in ("decision_id", "work_item_id", "purpose", "selection_mode",
-                                                      "status", "selection_reason")}
-                              | {"selected": (x.get("selected_intelligence") or {}).get("id"),
-                                 "replayed": controller.replay(e, x["decision_id"])["reproduced"]}
-                              for x in e.decisions()],
-                   selection_report=selection_report(e, p),
-                   spent_usd=e.snapshot()["budget"]["ledger"]["spent_total"], phase=e.meta.get("phase"),
-                   notice=e.meta.get("notice"))
+        _report(e, out)
     except Exception as exc:  # noqa: BLE001 - a real provider can fail at any stage: recorded as it happened
         out.update(error=f"{type(exc).__name__}: {exc}"[:600], notice=e.meta.get("notice"))
         try:
@@ -334,6 +537,116 @@ def objective_run(supply, folder: Path, statement: str, budget_usd: float, *, to
             e.close()
     return out
 
+
+def _report(e, out: dict) -> None:
+    """What an objective run did, from its store: lifecycle, calibration, every decision replayed, the selection
+    report, the calls and the spend."""
+    from . import calibration, controller
+    p = e.store.get(calibration.KIND, calibration.plan_id(e)) or {}
+    out.update(lifecycle=(e.objective() or {}).get("lifecycle", {}).get("state"),
+               calibration={k: p.get(k) for k in ("status", "reason", "spent_usd", "budget_usd", "stopping",
+                                                   "coverage")}
+               | {"trials": [{k: t.get(k) for k in ("item_id", "intelligence_id", "verified", "attribution",
+                                                     "usd")} for t in p.get("trials") or []],
+                  "items": [{k: i.get(k) for k in ("item_id", "work_class", "source_task_id", "candidates",
+                                                    "skipped")} for i in p.get("items") or []]},
+               decisions=[{k: x.get(k) for k in ("decision_id", "work_item_id", "purpose", "selection_mode",
+                                                  "status", "selection_reason")}
+                          | {"selected": (x.get("selected_intelligence") or {}).get("id"),
+                             "replayed": controller.replay(e, x["decision_id"])["reproduced"]}
+                          for x in e.decisions()],
+               selection_report=selection_report(e, p),
+               calls=calls_summary(e),
+               spent_usd=e.snapshot()["budget"]["ledger"]["spent_total"], phase=e.meta.get("phase"),
+               notice=e.meta.get("notice"))
+
+
+def saved_phase(folder: Path) -> str | None:
+    """The phase an objective run's folder was saved in, None when it holds no run. Read without opening the run."""
+    from .db import Store
+    if not (folder / "cynqra.db").exists():
+        return None
+    st = Store(str(folder / "cynqra.db"))
+    try:
+        return (st.get("meta", "run") or {}).get("phase")
+    finally:
+        st.close()
+
+
+def resume_objective_run(supply, folder: Path, *, max_minutes: float = 300.0, log=print, live: bool = False,
+                         minutes: float | None = None) -> dict:
+    """An objective run its process left midway (a kill, a crash, a usage limit), reopened from its saved state: work
+    already verified stays verified and is not paid for again, work that was in flight starts over (nothing was
+    charged for it, and its reservations are released as the run reopens: budget.release_orphans), and the run goes
+    on to delivery with the minutes its time limit has left. A run that had already ended is reported as it ended."""
+    from . import settings as project_settings
+    from .engine import Engine
+    e = Engine(folder, supply=supply)
+    out = {"objective": (e.objective() or {}).get("statement"),
+           "budget_usd": project_settings.get(e.store)["budget_usd"],
+           "stage": e.meta.get("phase"), "to_delivery": True, "resumed": True}
+    tail = None
+    try:
+        if e.meta.get("phase") in ("planning", "running"):  # past its first bindings: the journey carries it on
+            if live:
+                tail = EventTail(e.store, log=log)
+                tail.seq = max((x["seq"] for x in e.store.events()), default=0)  # only what happens from here
+                tail.start()
+            used = minutes_worked(e)
+            left = max(0.0, max_minutes - used) if minutes is None else float(minutes)
+            log(f"  resumed from its saved state: {used:.1f} minutes worked before the stop, {left:.1f} now"
+                + (" (given on resuming)" if minutes is not None else f" (what its {max_minutes:g} have left)"))
+            out["journey"] = journey(e, left, log) | {"minutes_before": round(used, 1)}
+            out["stage"] = out["journey"]["ended"]
+        elif e.meta.get("phase") in ("accepted", "stopped", "stopped_error"):
+            log(f"  already ended ({e.meta.get('phase')}): reported as it ended")
+        else:  # stopped before its first bindings: nothing of its work to keep
+            out["error"] = (f"stopped before its work began (phase {e.meta.get('phase')}): run this objective again "
+                            "without --resume")
+            log("  " + out["error"])
+        _report(e, out)
+    except Exception as exc:  # noqa: BLE001 - as objective_run: recorded as it happened
+        out.update(error=f"{type(exc).__name__}: {exc}"[:600], notice=e.meta.get("notice"))
+    finally:
+        try:
+            if tail is not None:
+                tail.stop()
+        finally:
+            e.close()
+    return out
+
+
+def minutes_worked(e) -> float:
+    """Minutes from the objective's work starting (OBJECTIVE_EXECUTING) to its last saved event: the part of its time
+    limit an earlier process used."""
+    from datetime import datetime
+    events = e.store.events()
+    def to(x: dict) -> str | None:
+        pl = x.get("payload")
+        pl = json.loads(pl) if isinstance(pl, str) else (pl or {})  # the store hands it back decoded
+        return pl.get("to")
+
+    start = next((x for x in events if x["event_type"] == "objective.state_changed"
+                  and to(x) == "OBJECTIVE_EXECUTING"), None)
+    if start is None or not events:
+        return 0.0
+    t = lambda x: datetime.fromisoformat(str(x["created_at"])).timestamp()  # noqa: E731
+    return max(0.0, (t(events[-1]) - t(start)) / 60)
+
+
+def kept_qualification(supply, entries: list[dict], limit: int) -> tuple[list[dict], list[dict]] | None:
+    """On --resume: the models this data root's earlier run qualified, still offered and passed for their current
+    version, so the examination is not paid for twice. None when there are none: then they are examined."""
+    kept = []
+    for m in entries:
+        r = supply.registry.get(m["id"]) or {}
+        if (r.get("regression") or {}).get("status") == "passed" and r.get("status") == "active":
+            kept.append(m)
+    if not kept:
+        return None
+    kept = kept[:max(1, int(limit))]
+    return kept, [{"model_id": m["id"], "passed": True, "kept_from_earlier_run": True,
+                   "evidence": (supply.registry.get(m["id"]).get("regression") or {}).get("evidence")} for m in kept]
 
 def journey(e, max_minutes: float, log=print, idle_wait: float = 30.0) -> dict:
     """The work after the first bindings, to delivery: step until idle, answer the first pending decision as an

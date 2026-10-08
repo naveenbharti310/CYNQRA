@@ -31,13 +31,31 @@ DOWN_FOR_S = 600  # how long it is left untried the first time it goes down
 # still limiting calls after one wait is likely to keep doing so. On a fixed wait, real run 36972596704 moved seven
 # workers back to a rate-limited model three times, and each time it refused again within two minutes.
 DOWN_MAX_S = 3600
+# An overloaded model (HTTP 503 or 529, "high demand") lacks capacity for a moment; it has not gone away. It is left
+# untried a minute, doubling to five, not ten doubling to an hour: paid run 37589136743 lost an hour of one objective
+# waiting out Google's "high demand" on preview models as if they had gone down
+OVERLOAD_DOWN_S = 60
+OVERLOAD_MAX_S = 300
+_OVERLOAD = re.compile(r"HTTP (503|529)\b|high demand|overloaded", re.I)
 FACTS = ("name", "provider", "ref", "runtime", "version", "context", "tools", "json_schema", "modalities", "mcp",
          "local", "price_in", "price_out", "compute_usd_per_hour", "license", "commercial_use", "params", "hardware",
          "size_gb", "predict", "think", "served_by", "released",
          # normalized at discovery (normalize.py): who made it, who serves it, what it can do
          "display_name", "publisher", "publisher_name", "capabilities", "input_modalities", "type", "speed", "description",
          "max_output", "list_price_in", "list_price_out", "access_provider", "access_type", "rate_limit_per_min",
-         "catalogued")
+         "catalogued", "price_source", "list_price_cached", "price_cached_in")
+
+
+def cached_price(m: dict) -> float:
+    """What one million input tokens read from the provider's prompt cache cost: the model's own figure, else the
+    public catalogue's cache-read price for a model priced from Cynqra's list or the catalogue, else (a price the
+    connection set, or no cached price known) the full input price: no discount is assumed that nobody published."""
+    own, listed = m.get("price_cached_in"), m.get("list_price_cached")
+    if own is not None and 0 <= float(own) <= float(m.get("price_in") or 0):
+        return float(own)
+    if m.get("price_source") in ("list", "catalogue") and listed and 0 < float(listed) <= float(m.get("price_in") or 0):
+        return float(listed)  # a catalogue price of 0 is a free variant's, as for the input price
+    return float(m.get("price_in") or 0)
 
 
 def served_version(m: dict) -> str:
@@ -198,10 +216,13 @@ class IntelligenceRegistry:
     def available(self) -> list[dict]:
         return [m for m in self.models() if self.availability(m)[0]]
 
-    def cost(self, m: dict, tokens_in: int, tokens_out: int, seconds: float) -> float:
+    def cost(self, m: dict, tokens_in: int, tokens_out: int, seconds: float, cached: int = 0) -> float:
+        """A hosted call at its prices: the input the provider read from its prompt cache at the cached rate."""
         if m["local"]:
             return round(seconds * float(m.get("compute_usd_per_hour") or 0) / 3600, 6)
-        return round(tokens_in * m["price_in"] / 1e6 + tokens_out * m["price_out"] / 1e6, 6)
+        cached = max(0, min(int(cached or 0), tokens_in))
+        return round((tokens_in - cached) * m["price_in"] / 1e6 + cached * cached_price(m) / 1e6
+                     + tokens_out * m["price_out"] / 1e6, 6)
 
     # --- measurement -----------------------------------------------------------------------------------------
     def record_call(self, model_id: str, *, role: str, purpose: str, task_kind: str, usage: dict, run_id: str,
@@ -213,18 +234,32 @@ class IntelligenceRegistry:
                 raise RegistryError(f"no intelligence {model_id!r} in the registry")
             secs = float(usage.get("latency_s") or 0)
             tin, tout = int(usage.get("tokens_in") or 0), int(usage.get("tokens_out") or 0)
+            cached = max(0, min(int(usage.get("tokens_cached") or 0), tin))
+            journaled = bool(usage.get("journaled"))  # reused from the run's journal (model_adapter.journal)
+            uid = usage.get("call_uid")
+            seen = self.store.get("call_uid", uid) if uid else None
+            if seen:  # the same answer measured once: its first record stands
+                return self.store.get("call", seen["id"])
             c = {"id": f"c_{self.store.next_id('call'):06d}", "model_id": model_id, "role": role, "purpose": purpose,
-                 "task_kind": task_kind, "run_id": run_id, "tokens_in": tin, "tokens_out": tout,
-                 "seconds": round(secs, 1), "usd": self.cost(m, tin, tout, secs), "write_tps": usage.get("write_tps"),
+                 "task_kind": task_kind, "run_id": run_id, "tokens_in": tin, "tokens_out": tout, "tokens_cached": cached,
+                 "seconds": round(secs, 1),
+                 # what the call cost: the provider's own report where it gives one (Claude Code's list-price cost),
+                 # else the model's prices applied to the tokens
+                 "usd": (round(float(usage["usd_reported"]), 6) if usage.get("usd_reported") is not None
+                         else self.cost(m, tin, tout, secs, cached)),
+                 "journaled": journaled, "effort": usage.get("effort"), "write_tps": usage.get("write_tps"),
                  "error": error[:300], "served_by": m.get("served_by") or "", "model_version": served_version(m),
                  "tenant_id": usage.get("tenant_id") or "local", "at": now()}
             self.store.put("call", c["id"], c)
+            if uid:
+                self.store.put("call_uid", uid, {"id": c["id"]})
             h = m.get("health") or {"errors": 0, "down_until": 0}
             h["errors"] = h.get("errors", 0) + 1 if error else 0
             if h["errors"] >= DOWN_AFTER_ERRORS and h.get("down_until", 0) <= time.time():
                 # it goes down (again): a call in flight that fails while it is down changes nothing
                 h["trips"] = int(h.get("trips") or 0) + 1
-                h["down_until"] = time.time() + min(DOWN_MAX_S, DOWN_FOR_S * 2 ** (h["trips"] - 1))
+                first, most = (OVERLOAD_DOWN_S, OVERLOAD_MAX_S) if _OVERLOAD.search(error) else (DOWN_FOR_S, DOWN_MAX_S)
+                h["down_until"] = time.time() + min(most, first * 2 ** (h["trips"] - 1))
             elif not error:  # it answered: it is up, whatever the last failures said
                 h.update(down_until=0, trips=0)
             m["health"] = h

@@ -17,7 +17,7 @@ from . import binding, budget, policy, worker_runtime
 from .db import SECRET, digest, now
 from .testrunner import run_unittests
 
-ALLOWED_EXT = {".py", ".md", ".html", ".json", ".txt", ".css", ".js"}
+from .file_rules import ALLOWED_EXT, RULE as FILE_RULE, allowed as allowed_file  # noqa: E402,F401
 MAX_FILE = 200_000  # bytes
 # Output a worker may never write: credentials. Found in a write, the write is refused and the refusal audited.
 NO_COST = ("deploy_production", "product_rule_decision", "assign_task", "answer_blocker", "send_protocol",
@@ -29,7 +29,7 @@ class GatewayError(RuntimeError):
 
 
 def execute(run, worker_id: str, task_id: str, action_type: str, target: str = "", *, content: str | None = None,
-            approval: str | None = None, cwd: Path | None = None) -> dict:
+            approval: str | None = None, cwd: Path | None = None, provenance: str = "") -> dict:
     w = run.worker(worker_id)
     if w is None or w.get("status") != "active":
         raise GatewayError(f"unknown or inactive worker {worker_id}")
@@ -41,7 +41,9 @@ def execute(run, worker_id: str, task_id: str, action_type: str, target: str = "
               "risk_tier": decision["risk_tier"], "policy_decision": decision["decision"],
               "policy_reason": decision["reason"], "policy_version": decision["policy_version"],
               "authority_snapshot": dict(policy.MATRIX.get(w["role"], {})), "status": "", "created_at": now(),
-              "approval": approval}
+              "approval": approval,
+              # what asked for it: a tool call in a model's reply was written after reading data (provenance.py)
+              "provenance": provenance or None}
     auth = f"{w['role']}:{policy.MATRIX.get(w['role'], {}).get(action_type, 'none')}"
     if decision["decision"] == "DENY":
         return _refuse(run, action, task_id, auth, decision["reason"], decision)
@@ -53,7 +55,8 @@ def execute(run, worker_id: str, task_id: str, action_type: str, target: str = "
             action["status"] = "proposed"
             run.store.put("action", action["id"], action)
             run.event("action.proposed", "action", action["id"], {"task_id": task_id, "action_type": action_type,
-                      "risk_tier": decision["risk_tier"], "reason": decision["reason"]}, actor=worker_id,
+                      "risk_tier": decision["risk_tier"], "reason": decision["reason"],
+                      "provenance": action["provenance"]}, actor=worker_id,
                       actor_type="worker", correlation_id=task_id, policy_decision="REQUIRE_APPROVAL", authority=auth)
             return {"status": "requires_approval", "action": action, "policy": decision}
         action["status"] = "approved"
@@ -83,8 +86,9 @@ def execute(run, worker_id: str, task_id: str, action_type: str, target: str = "
     elif action_type == "write_file":
         folder = run.workspace(worker_id, task_id) / "out"
         rel = Path(target)
-        if rel.is_absolute() or ".." in rel.parts or rel.suffix not in ALLOWED_EXT or len(rel.parts) > 3:
-            return _refuse(run, action, task_id, auth, f"target {target!r} is outside the workspace rules")
+        if not allowed_file(target):
+            return _refuse(run, action, task_id, auth, f"target {target!r} is outside the workspace rules: a file "
+                                                       f"must be {FILE_RULE}")
         if content is None or len(content.encode("utf-8")) > MAX_FILE:
             return _refuse(run, action, task_id, auth, "content missing or larger than 200 KB")
         if SECRET.search(content):

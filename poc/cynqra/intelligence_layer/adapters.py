@@ -40,11 +40,27 @@ LIST_PRICES = {
     "claude-haiku-4-5": (1.00, 5.00),
     "claude-opus-5": (5.00, 25.00),
     "claude-opus-5-5": (4.00, 20.00),
+    "claude-sonnet-5-5": (2.00, 10.00),
     "claude-opus-4-8": (5.00, 25.00),
     "claude-fable-5-1": (10.00, 50.00),
     "gpt-4o-mini": (0.15, 0.60),
+    # Google's published prices for the Gemini models real runs have used, prompts up to 200k tokens (7 Oct 2026).
+    # Hidden reasoning is billed as output. Any other model is priced from the public catalogue at discovery
+    # (IntelligenceSupply._normalize), and only a model neither knows is priced at WORST_PRICE, and labelled so
+    "gemini-3-flash-preview": (0.50, 3.00),
+    "gemini-3.1-pro-preview": (2.00, 12.00),
+    "gemini-3.5-flash": (1.50, 9.00),
 }
 WORST_PRICE = (10.00, 50.00)
+# The fewest input tokens a provider's prompt cache serves (published, 7 Oct 2026): a shorter prompt is never cached,
+# whatever its prefix. Google: 4,096 for the Gemini 3 models, 2,048 for Gemini 2.5. OpenAI: 1,024.
+CACHE_MIN_TOKENS = (("gemini-3", 4096), ("gemini-2.5", 2048), ("gpt-", 1024), ("o3", 1024), ("o4", 1024))
+
+
+def cache_minimum(ref: str) -> int | None:
+    """The provider's caching minimum for a model, where it is published; None where it is not known."""
+    name = str(ref or "").lower().removeprefix("models/").split("/")[-1]
+    return next((n for prefix, n in CACHE_MIN_TOKENS if name.startswith(prefix)), None)
 # Provider types designed for but not built in V1. Listed so the product can say so; they cannot be connected.
 PLANNED = {"bedrock": "AWS Bedrock (IAM authentication): planned after V1; it is an adapter added here"}
 NOT_CHAT = ("embed", "tts", "whisper", "dall-e", "moderation", "image", "audio", "realtime", "transcribe", "search",
@@ -123,6 +139,24 @@ _OPENER = urllib.request.build_opener(_NoRedirect)
 MAX_RESPONSE_BYTES = 8_000_000
 
 def _get_json(url: str, headers: dict, timeout: float = 30.0):
+    """A provider's listing (or the public catalogue), recorded or replayed with the calls (model_adapter's
+    CYNQRA_CASSETTE), so a replayed run discovers what the recorded run discovered, offline."""
+    from .. import model_adapter as ma
+    mode = ma._cassette_mode()  # listings are free: recorded and replayed, never journaled
+    if mode not in ("record", "replay"):
+        return _fetch_json(url, headers, timeout)
+    key = ma.cassette_key("listing", {"url": url})  # the key depends on the address only, never on a credential
+    if mode == "replay":
+        answer = ma.cassette_replay(key)
+        if answer is None:
+            raise SupplyError(f"replay: the recording holds no listing from {url}")
+        return answer
+    data = _fetch_json(url, headers, timeout)
+    ma.cassette_record(key, "listing", url, data)
+    return data
+
+
+def _fetch_json(url: str, headers: dict, timeout: float = 30.0):
     from ..model_adapter import USER_AGENT  # the same signature as the calls: a bot filter refuses Python's own
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, **headers})
     try:
@@ -165,6 +199,14 @@ def _price(conn: dict, ref: str) -> tuple[float, float]:
     return LIST_PRICES.get(ref) or LIST_PRICES.get(re.sub(r"-\d{8}$", "", ref), WORST_PRICE)
 
 
+def price_source(conn: dict, ref: str) -> str:
+    """Where _price's figure comes from: the connection (the founder's or the environment's), Cynqra's list, or
+    nowhere (unknown: the worst case, until the public catalogue names the model's list price)."""
+    if conn.get("price_per_m"):
+        return "connection"
+    return "list" if (LIST_PRICES.get(ref) or LIST_PRICES.get(re.sub(r"-\d{8}$", "", ref))) else "unknown"
+
+
 HOSTED_TIMEOUT_S = 1200  # a free hosted endpoint can write at 10 tokens/s (Kimi K3 on NVIDIA); after 20 min it is stuck
 
 
@@ -173,7 +215,10 @@ def _hosted(route: dict, conn: dict) -> dict:
     from the environment, the environment) sets CYNQRA_TIMEOUT; the call then fails like any provider error, and
     the retry and the Replacement Engine take over."""
     env = os.environ.get("CYNQRA_TIMEOUT") if conn.get("origin") == "environment" else None
-    route["CYNQRA_TIMEOUT"] = route.get("CYNQRA_TIMEOUT") or env or str(HOSTED_TIMEOUT_S)
+    given = route.get("CYNQRA_TIMEOUT") or env
+    route["CYNQRA_TIMEOUT"] = given or str(HOSTED_TIMEOUT_S)
+    if not given:  # nobody set a limit: the gateway sets one from the model's own measured speed (gateway.deadline)
+        route["_deadline_from_record"] = True
     return route
 
 
@@ -297,8 +342,10 @@ class OpenAICompatibleAdapter(ProviderAdapter):
                     continue
             elif hf:
                 facts["price_in"], facts["price_out"] = _price(conn, ref)
+                facts["price_source"] = price_source(conn, ref)
             else:
                 facts["price_in"], facts["price_out"] = _price(conn, ref)
+                facts["price_source"] = price_source(conn, ref)
             out.append(facts)
         if unavailable:
             note = f"{len(unavailable)} not offered now ({'; '.join(unavailable[:3])}{'; ...' if len(unavailable) > 3 else ''})"
@@ -465,6 +512,7 @@ class AnthropicAdapter(ProviderAdapter):
             pin, pout = _price(conn, ref)
             facts = {"ref": ref, "name": row.get("display_name") or ref, "provider": "Anthropic",
                      "runtime": "anthropic_api", "local": False, "price_in": pin, "price_out": pout,
+                     "price_source": price_source(conn, ref),
                      "modalities": ["text", "image"], "json_schema": True, "tools": True, "mcp": True,
                      "released": self._released(row)}
             if isinstance(row.get("max_input_tokens"), int):
@@ -610,6 +658,51 @@ class LocalInferenceAdapter(ProviderAdapter):
         return out
 
 
+class ClaudeCodeAdapter(ProviderAdapter):
+    """Claude, reached through Claude Code on this computer (`claude -p`, model_adapter._claude_cli), signed in as this
+    computer's Claude Code is: no key passes through Cynqra. Its usage counts against that account. The models are the
+    current Claude line Claude Code serves; each is qualified like any other before it takes part, and what one costs
+    is the CLI's own report at list prices. It is connected only when asked for (CYNQRA_CLAUDE_CODE=1)."""
+    type = "claude_code"
+    title = "Claude Code (this computer)"
+    auth_methods = ("none",)
+    MODELS = ("claude-haiku-4-5", "claude-sonnet-5-5", "claude-opus-5-5")
+    # Claude Code writes every prompt to the one-hour prompt cache, billed at twice the input price, and a later
+    # read of it at a tenth (Opus 5.5: a twentieth). Measured: 1,257 prompt tokens to Sonnet 5.5 reported $0.005072,
+    # 1,257 x $4 + 2 x $2 + 4 x $10 per million. At the plain input price, forecasts and reservations were half of it.
+    CACHE_WRITE = 2.0
+    CACHE_READ = {"claude-opus-5-5": 0.05}
+
+    def discover(self, conn: dict, secret: str | None) -> list[dict]:
+        out = []
+        for ref in _allow(conn) or list(self.MODELS):
+            pin, pout = _price(conn, ref)
+            source = price_source(conn, ref)
+            billed = {}
+            if source == "list" and pin:
+                billed = {"price_in": round(pin * self.CACHE_WRITE, 6),
+                          "price_cached_in": round(pin * self.CACHE_READ.get(ref, 0.1), 6)}
+            out.append({"ref": ref, "name": ref, "provider": "Anthropic", "runtime": "claude_code", "local": False,
+                        "price_in": pin, "price_out": pout, "price_source": source,
+                        "modalities": ["text"], "json_schema": False, "tools": False, **billed})
+        return out
+
+    def reachable(self, conn: dict, entry: dict) -> tuple[bool, str]:
+        from ..model_adapter import claude_cli
+        return (True, "available") if claude_cli() else (False, "Claude Code is not installed on this computer")
+
+    def route(self, conn: dict, secret: str | None, entry: dict) -> dict:
+        return _hosted({"kind": "claude_cli", "label": entry["ref"], "local": False,
+                        **({"CYNQRA_CLAUDE_CLI": conn["endpoint"]} if conn.get("endpoint") else {})}, conn)
+
+    def environment_specs(self, primary: dict | None) -> list[dict]:
+        from ..model_adapter import claude_cli
+        if os.environ.get("CYNQRA_CLAUDE_CODE") != "1" or not claude_cli():
+            return []
+        return [{"type": self.type, "name": "Claude Code (this computer)", "endpoint": "",
+                 "auth": {"method": "none"}, "models": [], **(_env_price())}]
+
+
 class DemoScriptAdapter(ProviderAdapter):
     """A demo scenario's prepared script. It stands in a demo run's own registry so the demo is staffed, bound and
     metered like any run, but it is not a provider: nobody connects it, and the Gateway never calls it (the
@@ -653,7 +746,7 @@ class Adapters(dict):
 
 def make_adapters(runtime=None) -> Adapters:
     return Adapters({a.type: a for a in (OpenAICompatibleAdapter(), AnthropicAdapter(), LocalInferenceAdapter(runtime),
-                                         DemoScriptAdapter())})
+                                         ClaudeCodeAdapter(), DemoScriptAdapter())})
 
 
 def adapter_types() -> list[dict]:

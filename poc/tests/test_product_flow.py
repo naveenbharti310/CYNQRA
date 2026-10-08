@@ -102,6 +102,28 @@ class CatalogAndSynthesisTests(unittest.TestCase):
         lines = {w["id"]: w["reports_to"] for w in prop["workers"]}
         self.assertEqual((lines["w_be_a"], lines["w_qa"], lines["w_pm"]), ("w_cto", "w_cto", "w_cpo"))
 
+    def test_an_organization_over_the_seat_limit_is_kept_within_it_before_it_is_refused(self):
+        # paid run 37589136743: the SaaS objective failed at "18 workers proposed; at most 16", counted after the
+        # platform had closed gaps itself. A second or third seat of one role gives way first, then a team seat whose
+        # areas others cover; nothing it covers is left open; a founder's own edit is still refused, not trimmed
+        org = json.loads(json.dumps(SECTION3_ORG))
+        for r in org["roles"]:
+            if r["role"] in ("BackendEngineer", "FrontendEngineer"):
+                r["quantity"] = 3
+            if r["role"] == "QA":
+                r["quantity"] = 2
+        org["roles"] += [{"role": "Engineer", "quantity": 3, "why": "General engineering", "requirement_ids": []},
+                         {"role": "SecurityExpert", "quantity": 1, "why": "Threat model", "requirement_ids": []}]
+        self.assertEqual(sum(r["quantity"] for r in org["roles"]), 18, "as the SaaS objective's proposal")
+        prop = validate_workforce(json.loads(json.dumps(org)), self.req)
+        self.assertEqual(sum(r["quantity"] for r in prop["roles"]), roles.MAX_WORKERS)
+        self.assertTrue(prop["seat_limit"], "each change is said for the founder")
+        self.assertTrue(all(prop["coverage"][rid] for rid in prop["coverage"]), "every requirement still covered")
+        kept = {r["role"] for r in prop["roles"]}
+        self.assertTrue({"CTO", "CPO", "DataScientist", "DevOps", "Designer"} <= kept, "a role others do not cover stays")
+        with self.assertRaises(IntelligenceError):
+            validate_workforce(json.loads(json.dumps(org)), self.req, close_gaps=False)
+
     def test_the_synthesizer_cannot_leave_the_pipeline_unstaffed_or_exceed_the_catalog(self):
         def bad(change):
             org = json.loads(json.dumps(SECTION3_ORG))

@@ -127,6 +127,7 @@ def describe(ref: str, facts: dict, host: str) -> dict:
             "context": context or None, "description": desc,
             "max_output": int((rec.get("top_provider") or {}).get("max_completion_tokens") or 0) or None,
             "list_price_in": _per_million(price.get("prompt")), "list_price_out": _per_million(price.get("completion")),
+            "list_price_cached": _per_million(price.get("input_cache_read")),
             "released": facts.get("released") or (float(rec["created"]) if isinstance(rec.get("created"), (int, float))
                                                   else None),
             "catalogued": bool(rec)}

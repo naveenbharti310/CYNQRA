@@ -3,22 +3,61 @@
 This decides priority, never quality. Not every available model is called for every objective (mandate 11): a
 bounded set is chosen that is fair across providers and diverse across model families, and inside each family the
 newest release stands for it. Metadata (stated capabilities, context, whether a public catalogue knows it) orders
-the set; a release date only picks the newest member of a family and never ranks one family above another, and
-nothing here says which model is better. What a candidate can do is learned from its verified work.
+the set; a version or release date only picks the newest member of a family and never ranks one family above
+another, and nothing here says which model is better. What a candidate can do is learned from its verified work.
 """
 from __future__ import annotations
 
 import re
 
+from .adapters import _family as _release
+
 USEFUL = {"reasoning", "coding", "agentic", "tool use", "long context", "structured output"}
 
 
-def family_key(ref: str) -> str:
-    """A model's family: its name without publisher, serving suffix or version numbers, so vendor/model-k2.6 and
-    vendor/model-k3 are one family, as are vendor-model-4-6 and vendor-model-5 (a version written with dashes, or
-    with a release date after it), and only the newest of them takes a place in a bounded set."""
+# A release stage at the end of a name, with any date after it: vendor-3.1-pro-preview is a release of the vendor's Pro
+# family, as vendor-2.5-flash-preview-05-20 is of Flash; vendor-pro-latest names whichever Pro the provider moves it to
+_STAGE = re.compile(r"-(?:preview|latest|exp|experimental|beta|alpha)(?:-\d+)*$")
+
+
+def _name(ref: str) -> str:
+    """A model's name without publisher, serving suffix or release stage."""
     value = str(ref or "").lower().split("/")[-1].split(":")[0]
-    return re.sub(r"#(?:-#)+(?![a-z])", "#", re.sub(r"\d+(?:\.\d+)*", "#", value))
+    prev = None
+    while prev != value:
+        prev, value = value, _STAGE.sub("", value)
+    return value
+
+
+def family_key(ref: str) -> str:
+    """A model's family: its name without publisher, serving suffix, release stage or version numbers, so
+    vendor/model-k2.6 and vendor/model-k3 are one family, as are vendor-model-4-6 and vendor-model-5 (a version written
+    with dashes, or with a release date after it) and vendor-2.5-pro and vendor-3.1-pro-preview, and only the newest
+    of them takes a place in a bounded set."""
+    return re.sub(r"#(?:-#)+(?![a-z])", "#", re.sub(r"\d+(?:\.\d+)*", "#", _name(ref)))
+
+
+def _families(models: list[dict]) -> dict[str, str]:
+    """Each model's family. A name with no version of its own (vendor-pro-latest, an alias the provider moves to each
+    new release) belongs to the versioned family it names, when there is one: a moving alias is not a pinned version,
+    so it never takes that family's place ahead of a pinned release."""
+    fam = {m["id"]: family_key(m.get("ref") or m["id"]) for m in models}
+    lines: dict[str, str] = {}
+    for k in sorted(set(fam.values())):
+        if "#" in k.split("-"):
+            lines.setdefault("-".join(p for p in k.split("-") if p != "#"), k)
+    return {mid: lines.get(k, k) if "#" not in k.split("-") else k for mid, k in fam.items()}
+
+
+def _newest_first(m: dict) -> tuple:
+    """Inside a family, newest first: a pinned version before a moving alias, then the higher version the provider's
+    own name gives (3.8 Flash before 2.5 Flash, 3.1 Pro Preview before 2.5 Pro), a stable release before a preview of
+    the same version, and only then the later release date. A date the public catalogue does not have is unknown,
+    never old, so it never puts an old release first."""
+    ref = str(m.get("ref") or m.get("id"))
+    name = _name(ref)
+    return (bool(re.search(r"\d", name)), _release(ref)[1], name == ref.lower().split("/")[-1].split(":")[0],
+            float(m.get("released") or 0))
 
 
 def provider_key(m: dict) -> str:
@@ -37,11 +76,13 @@ def priority(m: dict) -> tuple:
 def _order(models: list[dict]) -> list[dict]:
     """Newest of each family first inside it; families by priority, then by name for a stable order."""
     fams: dict[str, list[dict]] = {}
+    fam_of = _families(models)
     for m in models:
-        fams.setdefault(family_key(m.get("ref") or m.get("id")), []).append(m)
+        fams.setdefault(fam_of[m["id"]], []).append(m)
     heads, tails = [], []
     for members in fams.values():
-        members.sort(key=lambda m: (-float(m.get("released") or 0), str(m.get("ref") or m.get("id"))))
+        members.sort(key=lambda m: str(m.get("ref") or m.get("id")))
+        members.sort(key=_newest_first, reverse=True)
         heads.append(members[0])
         tails.extend(members[1:])
     key = lambda m: (tuple(-x for x in priority(m)), str(m.get("ref") or m.get("id")))  # noqa: E731
@@ -53,6 +94,7 @@ def select(entries: list[dict], limit: int, prefer: list[str] | None = None) -> 
     provider in turn, one per family, by priority; then the remaining capacity by priority."""
     limit = max(1, int(limit))
     active = [m for m in entries if m.get("status") != "retired"]
+    fam_of = _families(active)
     chosen: list[dict] = []
     ids: set[str] = set()
     for pid in prefer or []:
@@ -60,7 +102,7 @@ def select(entries: list[dict], limit: int, prefer: list[str] | None = None) -> 
         if m is not None and m["id"] not in ids and len(chosen) < limit:
             chosen.append(m)
             ids.add(m["id"])
-    families = {family_key(m.get("ref") or m["id"]) for m in chosen}
+    families = {fam_of[m["id"]] for m in chosen}
     groups: dict[str, list[dict]] = {}
     for m in active:
         groups.setdefault(provider_key(m), []).append(m)
@@ -69,13 +111,12 @@ def select(entries: list[dict], limit: int, prefer: list[str] | None = None) -> 
     while len(chosen) < limit:
         progressed = False
         for p in sorted(groups):
-            pick = next((m for m in groups[p] if m["id"] not in ids
-                         and family_key(m.get("ref") or m["id"]) not in families), None)
+            pick = next((m for m in groups[p] if m["id"] not in ids and fam_of[m["id"]] not in families), None)
             if pick is None:
                 continue
             chosen.append(pick)
             ids.add(pick["id"])
-            families.add(family_key(pick.get("ref") or pick["id"]))
+            families.add(fam_of[pick["id"]])
             progressed = True
             if len(chosen) >= limit:
                 break
@@ -84,6 +125,35 @@ def select(entries: list[dict], limit: int, prefer: list[str] | None = None) -> 
     rest = [m for m in _order(active) if m["id"] not in ids]
     chosen.extend(rest[: max(0, limit - len(chosen))])
     return chosen[:limit]
+
+
+def examine(entries: list[dict], limit: int, run_one, served=lambda result: True,
+            parallel: int = 1) -> tuple[list[dict], list[dict]]:
+    """Qualification work on a bounded set, in select's order. A candidate its provider turns out not to serve (it
+    lists the model, then answers HTTP 404, "no longer available to new users") gives its place to the next, so the
+    limit counts models that can be used; at most twice the limit are tried. With parallel, the places still open are
+    examined side by side, up to parallel at once: qualification then takes about as long as its slowest probe, not
+    the sum of them (paid run 37628067857: 27 minutes one after another, 18.6 of them one model's hung probe).
+    Returns the candidates tried and their results, in select's order."""
+    from concurrent.futures import ThreadPoolExecutor
+    limit, parallel = max(1, int(limit)), max(1, int(parallel))
+    order = select(entries, len(entries))
+    tried, results, i = [], [], 0
+    while i < len(order):
+        need = limit - sum(1 for r in results if served(r))
+        room = 2 * limit - len(tried)
+        if need <= 0 or room <= 0:
+            break
+        batch = order[i:i + min(need, room, parallel)]
+        i += len(batch)
+        if len(batch) == 1:
+            out = [run_one(batch[0])]
+        else:
+            with ThreadPoolExecutor(max_workers=len(batch), thread_name_prefix="cynqra-probe") as pool:
+                out = list(pool.map(run_one, batch))
+        tried += batch
+        results += out
+    return tried, results
 
 
 def details(entries: list[dict], selected: list[dict], limit: int) -> dict:

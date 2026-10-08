@@ -29,11 +29,11 @@ import re
 import sys
 import time
 
-from . import binding, budget, objective_evidence as oe, policies, roles
+from . import binding, budget, objective_evidence as oe, policies, roles, telemetry
 from . import attribution as attr
 from . import settings as project_settings
 from .db import ConcurrencyError, digest, now
-from .intelligence_layer import router
+from .intelligence_layer import router, weather
 from .intelligence_layer import evidence as evidence_model
 from .intelligence_layer.registry import RegistryError, served_version
 
@@ -112,12 +112,46 @@ def _work(run, *, item: str, scope: str, kinds: list[str], worker_id: str | None
             "requires": sorted({*requires, *(r for k in kinds for r in roles.TASK_TYPES.get(k, {}).get("requires", []))})}
 
 
+# Critical-path routing (R9 of the architecture review): the objective finishes when its critical path does. Time on
+# a task on that path delays everything after it, so the Router weighs it CRITICAL_TIME_WEIGHT times the founder's
+# value of time; time on a task with slack delays nothing until the slack is used, so it weighs SLACK_TIME_WEIGHT.
+CRITICAL_TIME_WEIGHT = 3.0
+SLACK_TIME_WEIGHT = 0.5
+FINISHED = ("VERIFIED", "FAILED")
+
+
+def schedule(run, task_id: str) -> dict:
+    """Where a task stands in the work still to do: on its critical path or not, and its slack in minutes, from the
+    planner's durations (planner.DEFAULT_DURATION_MINUTES), solved again at every decision."""
+    from .planner import DEFAULT_DURATION_MINUTES
+    tasks = [t for t in run.tasks() if t and t.get("status") not in FINISHED]
+    ids = {t["id"] for t in tasks}
+    if task_id not in ids:
+        return {"critical": False, "slack_minutes": None, "time_weight": 1.0}
+    dur = {t["id"]: float(t.get("estimated_minutes") or DEFAULT_DURATION_MINUTES.get(t.get("kind"), 30)) for t in tasks}
+    deps = {t["id"]: [d for d in t.get("dependencies") or [] if d in ids] for t in tasks}
+    early: dict[str, float] = {}
+    for t in tasks:  # the plan's order puts a task after what it depends on (planner.critical_path reads it so too)
+        early[t["id"]] = max((early.get(d, 0.0) + dur[d] for d in deps[t["id"]]), default=0.0)
+    end = max(early[i] + dur[i] for i in ids)
+    late = {i: end - dur[i] for i in ids}
+    for t in reversed(tasks):
+        for d in deps[t["id"]]:
+            late[d] = min(late[d], late[t["id"]] - dur[d])
+    slack = round(max(0.0, late[task_id] - early[task_id]), 1)
+    critical = slack < 1.0
+    return {"critical": critical, "slack_minutes": slack,
+            "time_weight": CRITICAL_TIME_WEIGHT if critical else SLACK_TIME_WEIGHT}
+
+
 def work_for_task(run, t: dict) -> dict:
     owner = run.worker(t["owner_worker_id"]) or {}
-    return _work(run, item=t["id"], scope="task", kinds=[t["kind"]], worker_id=t["owner_worker_id"],
+    work = _work(run, item=t["id"], scope="task", kinds=[t["kind"]], worker_id=t["owner_worker_id"],
                  role=owner.get("role"), requirement_ids=t.get("requirement_ids") or [],
                  acceptance_hash=t.get("acceptance_hash"),
                  criterion_ids=[c["criterion_id"] for c in t.get("acceptance") or []], requires=t.get("requires") or [])
+    work["schedule"] = schedule(run, t["id"])  # kept in the snapshot: the decision replays with it
+    return work
 
 
 def work_for_worker(run, w: dict, kinds: list[str]) -> dict:
@@ -155,6 +189,7 @@ def candidate_facts(run, m: dict, kinds: list[str]) -> dict:
                               "version": reg_state.get("version")},
             "reliability": {"calls": len(calls), "call_errors": errors,
                             "rate": round(1 - errors / len(calls), 3) if calls else None},
+            "weather": weather.of(calls),  # the last half hour on the provider's side (weather.py)
             "measured": measured}
 
 
@@ -270,6 +305,9 @@ def _persist(run, work, purpose, snap, res, revalidates=None, supersedes=None, s
            "result_hash": digest({"selected": res["selected"], "mode": res["mode"], "ranking": res["ranking"]})}
     rec["content_hash"] = run.store.put_object("json", {k: v for k, v in rec.items() if k != "status"})
     run.store.put(KIND, did, rec)
+    if getattr(run, "dir", None) is not None:  # a span in the run's traces (telemetry.py)
+        telemetry.decision(run.dir / "traces.jsonl", run_id=(getattr(run, "meta", None) or {}).get("company_id") or "",
+                           rec=rec, at_ns=time.time_ns())
     # every decision, the control plane's own included, is shown as proposed before it is committed
     run.event("intelligence.candidate_set.created", "work_item", work["work_item_id"],
               {"decision_id": did, "candidates": len(rec["candidate_set"]), "eligible": len(rec["eligible_candidates"]),
